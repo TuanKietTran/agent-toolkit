@@ -13,12 +13,6 @@ extension system in `exts/`.
 
 | Extension | What it does |
 |---|---|
-| `touchbar-usage/` | Git submodule: Claude Code and Codex quota polling with Touch Bar charts and a persistent right-panel TUI showing context/quota progress bars plus session input/output tokens. See its README for native host setup. |
-| `claude-cli/` | Git submodule: wraps the authenticated Claude CLI as a Pi provider while delegating tool calls and execution to Pi. Supports text and image input. |
-| `odysseus-bridge/` | Git submodule: exposes the live Pi harness and all authenticated Pi models through an OpenAI-compatible endpoint for Odysseus and other chat clients. |
-| `macos-browser-control/` | Git submodule: native Quartz browser automation with a tracked virtual mouse. |
-| `web-ui-vision/` | Git submodule: visual browser interaction via screenshots and reusable element references. Requires `playwright-core`. |
-| `cloud-admin/` | Git submodule: session-scoped Cloudflare and Tailscale administration. |
 | `core/guards/context-optimize.ts` | Routes built-in `/compact`, auto-compaction, `/optimize-context`, and the Touch Bar **Optimize** action through a round-robin cheap-model pool (Claude Haiku 4.5, Codex GPT-5.6 Luna with Sol/API fallback, local llama.cpp/MLX) with failover on any provider or transport error. Also adds `Ctrl-Shift-O` and a persistent context-percentage status. |
 | `core/guards/context-guard.ts` | Caps a single tool result to a share of the *active* model's context window and elides the middle, keeping head and tail. Points the model at pi's complete saved output instead of the truncated copy. |
 | `core/guards/file-tool-discipline.ts` | Makes GPT models use Pi's auditable `write` tool for new/full files and `edit` for targeted changes. Strengthens the per-turn prompt and blocks obvious shell/heredoc/script-based source-file authoring while allowing normal commands, generated artifacts, logs, and temporary files. |
@@ -165,29 +159,36 @@ Open WebUI can use the same values as an OpenAI-compatible connection.
 
 ## Installation
 
-Keep the editable aggregate checkout in Downloads and install it by local path:
+This package lives in the [agent-toolkit](https://github.com/TuanKietTran/agent-toolkit)
+monorepo at `packages/pi-agent-extensions`. Clone the monorepo and install the package by
+local path:
 
 ```sh
-git clone --recurse-submodules https://github.com/TuanKietTran/pi-agent-extensions ~/Downloads/pi-agent-extensions
-pi install ~/Downloads/pi-agent-extensions
-cd ~/Downloads/pi-agent-extensions && npm run install:tui
+git clone https://github.com/TuanKietTran/agent-toolkit ~/Downloads/active/agent-toolkit
+pi install ~/Downloads/active/agent-toolkit/packages/pi-agent-extensions
+cd ~/Downloads/active/agent-toolkit/packages/pi-agent-extensions && npm run install:tui
 ```
 
-The active user settings entry is equivalent to:
+The extensions that used to be submodules are no longer part of this package. Install them
+from their own locations: `packages/pi-touchbar-usage` and
+`packages/pi-extension-macos-browser-control` in this monorepo, or the standalone
+`pi-extension-claude-cli` and `pi-extension-odysseus-bridge` repositories.
 
-```json
-{ "packages": ["../../Downloads/pi-agent-extensions"] }
-```
+## Minified build
 
-Relative local package paths in `~/.pi/agent/settings.json` resolve from
-`~/.pi/agent`. The package manifest loads the extensions in this repository and
-its submodules without copying them into Pi's managed cache. After a non-recursive
-clone, initialize the submodules with:
+Everything except `core/` can be shipped minified:
 
 ```sh
-cd ~/Downloads/pi-agent-extensions
-git submodule update --init --recursive
+npm install
+npm run build:min
+pi install ./dist
 ```
+
+`scripts/minify.mjs` writes `dist/` (gitignored). Non-core `.ts` files are minified to `.js`
+with esbuild, and relative imports between them are rewritten to `.js`. `core/` is copied
+unchanged, because it reads `rules.md`, `contexts.md` and `commands.md` at runtime and keeps
+its imports as `.ts`. Test files are left out, and `dist/package.json` lists the minified
+entry points.
 
 ## Layout
 
