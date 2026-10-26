@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# data/ is local by design: decision_points.jsonl is row-level metadata about the owner's own sessions.
+# Only the served student model and the aggregate result files are tracked.
+data/*
+!data/student_model.json
+!data/baseline_results.json
+!data/m3_m4_metrics.json
+!data/inventory_summary.json

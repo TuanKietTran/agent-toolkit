@@ -1,0 +1,16 @@
+[Unit]
+Description=Session chat celld v0.6.2 node
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/distributed-agent-chat
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin
+EnvironmentFile=%h/.config/session-chat/cell.env
+ExecStart=%h/distributed-agent-chat/scripts/run-celld.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+UMask=0077
+
+[Install]
+WantedBy=default.target

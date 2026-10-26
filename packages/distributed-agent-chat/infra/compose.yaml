@@ -1,0 +1,116 @@
+name: session-chat
+x-cell-env: &cell-env
+  AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+  AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+  AWS_REGION: us-east-1
+  CELLD_WATCH: /var/lib/celld/state
+services:
+  minio:
+    image: session-chat-minio:RELEASE.2025-04-22T22-12-26Z-source
+    build:
+      context: ..
+      dockerfile: infra/minio.Dockerfile
+      target: minio
+    command: [server, /data, --console-address, ':9001']
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD}
+    volumes: [bucket:/data]
+    networks: [fleet]
+    restart: unless-stopped
+  bucket-init:
+    image: session-chat-mc:RELEASE.2025-04-16T18-13-26Z-source
+    build:
+      context: ..
+      dockerfile: infra/minio.Dockerfile
+      target: mc
+    depends_on: [minio]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    entrypoint: [/bin/sh, -ec]
+    command:
+      - |
+        attempts=0
+        until mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do
+          attempts=$$((attempts+1)); [ "$$attempts" -lt 60 ] || exit 1; sleep 1
+        done
+        mc mb --ignore-existing local/session-chat
+    networks: [fleet]
+  node-a:
+    image: ghcr.io/denoland/celld:v0.6.2
+    environment: *cell-env
+    command: [--bucket, 's3://session-chat', --endpoint, 'http://minio:9000', --region, us-east-1, --listen, '0.0.0.0:8080', --internal-listen, '0.0.0.0:8081', --advertise, 'node-a:8081']
+    depends_on:
+      bucket-init: {condition: service_completed_successfully}
+    ports: ['127.0.0.1:${CHAT_PORT_A:-18877}:8080']
+    volumes: [node-a:/var/lib/celld]
+    networks: [fleet, ingress]
+    restart: unless-stopped
+  node-b:
+    image: ghcr.io/denoland/celld:v0.6.2
+    environment: *cell-env
+    command: [--bucket, 's3://session-chat', --endpoint, 'http://minio:9000', --region, us-east-1, --listen, '0.0.0.0:8080', --internal-listen, '0.0.0.0:8081', --advertise, 'node-b:8081']
+    depends_on:
+      bucket-init: {condition: service_completed_successfully}
+    ports: ['127.0.0.1:${CHAT_PORT_B:-18878}:8080']
+    volumes: [node-b:/var/lib/celld]
+    networks: [fleet, ingress]
+    restart: unless-stopped
+  tools:
+    profiles: [tools]
+    image: session-chat-tools:0.1.0-celld0.6.2
+    build:
+      context: ..
+      dockerfile: infra/tools.Dockerfile
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
+      CELLD_BUCKET: s3://session-chat
+      S3_ENDPOINT: http://minio:9000
+      CHAT_TOKEN: ${CHAT_TOKEN:?set CHAT_TOKEN}
+      PI_TOKEN: ${PI_TOKEN:?set PI_TOKEN}
+      CLAUDE_TOKEN: ${CLAUDE_TOKEN:?set CLAUDE_TOKEN}
+      CONFIRM_FLEET_DEPLOY: ${CONFIRM_FLEET_DEPLOY:-NO}
+    command: [npm, run, fleet:deploy]
+    networks: [fleet]
+  mock-pi:
+    profiles: [mock]
+    image: session-chat-tools:0.1.0-celld0.6.2
+    network_mode: service:node-a
+    depends_on: [node-a]
+    environment:
+      CHAT_URL: http://127.0.0.1:8080
+      ROOM: ${FLEET_TEST_ROOM:-fleet-verify}
+      AGENT_ID: pi
+      AGENT_MODE: mock
+      WORKER_ID: pi-orbstack-mock
+      AGENT_TOKEN: ${PI_TOKEN}
+    command: [npm, run, worker]
+    restart: unless-stopped
+  mock-claude:
+    profiles: [mock]
+    image: session-chat-tools:0.1.0-celld0.6.2
+    network_mode: service:node-b
+    depends_on: [node-b]
+    environment:
+      CHAT_URL: http://127.0.0.1:8080
+      ROOM: ${FLEET_TEST_ROOM:-fleet-verify}
+      AGENT_ID: claude
+      AGENT_MODE: mock
+      WORKER_ID: claude-orbstack-mock
+      AGENT_TOKEN: ${CLAUDE_TOKEN}
+    command: [npm, run, worker]
+    restart: unless-stopped
+volumes:
+  bucket:
+  node-a:
+  node-b:
+networks:
+  fleet:
+    internal: true
+  ingress:
+    # OrbStack does not publish host ports for an internal-only network.
+    # Only Worker ports are mapped; MinIO is attached solely to fleet.
+    driver: bridge

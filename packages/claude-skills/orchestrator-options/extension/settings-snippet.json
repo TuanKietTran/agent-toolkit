@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python /REPLACE-WITH-ABSOLUTE-PATH/orchestrator-options/client/system1_client.py:*)",
+      "Bash(python3 /REPLACE-WITH-ABSOLUTE-PATH/orchestrator-options/client/system1_client.py:*)",
+      "Bash(py -3 /REPLACE-WITH-ABSOLUTE-PATH/orchestrator-options/client/system1_client.py:*)"
+    ],
+    "deny": [
+      "AskUserQuestion"
+    ]
+  },
+  "env": {
+    "SYSTEM1_API_URL": "file:/REPLACE-WITH-ABSOLUTE-PATH/system1-inbox.jsonl",
+    "SYSTEM1_PICK_URL": "http://127.0.0.1:8600/upstream/system-one/v1/decide"
+  }
+}

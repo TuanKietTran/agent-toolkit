@@ -1,0 +1,7 @@
+{
+  "name": "distributed-agent-chat",
+  "main": "src/worker.ts",
+  "compatibility_date": "2025-10-11",
+  "durable_objects": { "bindings": [{ "name": "ROOMS", "class_name": "Room" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Room"] }]
+}

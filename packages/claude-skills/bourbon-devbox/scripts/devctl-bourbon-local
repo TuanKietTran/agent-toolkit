@@ -1,0 +1,326 @@
+#!/usr/bin/env bash
+# Manage sshd-in-a-container devboxes on bourbon's Rancher Desktop (dockerd/moby).
+#
+# Bourbon-local variant. The canonical devctl (in TuanKietTran/claude-skills,
+# scripts/devctl) is written to run from the Mac and reaches bourbon over
+# `ssh bourbon`. This box IS bourbon, so that hop is dropped: rdctl/nerdctl
+# are called directly instead of via `ssh bourbon 'rdctl shell ...'`, and
+# devbox SSH config entries have no ProxyJump. Keep this file in sync by hand
+# if the canonical version changes upstream -- it will drift otherwise.
+set -euo pipefail
+
+REMOTE_BASE_WIN='C:\Users\cafe\devcontainers'
+REMOTE_BASE_LINUX='/mnt/c/Users/cafe/devcontainers'
+LOCAL_BASE='/c/Users/cafe/devcontainers'
+LOCAL_PUBKEY="$HOME/.ssh/id_ed25519.pub"
+SSH_CONFIG="$HOME/.ssh/config"
+BASE_PORT=2300
+RDCTL="/c/Program Files/Rancher Desktop/resources/resources/win32/bin/rdctl"
+
+# Rancher Desktop on this box runs dockerd (moby), NOT k3s/containerd, so the
+# nerdctl socket (/run/k3s/containerd/containerd.sock) does not exist. Drive the
+# real engine via the WSL distro instead. `wsl -e docker` passes argv straight
+# through with no intervening shell, so the quoting minefield below does not
+# apply to these calls and exit codes propagate correctly.
+nerdctl() { wsl.exe -d rancher-desktop -e docker "$@"; }
+
+usage() {
+    cat <<'EOF'
+devctl - manage devbox containers on bourbon via Rancher Desktop (local variant)
+
+Usage:
+  devctl create <name> [--mount <host-path>[:<container-path>]]
+                          Build and start a new devbox, wire up SSH config
+  devctl list            Show all devbox containers and their status
+  devctl start <name>    Start a stopped devbox
+  devctl stop <name>     Stop a running devbox
+  devctl rm <name>       Remove a devbox container and its SSH config entry
+  devctl ssh <name>      SSH into a devbox
+  devctl logs <name>     Tail a devbox's container logs
+
+<name> becomes the container "<name>-devbox" and SSH host "<name>-devbox".
+
+--mount takes a path as seen from bourbon's Rancher Desktop Linux VM
+(e.g. /mnt/c/chatgpt-orchestrator for C:\chatgpt-orchestrator). Container
+path defaults to /home/kyle/workspace if omitted.
+
+If <container-path>/.devcontainer/devcontainer.json exists at mount time,
+its postCreateCommand runs automatically inside this same sshd container
+(as root, then ownership is handed to kyle) -- no separate ephemeral
+container, no devcontainer CLI required. image/build/features in
+devcontainer.json are ignored; the devbox always uses devctl's own
+sshd base image.
+EOF
+}
+
+DEVCONTAINER_PARSE_PY='import json, sys
+
+def strip_jsonc(text):
+    out = []
+    i, n = 0, len(text)
+    in_str = False
+    while i < n:
+        c = text[i]
+        if in_str:
+            out.append(c)
+            if c == "\\" and i + 1 < n:
+                out.append(text[i + 1]); i += 2; continue
+            if c == "\"":
+                in_str = False
+            i += 1; continue
+        if c == "\"":
+            in_str = True; out.append(c); i += 1; continue
+        if c == "/" and i + 1 < n and text[i + 1] == "/":
+            j = text.find("\n", i)
+            i = n if j == -1 else j
+            continue
+        if c == "/" and i + 1 < n and text[i + 1] == "*":
+            j = text.find("*/", i + 2)
+            i = n if j == -1 else j + 2
+            continue
+        out.append(c); i += 1
+    return "".join(out)
+
+try:
+    text = open(sys.argv[1]).read()
+except OSError:
+    sys.exit(0)
+try:
+    data = json.loads(strip_jsonc(text))
+except ValueError:
+    sys.exit(0)
+cmd = data.get("postCreateCommand", "")
+if isinstance(cmd, list):
+    cmd = " ".join(cmd)
+elif isinstance(cmd, dict):
+    parts = []
+    for v in cmd.values():
+        parts.append(" ".join(v) if isinstance(v, list) else str(v))
+    cmd = " && ".join(parts)
+print(cmd)
+'
+
+# Runs a shell script inside a container by piping it through base64 --
+# avoids nested-quoting hell across rdctl shell -> WSL VM -> nerdctl exec.
+container_exec_script() {
+    local cname="$1" script="$2"
+    local b64
+    b64=$(printf '%s' "$script" | base64 | tr -d '\n')
+    nerdctl exec "${cname}" sh -c "echo ${b64} | base64 -d | sh"
+}
+
+provision_devcontainer() {
+    local cname="$1" workdir="$2"
+    local dcpath="${workdir}/.devcontainer/devcontainer.json"
+
+    if ! nerdctl exec "${cname}" test -f "${dcpath}" >/dev/null 2>&1; then
+        return
+    fi
+
+    echo "devctl: found devcontainer.json, extracting postCreateCommand..."
+    local parse_b64 postcmd
+    parse_b64=$(printf '%s' "$DEVCONTAINER_PARSE_PY" | base64 | tr -d '\n')
+    postcmd=$(nerdctl exec "${cname}" sh -c "echo ${parse_b64} | base64 -d | python3 - ${dcpath}" 2>/dev/null || true)
+
+    if [[ -z "$postcmd" ]]; then
+        echo "devctl: no postCreateCommand found, skipping provisioning"
+        return
+    fi
+
+    echo "devctl: running postCreateCommand: ${postcmd}"
+    container_exec_script "$cname" "set -e
+export HOME=/home/kyle
+cd '${workdir}'
+${postcmd}
+"
+    echo "devctl: fixing ownership of /home/kyle for kyle..."
+    nerdctl exec "${cname}" chown -R kyle:kyle /home/kyle
+    echo "devctl: devcontainer.json provisioning complete"
+}
+
+
+require_name() {
+    local name="$1"
+    if [[ ! "$name" =~ ^[a-z0-9][a-z0-9-]*$ ]]; then
+        echo "devctl: name must match ^[a-z0-9][a-z0-9-]*$" >&2
+        exit 1
+    fi
+}
+
+next_free_port() {
+    local used
+    used=$(nerdctl ps -a --format "{{.Ports}}" 2>/dev/null \
+        | grep -oE ':[0-9]+->22/tcp' | grep -oE '[0-9]+' || true)
+    local port=$BASE_PORT
+    while grep -qx "$port" <<<"$used"; do
+        port=$((port + 1))
+    done
+    echo "$port"
+}
+
+cmd_list() {
+    echo "devboxes on bourbon:"
+    printf '%-24s %-10s %s\n' NAME STATUS PORTS
+    nerdctl ps -a --format "{{.Names}}|{{.Status}}|{{.Ports}}" \
+        | awk -F'|' '$1 ~ /-devbox$/ { printf "%-24s %-10s %s\n", $1, $2, $3 }'
+}
+
+cmd_create() {
+    local name="" mount_host="" mount_container="/home/kyle/workspace"
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --mount)
+                [[ -n "${2:-}" ]] || { echo "devctl: --mount requires a value" >&2; exit 1; }
+                mount_host="${2%%:*}"
+                if [[ "$2" == *:* ]]; then
+                    mount_container="${2#*:}"
+                fi
+                shift 2
+                ;;
+            *)
+                if [[ -z "$name" ]]; then
+                    name="$1"
+                    shift
+                else
+                    echo "devctl: unexpected argument '$1'" >&2
+                    exit 1
+                fi
+                ;;
+        esac
+    done
+    [[ -n "$name" ]] || { echo "devctl: create requires <name>" >&2; exit 1; }
+    require_name "$name"
+    local cname="${name}-devbox"
+
+    if nerdctl container inspect "${cname}" >/dev/null 2>&1; then
+        echo "devctl: container ${cname} already exists" >&2
+        exit 1
+    fi
+
+    local port
+    port=$(next_free_port)
+    echo "devctl: creating ${cname} on port ${port}"
+
+    ssh-keygen -R "[localhost]:${port}" >/dev/null 2>&1 || true
+
+    local win_dir="${REMOTE_BASE_WIN}\\${name}"
+    local linux_dir="${REMOTE_BASE_LINUX}/${name}"
+    local local_dir="${LOCAL_BASE}/${name}"
+
+    mkdir -p "$local_dir"
+
+    cp "$LOCAL_PUBKEY" "$local_dir/authorized_keys"
+    cat >"$local_dir/Dockerfile" <<'EOF'
+FROM python:3.14-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-server git build-essential curl sudo tmux \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd
+
+RUN useradd -m -s /bin/bash kyle \
+    && echo 'kyle ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/kyle
+
+RUN mkdir -p /home/kyle/.ssh && chmod 700 /home/kyle/.ssh
+COPY authorized_keys /home/kyle/.ssh/authorized_keys
+RUN chmod 600 /home/kyle/.ssh/authorized_keys && chown -R kyle:kyle /home/kyle/.ssh
+
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config \
+    && printf 'AllowUsers kyle\nPubkeyAuthentication yes\n' >> /etc/ssh/sshd_config
+
+EXPOSE 22
+CMD ["/usr/sbin/sshd", "-D", "-e"]
+EOF
+
+    echo "devctl: building image..."
+    nerdctl build -t "${cname}:latest" "${linux_dir}"
+
+    echo "devctl: starting container..."
+    if [[ -n "$mount_host" ]]; then
+        echo "devctl: mounting ${mount_host} -> ${mount_container}"
+        nerdctl run -d --name "${cname}" -p "127.0.0.1:${port}:22" \
+            -v "${mount_host}:${mount_container}" "${cname}:latest" >/dev/null
+    else
+        nerdctl run -d --name "${cname}" -p "127.0.0.1:${port}:22" "${cname}:latest" >/dev/null
+    fi
+
+    if [[ -n "$mount_host" ]]; then
+        provision_devcontainer "$cname" "$mount_container"
+    fi
+
+    add_ssh_host "$cname" "$port"
+
+    echo "devctl: ${cname} is up. Connect with: ssh ${cname}"
+}
+
+add_ssh_host() {
+    local cname="$1" port="$2"
+    if [[ -f "$SSH_CONFIG" ]] && grep -qx "Host ${cname}" "$SSH_CONFIG"; then
+        echo "devctl: SSH config already has a Host ${cname} entry, leaving it as-is"
+        return
+    fi
+    {
+        echo ""
+        echo "Host ${cname}"
+        echo "    HostName localhost"
+        echo "    Port ${port}"
+        echo "    User kyle"
+        echo "    IdentityFile ~/.ssh/id_ed25519"
+        echo "    StrictHostKeyChecking accept-new"
+    } >>"$SSH_CONFIG"
+    echo "devctl: added Host ${cname} to ${SSH_CONFIG}"
+}
+
+remove_ssh_host() {
+    local cname="$1"
+    [[ -f "$SSH_CONFIG" ]] || return
+    if ! grep -qx "Host ${cname}" "$SSH_CONFIG"; then
+        return
+    fi
+    local tmp
+    tmp=$(mktemp)
+    awk -v host="Host ${cname}" '
+        $0 == host { skip=1; next }
+        skip && /^Host / { skip=0 }
+        skip && NF == 0 { next }
+        !skip { print }
+    ' "$SSH_CONFIG" >"$tmp"
+    mv "$tmp" "$SSH_CONFIG"
+    echo "devctl: removed Host ${cname} from ${SSH_CONFIG}"
+}
+
+cmd_start() { local cname="${1}-devbox"; require_name "$1"; nerdctl start "$cname"; }
+cmd_stop()  { local cname="${1}-devbox"; require_name "$1"; nerdctl stop "$cname"; }
+cmd_logs()  { local cname="${1}-devbox"; require_name "$1"; nerdctl logs "$cname"; }
+
+cmd_rm() {
+    local name="$1" cname="${1}-devbox"
+    require_name "$name"
+    nerdctl rm -f "$cname"
+    remove_ssh_host "$cname"
+    echo "devctl: removed ${cname} (image and devcontainers/${name} build dir left in place)"
+}
+
+cmd_ssh() {
+    local cname="${1}-devbox"
+    require_name "$1"
+    exec ssh "$cname"
+}
+
+main() {
+    local sub="${1:-}"
+    [[ -n "$sub" ]] && shift || true
+    case "$sub" in
+        create) cmd_create "$@" ;;
+        list|ls) cmd_list "$@" ;;
+        start)  cmd_start "$@" ;;
+        stop)   cmd_stop "$@" ;;
+        rm)     cmd_rm "$@" ;;
+        ssh)    cmd_ssh "$@" ;;
+        logs)   cmd_logs "$@" ;;
+        -h|--help|help|"") usage ;;
+        *) echo "devctl: unknown command '$sub'" >&2; usage; exit 1 ;;
+    esac
+}
+
+main "$@"

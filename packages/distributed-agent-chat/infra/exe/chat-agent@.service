@@ -1,0 +1,17 @@
+[Unit]
+Description=Session chat external agent %i
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/distributed-agent-chat
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin
+EnvironmentFile=%h/.config/session-chat/agent-%i.env
+ExecStart=/usr/bin/env npm run worker
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=control-group
+UMask=0077
+
+[Install]
+WantedBy=default.target

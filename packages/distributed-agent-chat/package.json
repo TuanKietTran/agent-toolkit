@@ -1,0 +1,26 @@
+{
+  "name": "distributed-agent-chat",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "wrangler dev --ip 127.0.0.1",
+    "worker": "tsx src/agent/cli.ts",
+    "build": "tsc --noEmit && esbuild src/worker.ts --bundle --format=esm --external:cloudflare:workers --outfile=dist/worker.js",
+    "test": "tsx --test --test-concurrency=1 test/*.test.ts",
+    "fleet:deploy": "tsx scripts/deploy.ts"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "4.20251011.0",
+    "@types/node": "22.15.30",
+    "esbuild": "0.25.5",
+    "miniflare": "4.20251011.1",
+    "playwright": "1.56.1",
+    "tsx": "4.20.3",
+    "typescript": "5.8.3",
+    "wrangler": "4.45.0"
+  }
+}
