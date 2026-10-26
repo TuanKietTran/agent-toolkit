@@ -1,0 +1,30 @@
+{
+  "name": "pi-agent-extensions",
+  "version": "1.0.0",
+  "private": true,
+  "description": "TuanKietTran's bundled extensions for the Pi coding agent",
+  "keywords": ["pi-package"],
+  "license": "MIT",
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "node --test core/dev/*.test.ts claude-cli/*.test.ts",
+    "install:tui": "node ./tui/install-layout.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.52.0"
+  },
+  "pi": {
+    "extensions": [
+      "./gc-assets/index.ts",
+      "./thinking-control.ts",
+      "./usage-roundrobin.ts",
+      "./remote-control.ts",
+      "./macos-browser-control/extensions/macos-browser-control.ts",
+      "./web-ui-vision/extensions/web-ui-vision.ts",
+      "./cloud-admin/extensions/cloud-admin.ts",
+      "./claude-cli/index.ts",
+      "./odysseus-bridge/extensions/pi-odysseus-bridge.ts",
+      "./touchbar-usage/index.ts"
+    ]
+  }
+}

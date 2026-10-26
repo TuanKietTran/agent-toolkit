@@ -9,3 +9,6 @@ A collection of tools for working with coding agents (Pi, Claude Code, Codex). E
 | [`packages/claude-skills`](packages/claude-skills) | Personal Claude Code skills |
 | [`packages/pi`](packages/pi) | Extension-based installer CLI for hosts and containers |
 | [`packages/pi-touchbar-usage`](packages/pi-touchbar-usage) | Pi extension and native macOS Touch Bar quota charts for Claude Code and Codex |
+| [`packages/agent-cli-lab`](packages/agent-cli-lab) | Harness that hosts interactive agent CLIs in PTYs (`labctl`, lab-commander skill) |
+| [`packages/pi-agent-extensions`](packages/pi-agent-extensions) | Global extensions for the pi coding agent (core, TUI, usage, remote control) |
+| [`packages/pi-extension-macos-browser-control`](packages/pi-extension-macos-browser-control) | pi extension for controlling a macOS browser |
