@@ -1,6 +1,6 @@
 # UI parity plan
 
-Reference: `/Users/handlerone/Downloads/report.md`, Coverage section. Its 45 entries have non-contiguous original IDs (1–48); IDs below are preserved, not renumbered. No private sessions are copied into fixtures. Current equivalents describe the inspected exported `src/ui.ts`, not promises that proposed controls already work. UI worker owns source; audit worker owns this plan and parity tests.
+Reference: `report.md`, Coverage section. Its 45 entries have non-contiguous original IDs (1–48); IDs below are preserved, not renumbered. No private sessions are copied into fixtures. Current equivalents describe the inspected exported `src/ui.ts`, not promises that proposed controls already work. UI worker owns source; audit worker owns this plan and parity tests.
 
 Frozen source checkpoint: `src/ui.ts` file SHA256 `4987afb471bf54d60427551837de0c983522e2324e3ef2b711f4e4e65d284d04`. All Current/Gap entries below were reconciled against this checkpoint. File hash differs from the browser script's SHA256 of the exported HTML string.
 
