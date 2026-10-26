@@ -65,3 +65,7 @@ cargo test --locked
 Needs Rust 1.85 or newer. On Windows, either the MSVC or the GNU toolchain works. See [`specs/005-local-lifecycle.md`](specs/005-local-lifecycle.md) for setup and teardown, including Docker.
 
 See [`specs/`](specs/) for prioritized problems and acceptance criteria.
+
+## Commander skill
+
+[`skills/lab-commander`](skills/lab-commander) is a skill plus `labctl` CLI for Pi, Claude Code and Codex. It drives this tool to spawn, brief, monitor, checkpoint, resume and close interactive agent labs. Install with `skills/lab-commander/install.sh`.
