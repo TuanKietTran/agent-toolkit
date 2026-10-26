@@ -9,5 +9,3 @@ A collection of tools for working with coding agents (Pi, Claude Code, Codex). E
 | [`packages/claude-skills`](packages/claude-skills) | Personal Claude Code skills |
 | [`packages/pi`](packages/pi) | Extension-based installer CLI for hosts and containers |
 | [`packages/pi-touchbar-usage`](packages/pi-touchbar-usage) | Pi extension and native macOS Touch Bar quota charts for Claude Code and Codex |
-
-History of the original standalone repositories is preserved in their archived copies under `TuanKietTran/`.
