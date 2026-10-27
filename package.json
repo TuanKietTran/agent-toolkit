@@ -1,0 +1,15 @@
+{
+  "name": "agent-toolkit",
+  "private": true,
+  "description": "Monorepo task runner; packages stay independent (own lockfiles, own toolchains).",
+  "scripts": {
+    "list": "node tools/pkg.mjs list",
+    "changed": "node tools/pkg.mjs changed",
+    "check": "node tools/pkg.mjs check --changed",
+    "test": "node tools/pkg.mjs test --changed",
+    "build": "node tools/pkg.mjs build --changed",
+    "ci": "node tools/pkg.mjs ci --changed",
+    "ci:all": "node tools/pkg.mjs ci --all"
+  },
+  "engines": { "node": ">=20" }
+}

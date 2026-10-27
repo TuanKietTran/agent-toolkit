@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: plan (changed packages)
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - id: m
+        run: |
+          base="origin/${{ github.base_ref || 'main' }}"
+          # on push to main compare with the previous commit instead
+          [ "${{ github.event_name }}" = push ] && base="${{ github.event.before }}"
+          [ "${{ github.event_name }}" = workflow_dispatch ] && base="$(git rev-list --max-parents=0 HEAD | tail -1)"
+          echo "matrix=$(node tools/pkg.mjs matrix "$base")" | tee -a "$GITHUB_OUTPUT"
+
+  package:
+    name: ${{ matrix.package }} (${{ matrix.os }})
+    needs: plan
+    if: ${{ fromJSON(needs.plan.outputs.matrix).include[0] != null }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - if: matrix.toolchain == 'node'
+        uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - if: matrix.toolchain == 'python'
+        uses: astral-sh/setup-uv@v5
+      - if: matrix.toolchain == 'rust'
+        run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
+      - run: node tools/pkg.mjs ci ${{ matrix.package }}
+
+  # single required status check for branch protection
+  all-green:
+    if: always()
+    needs: [plan, package]
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          [ "${{ needs.plan.result }}" = success ] && [ "${{ needs.package.result }}" != failure ] && [ "${{ needs.package.result }}" != cancelled ]

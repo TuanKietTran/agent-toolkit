@@ -13,3 +13,5 @@ A collection of tools for working with coding agents (Pi, Claude Code, Codex). E
 | [`packages/pi-agent-extensions`](packages/pi-agent-extensions) | Global extensions for the pi coding agent (core, TUI, usage, remote control) |
 | [`packages/pi-extension-macos-browser-control`](packages/pi-extension-macos-browser-control) | pi extension for controlling a macOS browser |
 | [`packages/pi-extension-claude-cli`](packages/pi-extension-claude-cli) | pi provider extension that wraps the claude CLI binary |
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the per-module workflow (`node tools/pkg.mjs ci <package>`).
