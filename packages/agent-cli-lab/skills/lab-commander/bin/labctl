@@ -23,6 +23,7 @@ ADAPTERS = {
     "codex":  {"cmd": ["codex"],  "model_flag": "--model", "model_slash": None,             "reload": None,      "stop": ["C-c", "C-c"]},
 }
 DONE = re.compile(r"^\s*LAB-(DONE|BLOCKED|CHECKPOINT)\b(.*)$", re.M)
+PICKER = re.compile(r"(Enter to select|No matching models)")
 LIMIT = re.compile(r"(usage limit|rate limit|resets? (at|in)|quota)", re.I)
 
 
@@ -118,6 +119,9 @@ def cmd_spawn(a):
     if a.model and not ad["model_flag"] and ad["model_slash"]:
         cli(rec, "ask", ad["model_slash"].format(model=a.model), "-t", "30")
         cli(rec, "send", "-e", "")  # confirm a picker if one opened
+        for _ in range(2):  # picker still open (no match / already on model): dismiss it so briefs are not swallowed
+            if not PICKER.search(screen(rec)[-1500:]): break
+            cli(rec, "send", "\x1b"); time.sleep(0.4)
     if not a.no_open and not os.environ.get("LABCTL_NO_OPEN") and not attach_pids(sock):
         with err_file.open("a") as err:
             subprocess.Popen([LAB, "foreground", "-s", sock, "--terminal", os.environ.get("AGENT_CLI_LAB_TERMINAL", "Ghostty")],
@@ -125,22 +129,37 @@ def cmd_spawn(a):
     log("spawn", lab=a.name, agent=a.agent, model=a.model, cwd=cwd)
     print(f"{a.name} up (pid {p.pid}, socket {sock})")
 
-def cmd_ask(a):
-    rec = load(a.name)
-    text = Path(a.file).read_text() if a.file else " ".join(a.text)
-    r = cli(rec, "ask", text, "-i", str(a.idle), "-t", str(a.timeout))
-    print(r.stdout)
-    tail = " ".join(screen(rec).splitlines()[-4:])
-    if text.strip() and re.sub(r"\s+", " ", text.strip()) in re.sub(r"\s+", " ", tail):
-        cli(rec, "send", "-e", "")
+def names_of(a):
+    """`a,b,c` or --all -> list of lab names."""
+    if getattr(a, "all", False): return sorted(p.stem for p in LABS.glob("*.json"))
+    return [n for n in a.name.split(",") if n]
 
-def cmd_screen(a): print(screen(load(a.name)))
+def cmd_ask(a):
+    if a.all and a.name: a.text.insert(0, a.name)  # with --all the first word is text, not a lab name
+    text = Path(a.file).read_text() if a.file else " ".join(a.text)
+    for n in names_of(a):
+        rec = load(n)
+        if a.no_wait:  # type + Enter and return at once; a busy agent never settles, so ask would block
+            cli(rec, "send", "-e", text); print(f"{n}: sent"); continue
+        r = cli(rec, "ask", text, "-i", str(a.idle), "-t", str(a.timeout))
+        print(r.stdout)
+        tail = " ".join(screen(rec).splitlines()[-4:])
+        if text.strip() and re.sub(r"\s+", " ", text.strip()) in re.sub(r"\s+", " ", tail):
+            cli(rec, "send", "-e", "")
+
+def cmd_screen(a):
+    s = screen(load(a.name))
+    if a.tail: s = "\n".join([l for l in s.splitlines() if l.strip()][-a.tail:])
+    print(s)
+
+KEYS = {"esc": "\x1b", "tab": "\t", "up": "\x1b[A", "down": "\x1b[B", "right": "\x1b[C", "left": "\x1b[D", "space": " "}
 
 def cmd_send(a):
     rec = load(a.name); flags = []
     if a.enter: flags.append("-e")
     if a.ctrl_c: flags.append("-c")
-    r = cli(rec, "send", *flags, *( [a.text] if a.text else []))
+    text = KEYS[a.key] if a.key else a.text
+    r = cli(rec, "send", *flags, *([text] if text else []))
     print(r.stdout, end="")
 
 def classify(rec):
@@ -152,6 +171,7 @@ def classify(rec):
         kind, rest = marks[-1]
         return {"DONE": "done", "BLOCKED": "blocked", "CHECKPOINT": "working"}[kind], rest.strip()
     if LIMIT.search(s[-1500:]): return "limit", LIMIT.search(s[-1500:]).group(0)
+    if PICKER.search(s[-1500:]): return "blocked", "picker open: labctl send <lab> -k esc"
     return "working", ""
 
 def cmd_status(a):
@@ -162,13 +182,16 @@ def cmd_status(a):
 
 def cmd_wait(a):
     """Block until the lab reports DONE/BLOCKED, hits a usage limit, or dies."""
-    rec = load(a.name); end = time.time() + a.timeout
-    while time.time() < end:
-        state, detail = classify(rec)
-        if state != "working":
-            print(f"{state} {detail}".strip()); sys.exit(0 if state == "done" else 2)
-        time.sleep(a.poll)
-    print("timeout"); sys.exit(3)
+    recs = {n: load(n) for n in names_of(a)}; end = time.time() + a.timeout; seen = {}
+    while time.time() < end and len(seen) < len(recs):  # `a,b` / --all: return when every lab has settled
+        for n, rec in recs.items():
+            if n in seen: continue
+            state, detail = classify(rec)
+            if state != "working": seen[n] = f"{state} {detail}".strip()
+        time.sleep(a.poll if len(seen) < len(recs) else 0)
+    for n in recs: print(f"{n}: {seen.get(n, 'timeout')}")
+    if len(seen) < len(recs): sys.exit(3)
+    sys.exit(0 if all(v.startswith("done") for v in seen.values()) else 2)
 
 def cmd_checkpoint(a):
     log("checkpoint", lab=a.name, note=" ".join(a.note)); print("recorded")
@@ -207,15 +230,16 @@ def main():
     s.add_argument("--model"); s.add_argument("--cwd", default=os.getcwd()); s.add_argument("--cols", type=int, default=140)
     s.add_argument("--rows", type=int, default=45); s.add_argument("--boot", type=float, default=4.0)
     s.add_argument("--no-open", action="store_true"); s.add_argument("extra", nargs="*"); s.set_defaults(f=cmd_spawn)
-    s = sp.add_parser("ask"); s.add_argument("name"); s.add_argument("text", nargs="*"); s.add_argument("-f", "--file")
-    s.add_argument("-i", "--idle", type=int, default=3000); s.add_argument("-t", "--timeout", type=int, default=180); s.set_defaults(f=cmd_ask)
-    s = sp.add_parser("screen"); s.add_argument("name"); s.set_defaults(f=cmd_screen)
+    s = sp.add_parser("ask"); s.add_argument("name", nargs="?", default=""); s.add_argument("text", nargs="*"); s.add_argument("-f", "--file")
+    s.add_argument("-i", "--idle", type=int, default=3000); s.add_argument("-t", "--timeout", type=int, default=180)
+    s.add_argument("--no-wait", action="store_true"); s.add_argument("--all", action="store_true"); s.set_defaults(f=cmd_ask)
+    s = sp.add_parser("screen"); s.add_argument("name"); s.add_argument("-n", "--tail", type=int, default=0); s.set_defaults(f=cmd_screen)
     s = sp.add_parser("send"); s.add_argument("name"); s.add_argument("text", nargs="?"); s.add_argument("-e", "--enter", action="store_true")
-    s.add_argument("-c", "--ctrl-c", action="store_true"); s.set_defaults(f=cmd_send)
+    s.add_argument("-c", "--ctrl-c", action="store_true"); s.add_argument("-k", "--key", choices=KEYS); s.set_defaults(f=cmd_send)
     s = sp.add_parser("status"); s.add_argument("name", nargs="?"); s.set_defaults(f=cmd_status)
     sp.add_parser("ls").set_defaults(f=cmd_status, name=None)
-    s = sp.add_parser("wait"); s.add_argument("name"); s.add_argument("--timeout", type=int, default=1800)
-    s.add_argument("--poll", type=int, default=20); s.set_defaults(f=cmd_wait)
+    s = sp.add_parser("wait"); s.add_argument("name", nargs="?", default=""); s.add_argument("--all", action="store_true")
+    s.add_argument("--timeout", type=int, default=1800); s.add_argument("--poll", type=int, default=20); s.set_defaults(f=cmd_wait)
     s = sp.add_parser("checkpoint"); s.add_argument("name"); s.add_argument("note", nargs="+"); s.set_defaults(f=cmd_checkpoint)
     s = sp.add_parser("decide"); s.add_argument("name"); s.add_argument("text", nargs="+"); s.set_defaults(f=cmd_decide)
     s = sp.add_parser("resume"); s.add_argument("name"); s.add_argument("--last", type=int, default=8); s.set_defaults(f=cmd_resume)
