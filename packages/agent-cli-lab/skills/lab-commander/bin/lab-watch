@@ -5,7 +5,9 @@ set -eu
 name=$1; shift; timeout=${1:-1800}; [ "$#" -eq 0 ] || shift
 status_file=
 while [ "$#" -gt 0 ]; do case $1 in --status) status_file=$2; shift 2;; *) echo "unknown option: $1" >&2; exit 2;; esac; done
-start=$(date +%s); previous_count=0; markers_initialized=0; idle_count=0; previous_screen=
+tmp=$(mktemp -d)
+trap 'rm -rf "$tmp"' EXIT INT TERM
+start=$(date +%s); markers_initialized=0; idle_count=0; previous_screen=
 main_cli=0
 agent-cli-lab open --help >/dev/null 2>&1 && main_cli=1
 while :; do
@@ -16,17 +18,18 @@ while :; do
     if ! screen=$(agent-cli-lab screen -s "$name" 2>&1); then echo "WATCH-GONE $name"; exit 0; fi
   fi
   if [ -n "$status_file" ] && [ -f "$status_file" ]; then
-    count=$(grep -Ec '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]' "$status_file" || true)
-    if [ "$markers_initialized" -eq 1 ] && [ "$count" -gt "$previous_count" ]; then tail -n 1 "$status_file"; exit 0; fi
-    previous_count=$count
+    grep -Ei '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]|usage limit|rate limit' "$status_file" 2>/dev/null | awk '!s[$0]++' > "$tmp/cur" || true
+  else
+    printf '%s\n' "$screen" | grep -iE '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]|usage limit|rate limit' | awk '!s[$0]++' > "$tmp/cur" || true
+  fi
+  if [ "$markers_initialized" -eq 0 ]; then
+    cp "$tmp/cur" "$tmp/seen"
     markers_initialized=1
   else
-    count=$(printf '%s\n' "$screen" | grep -Ec '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]' || true)
-    if [ "$markers_initialized" -eq 1 ] && [ "$count" -gt "$previous_count" ]; then printf '%s\n' "$screen"; exit 0; fi
-    previous_count=$count
-    markers_initialized=1
+    new=$(grep -vxF -f "$tmp/seen" "$tmp/cur" || true)
+    if [ -n "$new" ]; then printf '%s\n' "$new"; exit 0; fi
+    cat "$tmp/cur" >> "$tmp/seen"
   fi
-  if printf '%s\n' "$screen" | grep -iE 'LAB-BLOCKED|usage limit|rate limit' >/dev/null; then printf '%s\n' "$screen"; exit 0; fi
   if [ "$main_cli" -eq 1 ]; then
     state=$(agent-cli-lab status -n "$name" 2>&1 || true)
     if printf '%s\n' "$state" | grep -iE 'asking|stalled|idle' >/dev/null; then printf '%s\n' "$screen"; exit 0; fi
