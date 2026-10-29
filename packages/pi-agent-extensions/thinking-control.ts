@@ -94,7 +94,7 @@ export default function (pi: ExtensionAPI) {
 			// The only switch this template reads. Without it the template defaults
 			// to thinking on at xhigh effort, whatever pi believes the level to be.
 			kwargs[TEMPLATE_ENABLE_THINKING] = false;
-			const next = { ...payload, [TEMPLATE_KWARGS]: kwargs };
+			const next: Record<string, unknown> = { ...payload, [TEMPLATE_KWARGS]: kwargs };
 			delete next[REASONING_EFFORT];
 			return next;
 		}

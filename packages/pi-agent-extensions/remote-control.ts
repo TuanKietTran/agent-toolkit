@@ -1,7 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomBytes, timingSafeEqual } from "node:crypto";
-import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import type { Readable } from "node:stream";
 import { networkInterfaces } from "node:os";
 import { PI_EVENT } from "./core/events.ts";
 
@@ -47,7 +48,7 @@ type RemoteState = {
   api?: ExtensionAPI;
   ctx?: ExtensionContext;
   server?: Server;
-  tunnel?: ChildProcessWithoutNullStreams;
+  tunnel?: ChildProcessByStdio<null, Readable, Readable>;
   port?: number;
   publicUrl?: string;
   token: string;

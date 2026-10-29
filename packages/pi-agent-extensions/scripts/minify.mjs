@@ -7,8 +7,10 @@ import { transform } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, "dist");
-const keep = new Set(["core", "dist", "node_modules", "scripts"]);
-const skipFile = (path) => /\.test\.ts$/.test(path);
+const keep = new Set(["core", "dist", "node_modules", "scripts", "tests"]);
+const skipFile = (path) => /(?:\.test\.(?:ts|mjs)|\/live-watch\.ts)$/.test(path)
+  || /(?:^|\/)(?:\.build|target|node_modules)(?:\/|$)/.test(path)
+  || /(?:^|\/)(?:\.DS_Store)$/.test(path);
 
 const exists = (path) => stat(path).then(() => true, () => false);
 
@@ -18,7 +20,7 @@ async function* walk(dir) {
     if (entry.isDirectory()) {
       if (dir === root && keep.has(entry.name)) continue;
       if (!entry.name.startsWith(".")) yield* walk(path);
-    } else yield path;
+    } else if (!skipFile(relative(root, path))) yield path;
   }
 }
 
@@ -32,7 +34,10 @@ function rewriteImports(code, file) {
 }
 
 await rm(out, { recursive: true, force: true });
-await cp(join(root, "core"), join(out, "core"), { recursive: true, filter: (src) => !/\.test\.ts$/.test(src) });
+await cp(join(root, "core"), join(out, "core"), {
+  recursive: true,
+  filter: (src) => !/\.test\.(?:ts|mjs)$/.test(src) && !/(?:^|[\\/])dev(?:[\\/]|$)/.test(src),
+});
 
 let before = 0;
 let after = 0;
@@ -47,19 +52,19 @@ for await (const file of walk(root)) {
     await writeFile(join(out, rel.replace(/\.ts$/, ".js")), min);
     before += Buffer.byteLength(source);
     after += Buffer.byteLength(min);
-  } else if (!skipFile(rel) && !/^(package(-lock)?|tsconfig)\.json$/.test(rel) && !rel.endsWith(".mjs")) {
-    await cp(file, dest);
+  } else if (!/^(package(-lock)?|tsconfig)\.json$/.test(rel)) {
+    await cp(file, dest, { recursive: false, preserveTimestamps: true });
   }
 }
 
-// Manifest for the minified package: non-core entries point at their .js output, entries
-// whose files are not in this package are dropped.
+// Manifest for the minified package: every declared entry must have a built counterpart.
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
 const extensions = [];
 for (const entry of pkg.pi.extensions) {
   const min = entry.replace(/\.ts$/, ".js");
   if (await exists(join(out, min))) extensions.push(min);
   else if (await exists(join(out, entry))) extensions.push(entry);
+  else throw new Error(`Declared extension entry missing from dist: ${entry}`);
 }
 await writeFile(join(out, "package.json"), `${JSON.stringify({
   name: `${pkg.name}-min`, version: pkg.version, private: true, type: "module", license: pkg.license,

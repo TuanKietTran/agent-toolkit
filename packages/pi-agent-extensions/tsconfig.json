@@ -9,15 +9,8 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "types": ["node"],
-    "typeRoots": ["/opt/homebrew/Cellar/pi-coding-agent/0.84.4/libexec/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@types"],
-    "paths": {
-      "@earendil-works/pi-coding-agent": ["/opt/homebrew/Cellar/pi-coding-agent/0.84.4/libexec/lib/node_modules/@earendil-works/pi-coding-agent"],
-      "@earendil-works/*": ["/opt/homebrew/Cellar/pi-coding-agent/0.84.4/libexec/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/*"],
-      "typebox": ["/opt/homebrew/Cellar/pi-coding-agent/0.84.4/libexec/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/typebox"],
-      "*": ["/opt/homebrew/Cellar/pi-coding-agent/0.84.4/libexec/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/*"]
-    }
+    "types": ["node"]
   },
   "include": ["**/*.ts"],
-  "exclude": ["**/node_modules", "**/.build"]
+  "exclude": ["**/node_modules", "dist", "**/.build", "**/target", "**/native/build", "browser-control/tests/live-watch.ts"]
 }
