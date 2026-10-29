@@ -24,21 +24,27 @@ function changedPackages(base = "origin/main") {
     files = execSync(`git diff --name-only ${mergeBase}`, { cwd: root }).toString().split("\n").filter(Boolean);
   } catch { die(`cannot diff against ${base}`); }
   if (files.some((f) => GLOBAL_TRIGGERS.some((g) => f === g || f.startsWith(g)))) return names;
-  const hit = new Set(files.map((f) => /^packages\/([^/]+)\//.exec(f)?.[1]).filter(Boolean));
+  const hit = new Set(files.map((f) => {
+    for (const n of names) {
+      const dir = packages[n].dir ?? `packages/${n}`;
+      if (f.startsWith(`${dir}/`)) return n;
+    }
+    return undefined;
+  }).filter(Boolean));
   // pull in dependents (transitively)
   for (let grew = true; grew; ) {
     grew = false;
     for (const n of names)
       if (!hit.has(n) && (packages[n].dependsOn ?? []).some((d) => hit.has(d))) { hit.add(n); grew = true; }
   }
-  return names.filter((n) => hit.has(n) && existsSync(join(root, "packages", n)));
+  return names.filter((n) => hit.has(n) && existsSync(join(root, packages[n].dir ?? `packages/${n}`)));
 }
 
 function run(pkg, verb) {
   const cmd = packages[pkg][verb];
   if (!cmd) { console.log(`- ${pkg}: no '${verb}' (skipped)`); return true; }
   console.log(`\n▶ ${pkg}: ${verb}  (${cmd})`);
-  return spawnSync(cmd, { cwd: join(root, "packages", pkg), shell: true, stdio: "inherit" }).status === 0;
+  return spawnSync(cmd, { cwd: join(root, packages[pkg].dir ?? `packages/${pkg}`), shell: true, stdio: "inherit" }).status === 0;
 }
 
 const [verb, ...rest] = process.argv.slice(2);
