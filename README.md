@@ -1,17 +1,13 @@
-# agent-toolkit
+# pi-agent-extensions
 
-A collection of tools for working with coding agents (Pi, Claude Code, Codex). Each package is self-contained; see its own README.
+A collection of tools for working with coding agents (Pi, Claude Code, Codex). See each package family and the root skill collection for details.
 
 | Package | What it is |
 |---|---|
 | [`packages/system-one`](packages/system-one) | Local-first model-pick decision model (never permission decisions) |
 | [`packages/distributed-agent-chat`](packages/distributed-agent-chat) | Distributed Pi and Claude Code session chat on a two-node fleet |
-| [`packages/claude-skills`](packages/claude-skills) | Personal Claude Code skills |
-| [`packages/pi`](packages/pi) | Extension-based installer CLI for hosts and containers |
-| [`packages/pi-touchbar-usage`](packages/pi-touchbar-usage) | Pi extension and native macOS Touch Bar quota charts for Claude Code and Codex |
+| [`skills/`](skills/) | Agent-neutral skill collection and shared installer |
 | [`packages/agent-cli-lab`](packages/agent-cli-lab) | Harness that hosts interactive agent CLIs in PTYs (`labctl`, lab-commander skill) |
-| [`packages/pi-agent-extensions`](packages/pi-agent-extensions) | Global extensions for the pi coding agent (core, TUI, usage, remote control) |
-| [`packages/pi-extension-macos-browser-control`](packages/pi-extension-macos-browser-control) | pi extension for controlling a macOS browser |
-| [`packages/pi-extension-claude-cli`](packages/pi-extension-claude-cli) | pi provider extension that wraps the claude CLI binary |
+| [`packages/pi-agent-extensions`](packages/pi-agent-extensions) | Pi extension package with core, TUI, usage, browser-control, and Claude CLI feature families |
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the per-module workflow (`node tools/pkg.mjs ci <package>`).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the package-family workflow (`node tools/pkg.mjs ci <package>`).

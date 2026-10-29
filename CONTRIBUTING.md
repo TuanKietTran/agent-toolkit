@@ -1,12 +1,12 @@
-# Working on a module
+# Working on package families
 
-Each directory under `packages/` is an independent module with its own toolchain and lockfile. Nothing is hoisted; the root only provides a uniform way to drive them.
+The independently managed packages live under `packages/*`; reusable agent skills live in the root `skills/` collection. Related features are grouped into package families rather than treated as separate packages. The root tooling provides a uniform way to run each registered package's checks.
 
 ```sh
-npm run list                         # modules
-npm run changed                      # modules touched vs origin/main (plus dependents)
-node tools/pkg.mjs ci pi             # install + check + test + build one module
-node tools/pkg.mjs test pi system-one
+npm run list                         # packages
+npm run changed                      # packages touched vs origin/main (plus dependents)
+node tools/pkg.mjs ci pi-agent-extensions # install + check + test + build one package
+node tools/pkg.mjs test pi-agent-extensions system-one
 npm run ci                           # everything you changed, same as CI
 npm run ci:all                       # everything
 ```
@@ -15,7 +15,7 @@ Verbs are `install`, `check`, `test`, `build`; a module without one is skipped. 
 
 ## Rules of thumb
 
-- Work on one module per branch: `<module>/<topic>` (e.g. `pi/fix-installer`). Commits: `<module>: <summary>`.
+- Work on one package family per branch: `<package>/<topic>`. Commits: `<package>: <summary>`.
 - Cross-module dependency? Declare it with `dependsOn` in `packages.json` so dependents are re-tested.
-- New module: add `packages/<name>/` with a README, add an entry to `packages.json` and the README table.
+- New package: add `packages/<name>/` with a README and registry entry. Skills belong in `skills/`, not as separate package identities.
 - Keep module-specific docs in the module; keep this file about the repo.

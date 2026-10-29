@@ -12,11 +12,8 @@ const ENTRYPOINTS = [
   "usage-roundrobin.ts",
   "remote-control.ts",
   "claude-cli/index.ts",
-  "cloud-admin/extensions/cloud-admin.ts",
-  "macos-browser-control/extensions/macos-browser-control.ts",
-  "odysseus-bridge/extensions/pi-odysseus-bridge.ts",
+  "browser-control/index.ts",
   "touchbar-usage/index.ts",
-  "web-ui-vision/extensions/web-ui-vision.ts",
 ] as const;
 
 const INLINE_EVENT = /\bpi\.on\(\s*["'`]/;

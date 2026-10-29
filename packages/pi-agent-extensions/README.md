@@ -6,9 +6,6 @@ Global extensions for the [pi coding agent](https://github.com/earendil-works/pi
 `~/.pi/agent/settings.json`. Keeping source checkouts in Downloads avoids editing
 Pi's managed `~/.pi/agent/git` cache, which package updates may reset.
 
-Not to be confused with `D:\projects\pi`, a separate CLI with its own unrelated
-extension system in `exts/`.
-
 ## Extensions
 
 | Extension | What it does |
@@ -18,6 +15,9 @@ extension system in `exts/`.
 | `core/guards/file-tool-discipline.ts` | Makes GPT models use Pi's auditable `write` tool for new/full files and `edit` for targeted changes. Strengthens the per-turn prompt and blocks obvious shell/heredoc/script-based source-file authoring while allowing normal commands, generated artifacts, logs, and temporary files. |
 | `core/guards/answer-floor.ts` | Stops pi's own reply budget from silently collapsing to a handful of tokens. When a reply is cut off anyway, compacts if the budget was short and resumes it — no `/compact` by hand. |
 | `usage-roundrobin.ts` | Spreads turns across available models/providers so no 5h usage window runs dry. The model picker includes **Auto Rotate**: choosing it enables managed rotation, while choosing a real model disables rotation and keeps that model fixed; either choice becomes the next startup default. With no explicit `/roundrobin models` list or scoped models, the pool includes every available model; `/roundrobin models <provider/model ...>` restricts it. Claude CLI counts against the Claude subscription window, not a pay-as-you-go budget. Reads `~/.pi/usage-touchbar.json`, charges each turn's tokens by a relative price index, projects each window forward with observed drain velocity, and picks the lowest charge-per-unit-of-predicted-headroom. In auto mode, HTTP 429 and quota-limit failures cool down the exhausted provider and retry on another compatible provider in the configured pool. Switches only once the current model has burned a quantum, so the prompt cache survives. `/roundrobin [status\|on\|off\|now\|models\|set\|reset]`. |
+| `touchbar-usage/index.ts` | Displays Claude Code and Codex rate-limit windows in Pi and provides the `/touchbar-usage` command; shares its usage engine with the native Touch Bar host. |
+| `browser-control/index.ts` | Adds macOS browser screenshot, tab, watch, and native input tools; native actions remain lazy until invoked. |
+| `claude-cli/index.ts` | Registers the `claude-cli` provider backed by a local Claude CLI subprocess. |
 | `thinking-control.ts` | Adds the `/think` slash command pi lacks, and makes "off" actually reach the chat template instead of leaving thinking on at max effort. |
 | `remote-control.ts` | Shares the active pi session through a token-protected mobile web UI and optional Cloudflare Quick Tunnel. Start with `/remote-control start`; stop with `/remote-control stop`. |
 | `tui/` | Owns the responsive fullscreen layout and `/right-panel` collapse command: tools at the panel top, `aboveEditor` widgets in its middle, and `belowEditor` widgets plus statuses/footer at the bottom. Run `npm run install:tui` after Pi upgrades. |
@@ -159,20 +159,20 @@ Open WebUI can use the same values as an OpenAI-compatible connection.
 
 ## Installation
 
-This package lives in the [agent-toolkit](https://github.com/TuanKietTran/agent-toolkit)
+This package lives in the [pi-agent-extensions](https://github.com/TuanKietTran/pi-agent-extensions)
 monorepo at `packages/pi-agent-extensions`. Clone the monorepo and install the package by
 local path:
 
 ```sh
-git clone https://github.com/TuanKietTran/agent-toolkit ~/Downloads/active/agent-toolkit
-pi install ~/Downloads/active/agent-toolkit/packages/pi-agent-extensions
-cd ~/Downloads/active/agent-toolkit/packages/pi-agent-extensions && npm run install:tui
+git clone https://github.com/TuanKietTran/pi-agent-extensions ~/Downloads/pi-agent-extensions
+pi install ~/Downloads/pi-agent-extensions/packages/pi-agent-extensions
+cd ~/Downloads/pi-agent-extensions/packages/pi-agent-extensions && npm run install:tui
 ```
 
-The extensions that used to be submodules are no longer part of this package. Install them
-from their own locations: `packages/pi-touchbar-usage` and
-`packages/pi-extension-macos-browser-control` in this monorepo, or the standalone
-`pi-extension-claude-cli` and `pi-extension-odysseus-bridge` repositories.
+The aggregate package includes Touch Bar usage, macOS browser control, and the Claude CLI
+provider as separate feature entry points. Do not install their former standalone copies
+alongside this package; doing so can register duplicate handlers. The Odysseus bridge remains
+separate.
 
 ## Minified build
 
@@ -187,8 +187,9 @@ pi install ./dist
 `scripts/minify.mjs` writes `dist/` (gitignored). Non-core `.ts` files are minified to `.js`
 with esbuild, and relative imports between them are rewritten to `.js`. `core/` is copied
 unchanged, because it reads `rules.md`, `contexts.md` and `commands.md` at runtime and keeps
-its imports as `.ts`. Test files are left out, and `dist/package.json` lists the minified
-entry points.
+its imports as `.ts`. Tests, dependency trees and native build output are left out; runtime `.mjs`, Swift/native,
+Markdown and executable CLI resources are copied with their modes intact. A declared entry
+missing from `dist/` fails the build. `dist/package.json` lists every minified entry point.
 
 ## Layout
 
@@ -203,15 +204,13 @@ pi loads them from trusted locations only:
 
 ## Working on these
 
-Extension entry points use the declaration-first structure documented in [`core/DESIGN.md`](core/DESIGN.md): shared Pi event constants, top-level command/tool metadata, Markdown-owned model policy, and registry-owned right-panel tabs. `npm test` guards against embedding lifecycle and command names directly in registrations; `npm run check` type-checks the aggregate checkout.
+Extension entry points use the declaration-first structure documented in [`core/DESIGN.md`](core/DESIGN.md): shared Pi event constants, top-level command/tool metadata, Markdown-owned model policy, and registry-owned right-panel tabs. `npm test` runs the shared core, browser, Claude CLI, Touch Bar usage and aggregate layout/fake-host tests; `npm run check` type-checks all feature source and tests.
 
 Extensions in auto-discovered locations hot-reload with `/reload` inside pi. Use
 `pi -e ./path.ts` only for one-off tests — it bypasses discovery and cannot be
 reloaded.
 
-Types come from the `@earendil-works/pi-coding-agent` package that ships inside
-the pi install; there is no build step and no `node_modules` here. pi transpiles
-the TypeScript itself.
+The aggregate package declares its local TypeScript and Pi API development dependencies for portable checks. Pi still transpiles source TypeScript itself; `dist/` is an optional minified package build.
 
 ## Not collected here
 
