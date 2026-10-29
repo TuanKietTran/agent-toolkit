@@ -1,6 +1,6 @@
 """Standard-library tests for system1_client.py (no network, no API key, no anthropic package).
 
-    python -m unittest discover -s orchestrator-options/client -p "test_*.py"
+    python3 -m unittest discover -s packages/skills/orchestrator-options/client -p 'test_*.py'
 """
 import copy
 import io
@@ -20,7 +20,28 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import system1_client as c  # noqa: E402
 
-EXAMPLE = json.loads((HERE.parent / "examples" / "ruxt-labs.briefing.json").read_text(encoding="utf-8"))
+SKILL = HERE.parent
+EXAMPLE_PATH = SKILL / "examples" / "ruxt-labs.briefing.json"
+EXAMPLE = json.loads(EXAMPLE_PATH.read_text(encoding="utf-8"))
+
+
+class RelocationLayoutTests(unittest.TestCase):
+    def test_skill_and_plugin_references_resolve(self):
+        skill_text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("name: orchestrator-options", skill_text)
+        self.assertTrue(EXAMPLE_PATH.is_file())
+
+        plugin = SKILL / "plugin" / "system1-options"
+        metadata_path = plugin / ".claude-plugin" / "plugin.json"
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        self.assertEqual(metadata["name"], "system1-options")
+        self.assertTrue((plugin / metadata["types"]).is_file())
+
+        hooks_path = plugin / "hooks" / "hooks.json"
+        hooks = json.loads(hooks_path.read_text(encoding="utf-8"))
+        self.assertTrue(hooks["modules"])
+        for target in hooks["modules"]:
+            self.assertTrue((hooks_path.parent / target).is_file(), target)
 
 
 class Stub:
@@ -182,7 +203,7 @@ class CommandLineTests(unittest.TestCase):
         self.assertEqual(json.loads(result.stdout)["options"][0]["id"], "A")
 
     def test_dry_run_send_prints_payload(self):
-        result = self.run_cli("send", str(HERE.parent / "examples" / "ruxt-labs.briefing.json"), "--dry-run")
+        result = self.run_cli("send", str(EXAMPLE_PATH), "--dry-run")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["kind"], "decision_options")
 
