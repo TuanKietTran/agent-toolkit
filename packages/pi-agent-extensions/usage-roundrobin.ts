@@ -17,23 +17,15 @@
 // burned a quantum of quota units, or the moment its window becomes unsafe.
 
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { resolveHome, writeAtomic } from "./touchbar-usage/src/runtime-files.mjs";
 import type { Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PI_EVENT } from "./core/events.ts";
 
 // --- Constants: every local literal lives here. ---
 
-// os.homedir() prefers $HOME, which a tmux server that outlived its shell can
-// leave stale. Same reasoning as touchbar-usage/src/usage.mjs.
-const HOME = (() => {
-  try {
-    return os.userInfo().homedir || os.homedir();
-  } catch {
-    return os.homedir();
-  }
-})();
+const HOME = resolveHome();
 
 const STATE_PATH = path.join(HOME, ".pi", "usage-roundrobin.json");
 const SETTINGS_PATH = path.join(HOME, ".pi", "agent", "settings.json");
@@ -140,10 +132,7 @@ function readState(): PersistedState {
 /** Atomic publish so a concurrent session never reads a torn file. */
 function writeState(state: PersistedState): void {
   try {
-    fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
-    const tmp = `${STATE_PATH}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
-    fs.renameSync(tmp, STATE_PATH);
+    writeAtomic(STATE_PATH, `${JSON.stringify(state, null, 2)}\n`);
   } catch {
     // Losing the ledger degrades fairness, never correctness: the next pick
     // still respects the live window percentages.
@@ -156,9 +145,7 @@ function persistDefaultModel(model: Model<any>): void {
     const settings = JSON.parse(fs.readFileSync(SETTINGS_PATH, "utf8")) as Record<string, unknown>;
     settings.defaultProvider = model.provider;
     settings.defaultModel = model.id;
-    const tmp = `${SETTINGS_PATH}.tmp.${process.pid}`;
-    fs.writeFileSync(tmp, `${JSON.stringify(settings, null, 2)}\n`, { mode: 0o600 });
-    fs.renameSync(tmp, SETTINGS_PATH);
+    writeAtomic(SETTINGS_PATH, `${JSON.stringify(settings, null, 2)}\n`);
   } catch {
     // A read-only or malformed settings file must not prevent model selection.
   }
