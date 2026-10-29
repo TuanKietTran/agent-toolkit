@@ -169,10 +169,10 @@ pi install ~/Downloads/active/agent-toolkit/packages/pi-agent-extensions
 cd ~/Downloads/active/agent-toolkit/packages/pi-agent-extensions && npm run install:tui
 ```
 
-The extensions that used to be submodules are no longer part of this package. Install them
-from their own locations: `packages/pi-touchbar-usage` and
-`packages/pi-extension-macos-browser-control` in this monorepo, or the standalone
-`pi-extension-claude-cli` and `pi-extension-odysseus-bridge` repositories.
+The aggregate package includes Touch Bar usage, macOS browser control, and the Claude CLI
+provider as separate feature entry points. Do not install their former standalone copies
+alongside this package; doing so can register duplicate handlers. The Odysseus bridge remains
+separate.
 
 ## Minified build
 
@@ -187,8 +187,9 @@ pi install ./dist
 `scripts/minify.mjs` writes `dist/` (gitignored). Non-core `.ts` files are minified to `.js`
 with esbuild, and relative imports between them are rewritten to `.js`. `core/` is copied
 unchanged, because it reads `rules.md`, `contexts.md` and `commands.md` at runtime and keeps
-its imports as `.ts`. Test files are left out, and `dist/package.json` lists the minified
-entry points.
+its imports as `.ts`. Tests, dependency trees and native build output are left out; runtime `.mjs`, Swift/native,
+Markdown and executable CLI resources are copied with their modes intact. A declared entry
+missing from `dist/` fails the build. `dist/package.json` lists every minified entry point.
 
 ## Layout
 
@@ -203,15 +204,13 @@ pi loads them from trusted locations only:
 
 ## Working on these
 
-Extension entry points use the declaration-first structure documented in [`core/DESIGN.md`](core/DESIGN.md): shared Pi event constants, top-level command/tool metadata, Markdown-owned model policy, and registry-owned right-panel tabs. `npm test` guards against embedding lifecycle and command names directly in registrations; `npm run check` type-checks the aggregate checkout.
+Extension entry points use the declaration-first structure documented in [`core/DESIGN.md`](core/DESIGN.md): shared Pi event constants, top-level command/tool metadata, Markdown-owned model policy, and registry-owned right-panel tabs. `npm test` runs the shared core, browser, Claude CLI, Touch Bar usage and aggregate layout/fake-host tests; `npm run check` type-checks all feature source and tests.
 
 Extensions in auto-discovered locations hot-reload with `/reload` inside pi. Use
 `pi -e ./path.ts` only for one-off tests — it bypasses discovery and cannot be
 reloaded.
 
-Types come from the `@earendil-works/pi-coding-agent` package that ships inside
-the pi install; there is no build step and no `node_modules` here. pi transpiles
-the TypeScript itself.
+The aggregate package declares its local TypeScript and Pi API development dependencies for portable checks. Pi still transpiles source TypeScript itself; `dist/` is an optional minified package build.
 
 ## Not collected here
 
