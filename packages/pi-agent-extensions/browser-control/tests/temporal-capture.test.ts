@@ -4,7 +4,7 @@ import { readFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { TemporalCapture } from "../extensions/temporal-capture.ts";
+import { TemporalCapture } from "../temporal-capture.ts";
 
 test("renders a chronological multi-frame contact sheet and animated GIF", async () => {
   const directory = await mkdtemp(join(tmpdir(), "browser-clip-test-"));
