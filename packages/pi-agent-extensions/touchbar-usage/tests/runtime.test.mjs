@@ -54,22 +54,45 @@ test("cached/stale rendering, lease contention, malformed state and fetch failur
   assert.equal(usage.STATE_DIR, path.join(home, ".pi"));
   assert.ok(path.resolve(usage.STATE_DIR).startsWith(`${path.resolve(home)}${path.sep}`));
   assert.notEqual(path.resolve(usage.STATE_DIR), path.join(os.userInfo().homedir, ".pi"));
+  let claudeCredentialReads = 0;
+  let codexCredentialReads = 0;
+  const fetchers = usage.createFetchers({
+    readClaudeCredential: async () => { claudeCredentialReads++; return "fixture-claude-token"; },
+    readCodexCredential: async () => {
+      codexCredentialReads++;
+      return { token: "fixture-codex-token", accountId: "fixture-account" };
+    },
+  });
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    throw new Error("network disabled in test");
+  };
+  t.after(() => { globalThis.fetch = originalFetch; });
+
   fs.mkdirSync(usage.STATE_DIR, { recursive: true });
   const fresh = { updatedAt: Date.now(), claude: { ok: true, windows: [{ label: "5h", percent: 30 }] }, codex: null };
   fs.writeFileSync(usage.JSON_PATH, JSON.stringify(fresh));
-  assert.deepEqual(await usage.refresh(), fresh);
+  assert.deepEqual(await usage.refresh({ fetchClaudeFn: fetchers.fetchClaude, fetchCodexFn: fetchers.fetchCodex }), fresh);
   assert.match(usage.render({ ...fresh, updatedAt: Date.now() - 16 * 60_000 }), /!$/);
   fs.mkdirSync(path.join(usage.STATE_DIR, "usage-touchbar.lease"));
   fs.writeFileSync(path.join(usage.STATE_DIR, "usage-touchbar.lease", "owner.json"), JSON.stringify({ pid: process.pid, at: Date.now() }));
-  assert.deepEqual(await usage.refresh({ force: true }), usage.readPublished());
+  assert.deepEqual(await usage.refresh({ force: true, fetchClaudeFn: fetchers.fetchClaude, fetchCodexFn: fetchers.fetchCodex }), usage.readPublished());
   fs.rmSync(path.join(usage.STATE_DIR, "usage-touchbar.lease"), { recursive: true, force: true });
   fs.writeFileSync(usage.JSON_PATH, "{");
   assert.equal(usage.readPublished(), null);
   const result = await usage.refresh({
     force: true,
-    fetchClaudeFn: async () => ({ ok: false, error: "offline" }),
-    fetchCodexFn: async () => ({ ok: false, error: "offline" }),
+    fetchClaudeFn: fetchers.fetchClaude,
+    fetchCodexFn: fetchers.fetchCodex,
   });
+  assert.equal(claudeCredentialReads, 1);
+  assert.equal(codexCredentialReads, 1);
+  assert.deepEqual(requests.sort(), [
+    "https://api.anthropic.com/api/oauth/usage",
+    "https://chatgpt.com/backend-api/wham/usage",
+  ].sort());
   assert.equal(result.claude.error, "offline");
   assert.equal(result.codex.error, "offline");
 });

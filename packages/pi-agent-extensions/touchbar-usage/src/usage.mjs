@@ -255,33 +255,72 @@ async function claudeToken() {
   return token;
 }
 
-async function fetchClaude() {
-  const token = await claudeToken();
-  if (!token) return { ok: false, error: "no-auth" };
-  try {
-    const payload = await fetchJson(CLAUDE_USAGE_URL, {
-      authorization: `Bearer ${token}`,
-      "anthropic-beta": "oauth-2025-04-20",
-      accept: "application/json",
-      "user-agent": UA,
-    });
-    let windows = [
-      claudeWindow(payload.five_hour, "5h"),
-      claudeWindow(payload.seven_day, "wk"),
-    ].filter(Boolean);
-    if (!windows.length) windows = claudeWindowsFromLimits(payload);
-    if (!windows.length) return { ok: false, error: "shape" };
-    return {
-      ok: true,
-      account: payload?.email ?? payload?.account?.email_address ?? null,
-      windows,
-      credits: claudeCredits(payload),
-      at: nowMs(),
-    };
-  } catch (err) {
-    return { ok: false, error: shortError(err) };
-  }
+export function createFetchers({
+  readClaudeCredential = claudeToken,
+  readCodexCredential = codexAuth,
+  fetchJsonFn = fetchJson,
+} = {}) {
+  return {
+    fetchClaude: async () => {
+      const token = await readClaudeCredential();
+      if (!token) return { ok: false, error: "no-auth" };
+      try {
+        const payload = await fetchJsonFn(CLAUDE_USAGE_URL, {
+          authorization: `Bearer ${token}`,
+          "anthropic-beta": "oauth-2025-04-20",
+          accept: "application/json",
+          "user-agent": UA,
+        });
+        let windows = [
+          claudeWindow(payload.five_hour, "5h"),
+          claudeWindow(payload.seven_day, "wk"),
+        ].filter(Boolean);
+        if (!windows.length) windows = claudeWindowsFromLimits(payload);
+        if (!windows.length) return { ok: false, error: "shape" };
+        return {
+          ok: true,
+          account: payload?.email ?? payload?.account?.email_address ?? null,
+          windows,
+          credits: claudeCredits(payload),
+          at: nowMs(),
+        };
+      } catch (err) {
+        return { ok: false, error: shortError(err) };
+      }
+    },
+    fetchCodex: async () => {
+      const auth = await readCodexCredential();
+      if (!auth) return { ok: false, error: "no-auth" };
+      try {
+        const headers = {
+          authorization: `Bearer ${auth.token}`,
+          accept: "application/json",
+          "user-agent": UA,
+        };
+        if (auth.accountId) headers["chatgpt-account-id"] = auth.accountId;
+        const payload = await fetchJsonFn(CODEX_USAGE_URL, headers);
+        const rl = payload?.rate_limit ?? payload?.rateLimit ?? {};
+        const windows = [
+          codexWindow(rl.primary_window ?? rl.primaryWindow, "5h"),
+          codexWindow(rl.secondary_window ?? rl.secondaryWindow, "wk"),
+        ].filter(Boolean);
+        if (!windows.length) return { ok: false, error: "shape" };
+        return {
+          ok: true,
+          plan: payload?.plan_type ?? null,
+          account: payload?.email ?? payload?.account_id ?? null,
+          windows,
+          credits: codexCredits(payload),
+          at: nowMs(),
+        };
+      } catch (err) {
+        return { ok: false, error: shortError(err) };
+      }
+    },
+  };
 }
+
+const { fetchClaude, fetchCodex } = createFetchers();
 
 // --------------------------------------------------------------- codex side
 //
@@ -327,36 +366,6 @@ function codexAuth() {
   const token = tokens?.access_token ?? tokens?.accessToken;
   if (!token) return null;
   return { token, accountId: tokens?.account_id ?? tokens?.accountId ?? null };
-}
-
-async function fetchCodex() {
-  const auth = codexAuth();
-  if (!auth) return { ok: false, error: "no-auth" };
-  try {
-    const headers = {
-      authorization: `Bearer ${auth.token}`,
-      accept: "application/json",
-      "user-agent": UA,
-    };
-    if (auth.accountId) headers["chatgpt-account-id"] = auth.accountId;
-    const payload = await fetchJson(CODEX_USAGE_URL, headers);
-    const rl = payload?.rate_limit ?? payload?.rateLimit ?? {};
-    const windows = [
-      codexWindow(rl.primary_window ?? rl.primaryWindow, "5h"),
-      codexWindow(rl.secondary_window ?? rl.secondaryWindow, "wk"),
-    ].filter(Boolean);
-    if (!windows.length) return { ok: false, error: "shape" };
-    return {
-      ok: true,
-      plan: payload?.plan_type ?? null,
-      account: payload?.email ?? payload?.account_id ?? null,
-      windows,
-      credits: codexCredits(payload),
-      at: nowMs(),
-    };
-  } catch (err) {
-    return { ok: false, error: shortError(err) };
-  }
 }
 
 // ------------------------------------------------------------------ network

@@ -62,7 +62,7 @@ Enable the extension in pi, then `/touchbar-usage status`.
 ### UsageBar.app (native, recommended)
 
 MTMR is Intel-only and needs Rosetta; BetterTouchTool is paid. Both are shells
-around two private `DFRFoundation` calls, so ``host/` makes those calls directly
+around two private `DFRFoundation` calls, so `host/` makes those calls directly
 — arm64 native, ~200 lines, no dependencies.
 
 ```sh
