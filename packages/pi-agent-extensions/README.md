@@ -6,9 +6,6 @@ Global extensions for the [pi coding agent](https://github.com/earendil-works/pi
 `~/.pi/agent/settings.json`. Keeping source checkouts in Downloads avoids editing
 Pi's managed `~/.pi/agent/git` cache, which package updates may reset.
 
-Not to be confused with `D:\projects\pi`, a separate CLI with its own unrelated
-extension system in `exts/`.
-
 ## Extensions
 
 | Extension | What it does |
@@ -162,14 +159,14 @@ Open WebUI can use the same values as an OpenAI-compatible connection.
 
 ## Installation
 
-This package lives in the [agent-toolkit](https://github.com/TuanKietTran/agent-toolkit)
+This package lives in the [pi-agent-extensions](https://github.com/TuanKietTran/pi-agent-extensions)
 monorepo at `packages/pi-agent-extensions`. Clone the monorepo and install the package by
 local path:
 
 ```sh
-git clone https://github.com/TuanKietTran/agent-toolkit ~/Downloads/active/agent-toolkit
-pi install ~/Downloads/active/agent-toolkit/packages/pi-agent-extensions
-cd ~/Downloads/active/agent-toolkit/packages/pi-agent-extensions && npm run install:tui
+git clone https://github.com/TuanKietTran/pi-agent-extensions ~/Downloads/pi-agent-extensions
+pi install ~/Downloads/pi-agent-extensions/packages/pi-agent-extensions
+cd ~/Downloads/pi-agent-extensions/packages/pi-agent-extensions && npm run install:tui
 ```
 
 The aggregate package includes Touch Bar usage, macOS browser control, and the Claude CLI

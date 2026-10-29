@@ -47,10 +47,6 @@ The provider appends direct, concise response rules after conversation history a
 
 This is prompt guidance, not a hard character/token cap or text filter. Reload Pi after provider code changes; core response-rule wording is re-read each run once its loader is active.
 
-## Acknowledgements
-
-Initial version vibe coded with [Claude Code](https://claude.ai/code).
-
 ## License
 
 MIT
