@@ -42,17 +42,17 @@ For time-sensitive changes, call `mac_browser_watch` with `action=start` before 
 ## Install
 
 ```bash
-cd /path/to/pi-extension-macos-browser-control
+cd /path/to/agent-toolkit/packages/pi-agent-extensions
 npm install
 npm run check
-npm run check:native
-pi -e /path/to/pi-extension-macos-browser-control
+mkdir -p .build && xcrun swiftc browser-control/native/macos-controller.swift -o .build/macos-controller
+pi -e ./browser-control/index.ts
 ```
 
 Persistent installation:
 
 ```bash
-pi install /path/to/pi-extension-macos-browser-control
+pi install /path/to/agent-toolkit/packages/pi-agent-extensions/browser-control
 ```
 
 Then run:
@@ -86,7 +86,7 @@ Temporal recording requires `ffmpeg` on `PATH`. Its clips are stored in the syst
 Example:
 
 ```bash
-PI_MAC_BROWSER_APP="Brave Browser" pi -e /path/to/pi-extension-macos-browser-control
+PI_MAC_BROWSER_APP="Brave Browser" pi -e /path/to/agent-toolkit/packages/pi-agent-extensions/browser-control/index.ts
 ```
 
 ## Token use
