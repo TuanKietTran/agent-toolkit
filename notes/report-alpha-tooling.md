@@ -3,6 +3,7 @@
 ## Integration changes
 
 - Combined aggregate runtime, peer, and check/test/build dependencies in `packages/pi-agent-extensions/package.json:14-43`; the package remains Node `>=20` (`package.json:6-8`). Added local TypeScript, Node types, Pi API/TUI types and direct Typebox/Pi API peers. Regenerated the one aggregate `package-lock.json` with npm. The seven-entry source manifest explicitly adds the three migrated feature entries once each and does not enable `core/index.ts` or `tui/index.ts` (`packages/pi-agent-extensions/package.json:29-36`).
+- Manager follow-up removed obsolete `packages/pi-agent-extensions/.gitmodules`: its six component mappings had no active gitlinks (`git submodule status` was empty; migrated Touch Bar/Claude paths are ordinary trees, other entries absent), so the old standalone repository URLs were stale metadata.
 - Removed workstation-specific Homebrew `typeRoots` and `paths`, and excluded `dist`, native build output/dependencies and the deliberately manual browser live-watch test from TypeScript checking (`tsconfig.json:1-16`). Strict checking remains enabled.
 - Expanded test command to run core, Claude CLI, browser temporal tests, Touch Bar tests and integration tests; it builds first so tests verify source and built package (`package.json:14-18`).
 - Hardened `scripts/minify.mjs`: copies `.mjs`, Swift/native, Markdown and CLI resources with file modes; filters tests/dev/build artifacts; keeps core's readable-copy behavior; rewrites non-core `.ts` imports; and now errors on any missing declared output entry (`scripts/minify.mjs:10-68`).
@@ -36,7 +37,7 @@
 
 ## Modified paths
 
-`packages/pi-agent-extensions/{README.md,package.json,package-lock.json,tsconfig.json,remote-control.ts,thinking-control.ts}`, `packages/pi-agent-extensions/scripts/minify.mjs`, `packages/pi-agent-extensions/tests/layout.test.mjs`, `packages/pi-agent-extensions/core/dev/{declarative-design.test.ts,pi-root.mjs}`, and `packages/pi-agent-extensions/browser-control/tests/live-watch.ts` (one-line manager-authorized path fix). The only root-feature edits are the manager-approved, type-only fixes to `remote-control.ts` and `thinking-control.ts`. No other feature-owned `touchbar-usage/**`, `browser-control/**`, or `claude-cli/**` source was changed.
+`packages/pi-agent-extensions/{.gitmodules,README.md,package.json,package-lock.json,tsconfig.json,remote-control.ts,thinking-control.ts}`, `packages/pi-agent-extensions/scripts/minify.mjs`, `packages/pi-agent-extensions/tests/layout.test.mjs`, `packages/pi-agent-extensions/core/dev/{declarative-design.test.ts,pi-root.mjs}`, and `packages/pi-agent-extensions/browser-control/tests/live-watch.ts` (one-line manager-authorized path fix). The only root-feature edits are the manager-approved, type-only fixes to `remote-control.ts` and `thinking-control.ts`. No other feature-owned `touchbar-usage/**`, `browser-control/**`, or `claude-cli/**` source was changed.
 
 ## Dependencies / known gap
 
