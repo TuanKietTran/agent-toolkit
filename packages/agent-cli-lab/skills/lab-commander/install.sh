@@ -2,7 +2,7 @@
 # Install package CLI and skill links without overwriting real destinations.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
-package_dir=$(cd "$here/../../.." && pwd)
+package_dir=$(cd "$here/../.." && pwd)
 root=${INSTALL_ROOT:-"$HOME/.local"}
 cargo install --locked --path "$package_dir" --root "$root" --force
 PATH="$root/bin:$PATH"

@@ -46,4 +46,12 @@ Keep `repo/`, `wt/<lab>/`, `notes/`, `status/`, `briefs/`, and `logs/` separate.
 
 Stop with `stop`, or `/quit` + Enter / Ctrl-C twice on legacy. Verify the `agent-cli-lab` host exited; after about five seconds, identify any orphan with `pgrep -f "agent-cli-lab host .*(-s|-n|--name) <name>( |$)"` and kill only that PID. Confirm with `list` (legacy: `ls`); remove a socket only when no host listens, then confirm again. `lab-clean <name> --workspace W [--cwd DIR|--session-dir DIR] [--into BRANCH]` performs safe workspace cleanup; `--session-dir DIR` selects the Pi session directory directly and takes precedence over `--cwd`; `--all` is scoped to names represented by `status/<name>.log` or `logs/<name>.*` in W.
 
-Archive Pi `handoff.json` from the session directory into `W/logs/handoffs/` when `--cwd DIR` or `--session-dir DIR` is supplied. Remove only `W/tmp/<name>` by default; `--purge-logs` opts into deleting its recording, which may contain secrets. Keep `notes/` and reports. Remove run-owned temp scripts, generated briefs, and temp build directories when no longer needed. Cancel Pi `start_job` jobs. For clean worktrees under `W/wt/<name>` or `W/repo/wt/<name>`, remove/prune and delete the branch only if it is merged into `--into BRANCH`; otherwise skip. The helper is idempotent and never deletes notes or resources outside the workspace's own scope.
+Clean each resource immediately when it is no longer needed, not at the end of the run. `lab-clean` removes the named `<name>.host.log` by default; it retains `<name>.jsonl` unless `--purge-logs` is supplied. Keep `notes/` and reports. Use this timing guide:
+
+| When verified / no longer needed | Cleanup |
+| --- | --- |
+| Worker verified; no incident to investigate | Purge its recording with `lab-clean <name> --workspace W --purge-logs` |
+| Lab exits | Delete its `logs/<name>.host.log` (default behavior of `lab-clean`) |
+| Temporary file, job, session, or worktree is no longer needed | Remove temp files/scripts/build dirs immediately; cancel Pi `start_job`; archive/delete the lab's handoff; remove/prune a clean merged worktree and branch with `--into BRANCH` (otherwise keep unmerged worktrees) |
+
+Archive Pi `handoff.json` from the session directory into `W/logs/handoffs/` when `--cwd DIR` or `--session-dir DIR` is supplied. Remove only `W/tmp/<name>` by default. Keep recordings when an incident needs investigation; when purging, remember they may contain secrets. For clean worktrees under `W/wt/<name>` or `W/repo/wt/<name>`, remove/prune and delete the branch only if it is merged into `--into BRANCH`; otherwise skip. The helper is idempotent and never deletes notes or resources outside the workspace's own scope.

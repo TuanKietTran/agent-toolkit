@@ -35,8 +35,11 @@ for name in $names; do
     echo "terminated identified orphan for $name"
   else echo "stopped $name (no matching host process)"; fi
   if [ -e "$workspace/tmp/$name" ]; then rm -rf "$workspace/tmp/$name"; echo "removed $workspace/tmp/$name"; fi
+  host_log="$workspace/logs/$name.host.log"
+  [ ! -e "$host_log" ] || { rm -f "$host_log"; echo "removed $host_log"; }
   if [ "$purge" -eq 1 ]; then
-    for path in "$workspace/logs/$name.jsonl" "$workspace/logs/$name.host.log"; do [ ! -e "$path" ] || { rm -f "$path"; echo "removed $path"; }; done
+    recording="$workspace/logs/$name.jsonl"
+    [ ! -e "$recording" ] || { rm -f "$recording"; echo "removed $recording"; }
   fi
   if [ -n "$cwd" ] || [ -n "$session_dir" ]; then
     if [ -z "$session_dir" ]; then session_dir="$HOME/.pi/agent/sessions/$(printf '%s' "$cwd" | sed 's|/|--|g')"; fi
