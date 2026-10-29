@@ -54,7 +54,7 @@ class LabCommanderTests(unittest.TestCase):
             subprocess.run([str(SKILL / "install.sh"), "--agent", "codex", "--home", "/tmp/skill home"], cwd=tmp, env=env, check=True)
             records = [json.loads(line) for line in calls.read_text().splitlines()]
             self.assertEqual(records, [
-                ["cargo", "install", "--locked", "--path", str(SKILL / "../../agent-cli-lab")],
+                ["cargo", "install", "--locked", "--path", str(SKILL / "../../packages/agent-cli-lab")],
                 ["python3", str(SKILL / "../install.py"), "lab-commander", "--agent", "codex", "--home", "/tmp/skill home"],
             ])
 

@@ -1,6 +1,6 @@
 """Standard-library tests for system1_client.py (no network, no API key, no anthropic package).
 
-    python3 -m unittest discover -s packages/skills/orchestrator-options/client -p 'test_*.py'
+    python3 -m unittest discover -s skills/orchestrator-options/client -p 'test_*.py'
 """
 import copy
 import io

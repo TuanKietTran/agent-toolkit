@@ -17,10 +17,6 @@ class InstallerTests(unittest.TestCase):
         self.fixture = FILE.parent / "tests/fixtures/lab-commander"
         self.original_root = installer.ROOT
         installer.ROOT = FILE.parent
-        self.fixture_target = FILE.parent / "lab-commander"
-        self.fixture_target_backup = None
-        if self.fixture_target.exists():
-            self.fixture_target_backup = installer.ROOT
         # Inject fixture as the lab-commander source without touching the repository tree.
         self.mapping = {"lab-commander": self.fixture}
 
@@ -74,8 +70,7 @@ class InstallerTests(unittest.TestCase):
 
     def test_discovery_and_missing_skill(self):
         names = installer.discover()
-        self.assertIn("bourbon-devbox", names)
-        self.assertIn("orchestrator-options", names)
+        self.assertEqual(names, ["lab-commander", "orchestrator-options"])
         with self.assertRaises(ValueError):
             installer.install(["not-a-skill"], "all", self.home)
 
