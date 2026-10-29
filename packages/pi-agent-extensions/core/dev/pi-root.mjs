@@ -7,8 +7,6 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const localRequire = createRequire(import.meta.url);
-
 export function piRoot() {
   if (process.env.PI_PACKAGE_DIR) return process.env.PI_PACKAGE_DIR;
   try {

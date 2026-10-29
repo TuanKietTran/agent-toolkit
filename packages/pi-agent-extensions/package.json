@@ -30,7 +30,10 @@
       "./gc-assets/index.ts",
       "./thinking-control.ts",
       "./usage-roundrobin.ts",
-      "./remote-control.ts"
+      "./remote-control.ts",
+      "./touchbar-usage/index.ts",
+      "./browser-control/index.ts",
+      "./claude-cli/index.ts"
     ]
   },
   "devDependencies": {
