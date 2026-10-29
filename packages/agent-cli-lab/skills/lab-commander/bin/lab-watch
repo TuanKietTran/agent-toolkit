@@ -1,21 +1,37 @@
 #!/bin/sh
-# Wait for the first useful commander event in a named Pi/agent-cli-lab session.
+# Watch one lab for a durable marker, idle Pi, blocker, or exit.
 set -eu
-[ "$#" -ge 1 ] || { echo "Usage: lab-watch <name> [timeout-seconds]" >&2; exit 2; }
-name=$1; timeout=${2:-1800}; start=$(date +%s); previous='';
+[ "$#" -ge 1 ] || { echo "Usage: lab-watch <name> [timeout-seconds] [--status FILE]" >&2; exit 2; }
+name=$1; shift; timeout=${1:-1800}; [ "$#" -eq 0 ] || shift
+status_file=
+while [ "$#" -gt 0 ]; do case $1 in --status) status_file=$2; shift 2;; *) echo "unknown option: $1" >&2; exit 2;; esac; done
+start=$(date +%s); previous_count=0; idle_count=0; previous_screen=
+main_cli=0
+agent-cli-lab open --help >/dev/null 2>&1 && main_cli=1
 while :; do
-  now=$(date +%s)
-  if [ "$((now-start))" -ge "$timeout" ]; then echo "WATCH-TIMEOUT $name"; exit 124; fi
-  screen=$(agent-cli-lab screen -n "$name" 2>&1 || true)
-  [ -n "$screen" ] || { echo "WATCH-GONE $name"; exit 0; }
-  if printf '%s\n' "$screen" | grep -E 'LAB-BLOCKED|usage limit|rate limit|Usage limit' >/dev/null; then
-    printf '%s\n' "$screen"; exit 0
+  now=$(date +%s); [ "$((now-start))" -lt "$timeout" ] || { echo "WATCH-TIMEOUT $name"; exit 124; }
+  if [ "$main_cli" -eq 1 ]; then
+    if ! screen=$(agent-cli-lab screen -n "$name" 2>&1); then echo "WATCH-GONE $name"; exit 0; fi
+  else
+    if ! screen=$(agent-cli-lab screen -s "$name" 2>&1); then echo "WATCH-GONE $name"; exit 0; fi
   fi
-  if [ -n "$previous" ] && [ "$screen" != "$previous" ]; then
-    if printf '%s\n' "$screen" | grep -E 'LAB-CHECKPOINT|LAB-DONE' >/dev/null; then printf '%s\n' "$screen"; exit 0; fi
+  if [ -n "$status_file" ] && [ -f "$status_file" ]; then
+    count=$(grep -Ec '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]' "$status_file" || true)
+    if [ "$count" -gt "$previous_count" ]; then tail -n 1 "$status_file"; exit 0; fi
+    previous_count=$count
+  else
+    count=$(printf '%s\n' "$screen" | grep -Ec '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]' || true)
+    if [ "$count" -gt "$previous_count" ]; then printf '%s\n' "$screen"; exit 0; fi
+    previous_count=$count
   fi
-  state=$(agent-cli-lab status -n "$name" 2>&1 || true)
-  if printf '%s\n' "$state" | grep -iE 'asking|stalled|idle' >/dev/null; then printf '%s\n' "$screen"; exit 0; fi
-  previous=$screen
+  if printf '%s\n' "$screen" | grep -iE 'LAB-BLOCKED|usage limit|rate limit' >/dev/null; then printf '%s\n' "$screen"; exit 0; fi
+  if [ "$main_cli" -eq 1 ]; then
+    state=$(agent-cli-lab status -n "$name" 2>&1 || true)
+    if printf '%s\n' "$state" | grep -iE 'asking|stalled|idle' >/dev/null; then printf '%s\n' "$screen"; exit 0; fi
+  fi
+  if printf '%s\n' "$screen" | grep -q 'Working'; then idle_count=0
+  elif [ "$screen" = "$previous_screen" ]; then idle_count=$((idle_count+1)); else idle_count=0; fi
+  if [ "$idle_count" -ge 2 ]; then echo "WATCH-IDLE $name"; exit 0; fi
+  previous_screen=$screen
   sleep 2
 done

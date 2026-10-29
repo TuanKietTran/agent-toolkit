@@ -1,39 +1,60 @@
 #!/bin/sh
-# Remove resources owned by named lab(s), without touching notes or arbitrary files.
+# Idempotently clean only resources owned by a workspace lab.
 set -eu
-[ "$#" -ge 1 ] || { echo "Usage: lab-clean <name>|--all [--workspace W]" >&2; exit 2; }
-selection=$1; shift
-workspace=$PWD
+[ "$#" -ge 1 ] || { echo "Usage: lab-clean <name>|--all [--workspace W] [--cwd DIR] [--into BRANCH] [--purge-logs]" >&2; exit 2; }
+selection=$1; shift; workspace=$PWD; cwd=; into=; purge=0
 while [ "$#" -gt 0 ]; do
-  case $1 in --workspace) [ "$#" -ge 2 ] || exit 2; workspace=$2; shift 2;; *) echo "unknown option: $1" >&2; exit 2;; esac
+  case $1 in
+    --workspace) [ "$#" -ge 2 ] || exit 2; workspace=$2; shift 2;;
+    --cwd) [ "$#" -ge 2 ] || exit 2; cwd=$2; shift 2;;
+    --into) [ "$#" -ge 2 ] || exit 2; into=$2; shift 2;;
+    --purge-logs) purge=1; shift;;
+    *) echo "unknown option: $1" >&2; exit 2;;
+  esac
 done
 workspace=$(cd "$workspace" 2>/dev/null && pwd) || { echo "workspace not found" >&2; exit 1; }
+main_cli=0; agent-cli-lab open --help >/dev/null 2>&1 && main_cli=1
 if [ "$selection" = --all ]; then
-  names=$(agent-cli-lab list 2>/dev/null | awk 'NR>1 && $1 ~ /^[A-Za-z0-9_.-]+$/ {print $1}')
+  names=$(find "$workspace/status" "$workspace/logs" -type f \( -path "$workspace/status/*.log" -o -path "$workspace/logs/*" \) 2>/dev/null | awk -F/ '{n=$NF; sub(/\.log$/, "", n); sub(/\..*$/, "", n); if(n ~ /^[A-Za-z0-9_.-]+$/) print n}' | sort -u)
 else names=$selection
 fi
 for name in $names; do
   case $name in ''|*[!A-Za-z0-9_.-]*) echo "invalid lab name: $name" >&2; exit 2;; esac
-  # Main CLI stop handles host and socket cleanup. Legacy 0.1.0 fallback sends Ctrl-C.
-  if agent-cli-lab stop -n "$name" >/dev/null 2>&1; then
-    echo "stopped $name"
+  if [ "$main_cli" -eq 1 ]; then
+    agent-cli-lab stop -n "$name" >/dev/null 2>&1 || true
   else
+    agent-cli-lab send -s "$name" -e '/quit' >/dev/null 2>&1 || agent-cli-lab send -s "$name" -c >/dev/null 2>&1 || true
     agent-cli-lab send -s "$name" -c >/dev/null 2>&1 || true
-    echo "sent Ctrl-C to $name (legacy fallback)"
   fi
-  for path in "$workspace/tmp/$name" "$workspace/logs/$name.jsonl" "$workspace/logs/$name.host.log"; do
-    if [ -e "$path" ]; then rm -rf "$path"; echo "removed $path"; fi
-  done
+  sleep 5
+  if [ "$main_cli" -eq 1 ]; then agent-cli-lab list >/dev/null 2>&1 || true; else agent-cli-lab ls >/dev/null 2>&1 || true; fi
+  pids=$(pgrep -f "agent-cli-lab host .*(-s|-n|--name) $name( |$)" || true)
+  if [ -n "$pids" ]; then
+    for pid in $pids; do case $pid in $$) continue;; esac; kill "$pid" 2>/dev/null || true; done
+    echo "terminated identified orphan for $name"
+  else echo "stopped $name (no matching host process)"; fi
+  if [ -e "$workspace/tmp/$name" ]; then rm -rf "$workspace/tmp/$name"; echo "removed $workspace/tmp/$name"; fi
+  if [ "$purge" -eq 1 ]; then
+    for path in "$workspace/logs/$name.jsonl" "$workspace/logs/$name.host.log"; do [ ! -e "$path" ] || { rm -f "$path"; echo "removed $path"; }; done
+  fi
+  if [ -n "$cwd" ]; then
+    session_dir="$HOME/.pi/agent/sessions/$(printf '%s' "$cwd" | sed 's|/|--|g')"
+    if [ -f "$session_dir/handoff.json" ]; then
+      mkdir -p "$workspace/logs/handoffs"; ts=$(date +%Y%m%d%H%M%S)
+      mv "$session_dir/handoff.json" "$workspace/logs/handoffs/$name-$ts.json"
+      echo "archived handoff for $name"
+    fi
+  fi
+  if [ -n "$into" ]; then
+    for wt in "$workspace/wt/$name" "$workspace/repo/wt/$name"; do
+      [ -d "$wt" ] || continue
+      if git -C "$wt" status --porcelain | grep . >/dev/null; then echo "kept dirty worktree $wt"; continue; fi
+      branch=$(git -C "$wt" branch --show-current)
+      if git -C "$workspace/repo" merge-base --is-ancestor "$branch" "$into" 2>/dev/null; then
+        git -C "$workspace/repo" worktree remove "$wt"; git -C "$workspace/repo" worktree prune
+        git -C "$workspace/repo" branch -d "$branch"; echo "removed merged worktree and branch $branch"
+      else echo "kept unmerged worktree $wt"; fi
+    done
+  fi
 done
-# ls prunes orphaned sockets on 0.1.0; list confirms main-CLI sessions.
-if agent-cli-lab --version 2>&1 | grep -q '0\.1\.0'; then agent-cli-lab ls; else agent-cli-lab list; fi
-cat <<'EOF'
-Finalize run-owned resources: archive/delete Pi handoff.json from the session
-folder (usually ~/.pi/agent/sessions/<encoded-cwd>; handoff stores it in
-SessionManager.getSessionDir()), watcher/brief/temp/build files, and secret-bearing
-recordings. Keep notes/ and reports. Confirm no host process remains; terminate an
-identified orphan and remove only its confirmed stale socket. Cancel Pi start_job
-jobs. For finished worktrees use git worktree remove <path>, git worktree prune,
-and delete merged worker branches. These resources require their owning workspace
-and are intentionally not guessed or deleted by this helper.
-EOF
+if [ "$main_cli" -eq 1 ]; then agent-cli-lab list; else agent-cli-lab ls; fi

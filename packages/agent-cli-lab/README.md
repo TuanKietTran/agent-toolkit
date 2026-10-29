@@ -68,4 +68,4 @@ See [`specs/`](specs/) for prioritized problems and acceptance criteria.
 
 ## Commander skill
 
-[`skills/lab-commander`](skills/lab-commander) documents the installed `agent-cli-lab` CLI and the separate `labctl` Python commander controller (ledger, lab records, and workflow commands). Install the skill and `labctl` links with `skills/lab-commander/install.sh`; install `agent-cli-lab` separately.
+[`skills/lab-commander`](skills/lab-commander) documents the `agent-cli-lab` CLI. `labctl` is a compatibility shim that execs `agent-cli-lab`; `skills/lab-commander/install.sh` builds and installs the CLI, then links the skill plus `labctl`, `lab-watch`, and `lab-clean`.
