@@ -1,0 +1,64 @@
+#!/bin/sh
+# Idempotently clean only resources owned by a workspace lab.
+set -eu
+[ "$#" -ge 1 ] || { echo "Usage: lab-clean <name>|--all [--workspace W] [--cwd DIR] [--session-dir DIR] [--into BRANCH] [--purge-logs]" >&2; exit 2; }
+selection=$1; shift; workspace=$PWD; cwd=; session_dir=; into=; purge=0
+while [ "$#" -gt 0 ]; do
+  case $1 in
+    --workspace) [ "$#" -ge 2 ] || exit 2; workspace=$2; shift 2;;
+    --cwd) [ "$#" -ge 2 ] || exit 2; cwd=$2; shift 2;;
+    --session-dir) [ "$#" -ge 2 ] || exit 2; session_dir=$2; shift 2;;
+    --into) [ "$#" -ge 2 ] || exit 2; into=$2; shift 2;;
+    --purge-logs) purge=1; shift;;
+    *) echo "unknown option: $1" >&2; exit 2;;
+  esac
+done
+workspace=$(cd "$workspace" 2>/dev/null && pwd) || { echo "workspace not found" >&2; exit 1; }
+main_cli=0; agent-cli-lab open --help >/dev/null 2>&1 && main_cli=1
+if [ "$selection" = --all ]; then
+  names=$(find "$workspace/status" "$workspace/logs" -maxdepth 1 -type f \( -name '*.log' -o -name '*.jsonl' \) 2>/dev/null | awk -F/ '{n=$NF; sub(/\.host\.log$/, "", n); sub(/\.log$/, "", n); sub(/\.jsonl$/, "", n); if(n ~ /^[A-Za-z0-9_.-]+$/) print n}' | sort -u)
+else names=$selection
+fi
+for name in $names; do
+  case $name in ''|*[!A-Za-z0-9_.-]*) echo "invalid lab name: $name" >&2; exit 2;; esac
+  if [ "$main_cli" -eq 1 ]; then
+    agent-cli-lab stop -n "$name" >/dev/null 2>&1 || true
+  else
+    agent-cli-lab send -s "$name" -e '/quit' >/dev/null 2>&1 || agent-cli-lab send -s "$name" -c >/dev/null 2>&1 || true
+    agent-cli-lab send -s "$name" -c >/dev/null 2>&1 || true
+  fi
+  sleep 5
+  if [ "$main_cli" -eq 1 ]; then agent-cli-lab list >/dev/null 2>&1 || true; else agent-cli-lab ls >/dev/null 2>&1 || true; fi
+  pids=$(pgrep -f "agent-cli-lab host .*(-s|-n|--name) $name( |$)" || true)
+  if [ -n "$pids" ]; then
+    for pid in $pids; do case $pid in $$) continue;; esac; kill "$pid" 2>/dev/null || true; done
+    echo "terminated identified orphan for $name"
+  else echo "stopped $name (no matching host process)"; fi
+  if [ -e "$workspace/tmp/$name" ]; then rm -rf "$workspace/tmp/$name"; echo "removed $workspace/tmp/$name"; fi
+  host_log="$workspace/logs/$name.host.log"
+  [ ! -e "$host_log" ] || { rm -f "$host_log"; echo "removed $host_log"; }
+  if [ "$purge" -eq 1 ]; then
+    recording="$workspace/logs/$name.jsonl"
+    [ ! -e "$recording" ] || { rm -f "$recording"; echo "removed $recording"; }
+  fi
+  if [ -n "$cwd" ] || [ -n "$session_dir" ]; then
+    if [ -z "$session_dir" ]; then session_dir="$HOME/.pi/agent/sessions/--$(printf '%s' "${cwd#/}" | tr / -)--"; fi
+    if [ -f "$session_dir/handoff.json" ]; then
+      mkdir -p "$workspace/logs/handoffs"; ts=$(date +%Y%m%d%H%M%S)
+      mv "$session_dir/handoff.json" "$workspace/logs/handoffs/$name-$ts.json"
+      echo "archived handoff for $name"
+    fi
+  fi
+  if [ -n "$into" ]; then
+    for wt in "$workspace/wt/$name" "$workspace/repo/wt/$name"; do
+      [ -d "$wt" ] || continue
+      if git -C "$wt" status --porcelain | grep . >/dev/null; then echo "kept dirty worktree $wt"; continue; fi
+      branch=$(git -C "$wt" branch --show-current)
+      if git -C "$workspace/repo" merge-base --is-ancestor "$branch" "$into" 2>/dev/null; then
+        git -C "$workspace/repo" worktree remove "$wt"; git -C "$workspace/repo" worktree prune
+        git -C "$workspace/repo" branch -d "$branch"; echo "removed merged worktree and branch $branch"
+      else echo "kept unmerged worktree $wt"; fi
+    done
+  fi
+done
+if [ "$main_cli" -eq 1 ]; then agent-cli-lab list; else agent-cli-lab ls; fi
