@@ -1,4 +1,5 @@
 ---
+name: bourbon-devbox
 description: Manage self-hosted sshd devboxes on bourbon (Windows box, Rancher Desktop/dockerd, reached via Tailscale SSH). Use whenever the user wants to create, mount into, or auto-provision a devbox from a devcontainer.json — our DIY equivalent of GitHub Codespaces, without GitHub.
 argument-hint: [create|list|start|stop|rm|ssh|logs] [name] [--mount host:container]
 ---
