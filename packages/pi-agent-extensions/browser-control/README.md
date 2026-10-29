@@ -1,4 +1,10 @@
-# Pi macOS Browser Control
+# Pi Browser Control
+
+**Windows:** [Existing-session Brave control (Zen experimental)](WINDOWS.md). The same `index.ts` registers `win_browser_*` tools on Windows without restarting the browser, enabling a debug port, or copying its profile. See the Windows guide for installation, input safety, limits, and live smoke-test results.
+
+**macOS:** The existing `mac_browser_*` backend and behavior are unchanged; documented below.
+
+## macOS
 
 A Pi extension for controlling a Chrome-compatible browser on macOS with native Quartz mouse/keyboard events. It captures the browser window's backing surface directly and overlays a red trail plus crosshair for the tracked virtual mouse.
 

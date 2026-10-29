@@ -46,11 +46,30 @@ jobs:
         run: rustup toolchain install stable --profile minimal --no-self-update && rustup default stable
       - run: node tools/pkg.mjs ci ${{ matrix.package }}
 
+  windows-browser:
+    name: Windows browser control (compile + unit smoke)
+    needs: plan
+    if: contains(needs.plan.outputs.matrix, 'pi-agent-extensions')
+    runs-on: windows-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: packages/pi-agent-extensions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build:min
+      # No desktop/session is available on hosted CI; live interaction is opt-in locally.
+      - run: node --test browser-control/tests/windows.test.ts
+
   # single required status check for branch protection
   all-green:
     if: always()
-    needs: [plan, package]
+    needs: [plan, package, windows-browser]
     runs-on: ubuntu-latest
     steps:
       - run: |
-          [ "${{ needs.plan.result }}" = success ] && [ "${{ needs.package.result }}" != failure ] && [ "${{ needs.package.result }}" != cancelled ]
+          [ "${{ needs.plan.result }}" = success ] && [ "${{ needs.package.result }}" != failure ] && [ "${{ needs.package.result }}" != cancelled ] && [ "${{ needs.windows-browser.result }}" != failure ] && [ "${{ needs.windows-browser.result }}" != cancelled ]

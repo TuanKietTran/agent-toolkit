@@ -16,7 +16,7 @@ Pi's managed `~/.pi/agent/git` cache, which package updates may reset.
 | `core/guards/answer-floor.ts` | Stops pi's own reply budget from silently collapsing to a handful of tokens. When a reply is cut off anyway, compacts if the budget was short and resumes it — no `/compact` by hand. |
 | `usage-roundrobin.ts` | Spreads turns across available models/providers so no 5h usage window runs dry. The model picker includes **Auto Rotate**: choosing it enables managed rotation, while choosing a real model disables rotation and keeps that model fixed; either choice becomes the next startup default. With no explicit `/roundrobin models` list or scoped models, the pool includes every available model; `/roundrobin models <provider/model ...>` restricts it. Claude CLI counts against the Claude subscription window, not a pay-as-you-go budget. Reads `~/.pi/usage-touchbar.json`, charges each turn's tokens by a relative price index, projects each window forward with observed drain velocity, and picks the lowest charge-per-unit-of-predicted-headroom. In auto mode, HTTP 429 and quota-limit failures cool down the exhausted provider and retry on another compatible provider in the configured pool. Switches only once the current model has burned a quantum, so the prompt cache survives. `/roundrobin [status\|on\|off\|now\|models\|set\|reset]`. |
 | `touchbar-usage/index.ts` | Displays Claude Code and Codex rate-limit windows in Pi and provides the `/touchbar-usage` command; shares its usage engine with the native Touch Bar host. |
-| `browser-control/index.ts` | Adds macOS browser screenshot, tab, watch, and native input tools; native actions remain lazy until invoked. |
+| `browser-control/index.ts` | Adds macOS browser screenshot/tab/watch/input tools, or [Windows existing-session Brave control (Zen experimental)](browser-control/WINDOWS.md). Native actions remain lazy until invoked. |
 | `claude-cli/index.ts` | Registers the `claude-cli` provider backed by a local Claude CLI subprocess. |
 | `thinking-control.ts` | Adds the `/think` slash command pi lacks, and makes "off" actually reach the chat template instead of leaving thinking on at max effort. |
 | `remote-control.ts` | Shares the active pi session through a token-protected mobile web UI and optional Cloudflare Quick Tunnel. Start with `/remote-control start`; stop with `/remote-control stop`. |
@@ -169,7 +169,7 @@ pi install ~/Downloads/pi-agent-extensions/packages/pi-agent-extensions
 cd ~/Downloads/pi-agent-extensions/packages/pi-agent-extensions && npm run install:tui
 ```
 
-The aggregate package includes Touch Bar usage, macOS browser control, and the Claude CLI
+The aggregate package includes Touch Bar usage, macOS/Windows browser control, and the Claude CLI
 provider as separate feature entry points. Do not install their former standalone copies
 alongside this package; doing so can register duplicate handlers. The Odysseus bridge remains
 separate.

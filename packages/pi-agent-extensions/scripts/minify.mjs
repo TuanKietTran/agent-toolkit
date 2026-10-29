@@ -8,7 +8,7 @@ import { transform } from "esbuild";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, "dist");
 const keep = new Set(["core", "dist", "node_modules", "scripts", "tests"]);
-const skipFile = (path) => /(?:\.test\.(?:ts|mjs)|\/live-watch\.ts)$/.test(path)
+const skipFile = (path) => /(?:\.test\.(?:ts|mjs)|\/live-[^/]+\.ts)$/.test(path)
   || /(?:^|\/)(?:\.build|target|node_modules)(?:\/|$)/.test(path)
   || /(?:^|\/)(?:\.DS_Store)$/.test(path);
 

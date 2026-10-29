@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PI_EVENT } from "../core/events.ts";
 import { TemporalCapture } from "./temporal-capture.ts";
+import windowsBrowserControl from "./windows.ts";
 
 // --- Browser constants: local literals live together here. ---
 const PARENT = ".";
@@ -188,7 +189,8 @@ type SurfaceState = { enabled: boolean };
 type WatchState = { controller: AbortController; windowId: number; intervalMs: number; assess: boolean; record: boolean; clip?: TemporalCapture; state: "watching" | "paused"; startedAt: number };
 type WatchFrame = { hash: string; fingerprint: Buffer; title: string; content?: string };
 
-export default function macosBrowserControl(pi: ExtensionAPI) {
+export default function browserControl(pi: ExtensionAPI) {
+  if (platform() === "win32") return windowsBrowserControl(pi);
   let helperPromise: Promise<string> | undefined;
   let trail: Point[] = [];
   let view: View | undefined;

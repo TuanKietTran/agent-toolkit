@@ -11,6 +11,7 @@ const resources = [
   "touchbar-usage/src/usage.mjs", "touchbar-usage/src/runtime-files.mjs",
   "touchbar-usage/host/main.swift", "touchbar-usage/host/build.sh", "touchbar-usage/bin/pi-usagebar",
   "browser-control/native/chrome-control.js", "browser-control/native/macos-controller.swift",
+  "browser-control/native/windows-controller.cs", "browser-control/WINDOWS.md",
   "browser-control/README.md", "claude-cli/README.md", "claude-cli/LICENSE",
 ];
 
