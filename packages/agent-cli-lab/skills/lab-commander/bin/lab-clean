@@ -16,7 +16,7 @@ done
 workspace=$(cd "$workspace" 2>/dev/null && pwd) || { echo "workspace not found" >&2; exit 1; }
 main_cli=0; agent-cli-lab open --help >/dev/null 2>&1 && main_cli=1
 if [ "$selection" = --all ]; then
-  names=$(find "$workspace/status" "$workspace/logs" -type f \( -path "$workspace/status/*.log" -o -path "$workspace/logs/*" \) 2>/dev/null | awk -F/ '{n=$NF; sub(/\.log$/, "", n); sub(/\..*$/, "", n); if(n ~ /^[A-Za-z0-9_.-]+$/) print n}' | sort -u)
+  names=$(find "$workspace/status" "$workspace/logs" -maxdepth 1 -type f \( -name '*.log' -o -name '*.jsonl' \) 2>/dev/null | awk -F/ '{n=$NF; sub(/\.host\.log$/, "", n); sub(/\.log$/, "", n); sub(/\.jsonl$/, "", n); if(n ~ /^[A-Za-z0-9_.-]+$/) print n}' | sort -u)
 else names=$selection
 fi
 for name in $names; do
@@ -42,7 +42,7 @@ for name in $names; do
     [ ! -e "$recording" ] || { rm -f "$recording"; echo "removed $recording"; }
   fi
   if [ -n "$cwd" ] || [ -n "$session_dir" ]; then
-    if [ -z "$session_dir" ]; then session_dir="$HOME/.pi/agent/sessions/$(printf '%s' "$cwd" | sed 's|/|--|g')"; fi
+    if [ -z "$session_dir" ]; then session_dir="$HOME/.pi/agent/sessions/--$(printf '%s' "${cwd#/}" | tr / -)--"; fi
     if [ -f "$session_dir/handoff.json" ]; then
       mkdir -p "$workspace/logs/handoffs"; ts=$(date +%Y%m%d%H%M%S)
       mv "$session_dir/handoff.json" "$workspace/logs/handoffs/$name-$ts.json"
