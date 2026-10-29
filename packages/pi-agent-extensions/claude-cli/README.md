@@ -1,4 +1,4 @@
-# pi-extension-claude-cli
+# Claude CLI provider
 
 A [pi](https://github.com/earendil-works/pi) provider extension that wraps the local `claude` CLI binary. Auth is handled by whatever `claude` is already logged into — no separate API key or OAuth setup required.
 
@@ -14,7 +14,7 @@ claude auth login
 ## Install
 
 ```sh
-pi install path/to/pi-extension-claude-cli
+pi install path/to/pi-agent-extensions
 ```
 
 ## Usage
@@ -28,7 +28,7 @@ Available models: `claude-fable-5`, `claude-opus-5-5`, `claude-opus-5`, `claude-
 
 ## How it works
 
-The extension spawns `claude -p <prompt> --output-format stream-json` as a subprocess and pipes its response into Pi.
+Select the `claude-cli` provider entry from the `pi-agent-extensions` package. The extension spawns `claude -p <prompt> --output-format stream-json` as a subprocess and pipes its response into Pi.
 
 Pi remains responsible for tools:
 
