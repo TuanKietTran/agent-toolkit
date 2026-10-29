@@ -1,0 +1,53 @@
+{
+  "_doc": "Single source of truth for per-package workflows. Every package exposes the same verbs (install, check, test, build); a missing verb means 'nothing to do'. `dependsOn` lists sibling packages whose changes should also trigger this one. `os` is the CI runner.",
+  "packages": {
+    "agent-cli-lab": {
+      "os": "ubuntu-latest",
+      "toolchain": "rust",
+      "check": "cargo check --locked",
+      "test": "cargo test --locked",
+      "build": "cargo build --locked"
+    },
+    "claude-skills": {},
+    "distributed-agent-chat": {
+      "toolchain": "node",
+      "install": "npm ci",
+      "check": "npx tsc --noEmit",
+      "test": "npm test",
+      "build": "npm run build"
+    },
+    "pi": {
+      "toolchain": "node",
+      "install": "npm ci",
+      "check": "npm run typecheck",
+      "test": "npm test",
+      "build": "npm run build"
+    },
+    "pi-agent-extensions": {
+      "toolchain": "node",
+      "install": "npm ci",
+      "check": "npm run check",
+      "test": "npm test",
+      "build": "npm run build:min"
+    },
+    "pi-extension-claude-cli": {
+      "toolchain": "node",
+      "test": "npm test"
+    },
+    "pi-extension-macos-browser-control": {
+      "os": "macos-latest",
+      "toolchain": "node",
+      "install": "npm ci",
+      "check": "npm run check",
+      "test": "npm test"
+    },
+    "pi-touchbar-usage": {
+      "os": "macos-latest"
+    },
+    "system-one": {
+      "toolchain": "python",
+      "install": "uv sync",
+      "test": "uv run pytest"
+    }
+  }
+}
