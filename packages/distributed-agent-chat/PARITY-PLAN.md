@@ -27,7 +27,7 @@ Frozen source checkpoint: `src/ui.ts` file SHA256 `4987afb471bf54d60427551837de0
 | 24 session link: labs status desk (2) | `.recent-open`, local label, tooltip, `updateRoomTitle()` | Same component, distinct ID despite repeated source title | M |
 | 26 session link: System 1 orchestrator skills | `.recent-open`, local label, tooltip, `updateRoomTitle()` | Supported local navigation/title; no remote presence/mark-read writes | M |
 | 28 session link: GitHub login and AWS setup | `.recent-open`, local label, tooltip, `updateRoomTitle()` | Supported local navigation/title; no GitHub capability implied | M |
-| 30 session link: bourbon-agent-cli-lab | `.recent-open`, local label, tooltip, `updateRoomTitle()` | Supported local navigation/title; no source conversation import | M |
+| 30 session link: agent-cli-lab | `.recent-open`, local label, tooltip, `updateRoomTitle()` | Supported local navigation/title; no source conversation import | M |
 | 32 session link: getCurrentTools error in macOS browser control | `.recent-open`, local label, tooltip, `updateRoomTitle()` | Supported local navigation/title; tooltip reveals ID, not full renamed label | M |
 | 19 row menu: Agent log footprint removal | Shared `.row-menu-btn` | Landed local rename/pin/archive/remove/undo; no remote deletion | H |
 | 21 row menu: Codex reset watch | Shared `.row-menu-btn` | Landed same component; verify open/Esc/focus | H |
@@ -35,7 +35,7 @@ Frozen source checkpoint: `src/ui.ts` file SHA256 `4987afb471bf54d60427551837de0
 | 25 row menu: labs status desk (2) | Shared `.row-menu-btn` | Independently scoped despite duplicate source title | H |
 | 27 row menu: System 1 orchestrator skills | Shared `.row-menu-btn` | Same local menu; no invented local/cloud Fork capability | H |
 | 29 row menu: GitHub login and AWS setup | Shared `.row-menu-btn` | Same local menu; no GitHub action implied | H |
-| 31 row menu: bourbon-agent-cli-lab | Shared `.row-menu-btn` | Removing recent does not delete server history | H |
+| 31 row menu: agent-cli-lab | Shared `.row-menu-btn` | Removing recent does not delete server history | H |
 | 33 row menu: getCurrentTools error | Shared `.row-menu-btn` | Same local menu; Escape restores trigger focus | H |
 | 11 account-menu | `#account-control` opens `#ui-details` | Landed local account/connection explanation and authenticated disconnect; no token copy/display action | H |
 | 35 send-feedback-disabled | None | Local explicitly disabled affordance with reason; no silent click or third-party injection | M |
