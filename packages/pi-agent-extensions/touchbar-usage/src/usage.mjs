@@ -14,21 +14,13 @@
 
 import { execFile } from "node:child_process";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { resolveHome, writeAtomic } from "./runtime-files.mjs";
 
 // os.homedir() PREFERS $HOME on POSIX and only falls back to the passwd
 // entry, so it inherits a stale $HOME from a tmux/zellij server that outlived
 // its spawning shell. os.userInfo().homedir goes straight to getpwuid and
 // ignores the environment, which is the property we actually want here.
-function resolveHome() {
-  try {
-    const home = os.userInfo().homedir;
-    if (home) return home;
-  } catch {}
-  return os.homedir();
-}
-
 const HOME = resolveHome();
 
 export const STATE_DIR = path.join(HOME, ".pi");
@@ -55,19 +47,6 @@ const UA = "pi-touchbar-usage/1.0";
 
 const nowMs = () => Date.now();
 const ensureStateDir = () => fs.mkdirSync(STATE_DIR, { recursive: true });
-
-/** Atomic publish: same-dir temp + rename(). A reader never sees a torn file. */
-function writeAtomic(target, contents) {
-  ensureStateDir();
-  const tmp = `${target}.tmp.${process.pid}.${Math.random().toString(36).slice(2, 8)}`;
-  try {
-    fs.writeFileSync(tmp, contents, { mode: 0o600 });
-    fs.renameSync(tmp, target);
-  } catch (err) {
-    try { fs.unlinkSync(tmp); } catch {}
-    throw err;
-  }
-}
 
 function readJsonFile(file) {
   try { return JSON.parse(fs.readFileSync(file, "utf8")); } catch { return null; }
@@ -487,7 +466,7 @@ function mergeSide(prev, next) {
  * Refresh if due, otherwise return what is already published.
  * Safe to call from every pi session simultaneously.
  */
-export async function refresh({ force = false } = {}) {
+export async function refresh({ force = false, fetchClaudeFn = fetchClaude, fetchCodexFn = fetchCodex } = {}) {
   const prev = readPublished();
   const age = prev?.updatedAt ? nowMs() - prev.updatedAt : Infinity;
   if (!force && age < MIN_INTERVAL_MS) return prev;
@@ -497,7 +476,7 @@ export async function refresh({ force = false } = {}) {
   if (!acquireLease()) return prev ?? (await awaitFirstPublish());
 
   try {
-    const [claude, codex] = await Promise.all([fetchClaude(), fetchCodex()]);
+    const [claude, codex] = await Promise.all([fetchClaudeFn(), fetchCodexFn()]);
     const state = {
       updatedAt: nowMs(),
       claude: mergeSide(prev?.claude, claude),
