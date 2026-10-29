@@ -1,46 +1,75 @@
 ---
 name: lab-commander
 description: >
-  Command agent labs using agent-cli-lab. Open, brief, monitor, checkpoint and
-  close interactive Pi sessions. Use when the user says "commander",
-  "agent cli lab", or asks to delegate work to an interactive agent lab.
-  Not for a single small edit you can just do.
+  Command agent labs using agent-cli-lab and labctl. Spawn, brief, monitor,
+  checkpoint, resume and close interactive agent sessions.
 ---
 
 # Lab commander
 
-Use **agent-cli-lab only** to host and control agent sessions. `labctl` is a thin
-compatibility shim that execs `agent-cli-lab`; it does not manage agents, track
-state, parse completion markers, or keep a ledger. Install with `./install.sh`.
+Use `agent-cli-lab` to host/control PTYs and `labctl` for commander-side state,
+ledger, and workflows. These are different tools: `labctl` is a Python controller,
+not a shim. Run `./install.sh` to link this skill and `labctl` into Claude Code,
+Codex, and Pi skill locations and `~/.local/bin`.
 
-## Session workflow
+## Binary and commands
 
-1. Open a named session in the target repository:
-   `agent-cli-lab open -n <name> --cwd <repo> -- pi --no-session`
-2. Brief it using a file: `agent-cli-lab send -n <name> --paced --file BRIEF.md -e`
-3. Monitor with `agent-cli-lab status -n <name>`, `watch -n <name>`, and
-   `screen -n <name>`. Use `send -n <name> -e '<answer>'` to reply and
-   `key -n <name> ...` for keys.
-4. Checkpoint by sending the worker a request to record its progress in its
-   response or working notes; agent-cli-lab itself does not persist a ledger.
-5. On reset or restart, reopen/rebrief the session with the latest task and
-   checkpoint context. Do not assume a prior session's state was retained.
-6. Close sessions with `agent-cli-lab stop -n <name>` when the work is complete.
+The installer requires an independently installed `agent-cli-lab` on `PATH`; it
+installs only the `labctl` script from this skill. The documented direct CLI is
+the 0.1.0 interface: `run`, `host`, `send`, `ask`, `screen`, `attach`,
+`foreground`, `ls`, and `socket`. Select a session with `-s/--name`. `host`
+accepts `-C` (columns), `-R` (rows), and `-r` (recording); `send` accepts
+`-e` (submit), `-c` (Ctrl-C), and `-d` (delay); `ask` accepts `-i` (idle wait)
+and `-t` (timeout). Do not use `open`, `status`, `watch`, `key`, `stop`,
+`send --paced`, or `send --file` with this version.
 
-## Worker protocol
+Typical direct session:
 
-- Work unattended. Do not ask the user anything; state an exact blocker if
-  unable to proceed.
-- Print `LAB-CHECKPOINT <done / next>` at each phase boundary.
-- Finish with `LAB-DONE <one-line result>` or `LAB-BLOCKED <exact reason>` on
-  its own line.
-- A marker is valid only when it matches the line-start pattern
-  `^\s*LAB-(DONE|BLOCKED|CHECKPOINT)[ \t]+\S`. Ignore markers found before the
-  most recent prompt sent to that worker; they belong to an earlier turn.
-- Never publish, merge to main, change repository visibility, or write secrets
-  unless the task explicitly authorizes it.
+```sh
+agent-cli-lab host -s worker -C 160 -R 50 -r logs/worker.jsonl -- pi --no-session
+agent-cli-lab screen -s worker
+agent-cli-lab send -s worker -e 'Read BRIEF.md and execute.'
+agent-cli-lab send -s worker -c
+```
 
-## Pi session notes
+For other direct options, consult `agent-cli-lab <command> --help` on the
+installed binary.
 
-Launch with `pi --no-session`. Select or change the model through Pi's own
-interface as needed. Use a separate named session for each concurrent worker.
+## Commander workflow
+
+`labctl` manages agent-specific launches, lab records, status, waits, resume,
+and an append-only decision/checkpoint ledger under `$LABCTL_HOME` (default
+`~/.lab-commander`). Its commands are `spawn`, `ask`, `screen`, `send`, `status`,
+`ls`, `wait`, `checkpoint`, `decide`, `resume`, `close`, and `ledger`; use
+`labctl <command> --help` for flags. Example:
+
+```sh
+labctl spawn worker --agent pi --cwd ~/repo --no-open -- pi --no-session
+labctl ask worker -f BRIEF.md
+labctl status worker
+labctl checkpoint worker 'finished inventory; beginning edits'
+labctl wait worker
+labctl close worker
+```
+
+## Operating protocol
+
+- Use one worktree per worker that edits code; keep probe workers read-only.
+- Brief with one line pointing to the brief file: Enter submits immediately in Pi.
+- Never end your turn while workers are running. Monitor in a blocking bash loop
+  kept below the tool timeout; inspect screens and append-only status logs.
+- Pi's `Working` spinner means busy. Text sent while busy queues and is delivered.
+- Screens scroll and recordings are raw ANSI; preserve durable checkpoints as
+  marker lines in append-only `status/<name>.log` files.
+- Print and log `LAB-CHECKPOINT <done / next>` at phase boundaries. Finish with
+  `LAB-DONE <result>` or `LAB-BLOCKED <reason>`; markers start at column 0.
+- In briefs, indent marker examples (for example, `- \`LAB-DONE result\``) so
+  echoed brief text is not mistaken for a worker result.
+- Ignore stale markers from before the latest prompt. Check the actual screen and
+  status log before deciding a worker is finished or blocked.
+- Pi supports `--model provider/id`, `--thinking <level>`, `--models <list>` for
+  Ctrl+P cycling, and `-na` for untrusted clones; change model in-session with
+  `/model <id>`.
+- Work unattended. Do not ask the user; report exact blockers to the manager.
+- Do not push, publish, merge to the default branch, change visibility, or write
+  secrets unless explicitly authorized.

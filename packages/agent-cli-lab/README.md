@@ -68,4 +68,4 @@ See [`specs/`](specs/) for prioritized problems and acceptance criteria.
 
 ## Commander skill
 
-[`skills/lab-commander`](skills/lab-commander) describes using `agent-cli-lab` with Pi sessions to open, brief, monitor and close interactive labs. Its `labctl` command is only a compatibility shim that execs `agent-cli-lab` with the supplied arguments. Install with `skills/lab-commander/install.sh`.
+[`skills/lab-commander`](skills/lab-commander) documents the installed `agent-cli-lab` CLI and the separate `labctl` Python commander controller (ledger, lab records, and workflow commands). Install the skill and `labctl` links with `skills/lab-commander/install.sh`; install `agent-cli-lab` separately.
