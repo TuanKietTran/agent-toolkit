@@ -1,6 +1,6 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { PI_EVENT } from "./pi-events.ts";
+import { PI_EVENT } from "../core/events.ts";
 import { getRightPanel } from "../core/right-panel.ts";
 
 // pi reloads extensions in-process on session switch/fork, so module state is

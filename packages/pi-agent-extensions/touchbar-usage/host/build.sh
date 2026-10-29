@@ -35,6 +35,7 @@ swiftc -O -target arm64-apple-macos11 \
 
 cp "$DIR/../bin/pi-usagebar" "$APP/Contents/Resources/bin/pi-usagebar"
 cp "$DIR/../src/usage.mjs" "$APP/Contents/Resources/src/usage.mjs"
+cp "$DIR/../src/runtime-files.mjs" "$APP/Contents/Resources/src/runtime-files.mjs"
 chmod +x "$APP/Contents/Resources/bin/pi-usagebar"
 
 codesign --force --sign - "$APP" 2>/dev/null || true

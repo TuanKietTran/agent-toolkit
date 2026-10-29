@@ -7,11 +7,11 @@ import { readFile, mkdir, mkdtemp, rename, rm } from "node:fs/promises";
 import { homedir, platform, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { PI_EVENT } from "./pi-events.ts";
+import { PI_EVENT } from "../core/events.ts";
 import { TemporalCapture } from "./temporal-capture.ts";
 
 // --- Browser constants: local literals live together here. ---
-const PARENT = "..";
+const PARENT = ".";
 const NATIVE_DIR = "native";
 const SWIFT_FILE = "macos-controller.swift";
 const CHROME_FILE = "chrome-control.js";

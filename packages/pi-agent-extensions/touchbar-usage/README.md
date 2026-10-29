@@ -22,6 +22,7 @@ CC 5h 74% wk 6% ⟳29m  ·  CX mo 0% ⟳30d
 |---|---|
 | `index.ts` | pi extension — polls every 15s, `/touchbar-usage` command |
 | `src/usage.mjs` | standalone core — fetch, parse, publish. No deps, no pi imports |
+| `src/runtime-files.mjs` | shared dependency-free home and atomic-file helpers |
 | `bin/pi-usagebar` | Touch Bar host entrypoint, prints one line |
 | `host/main.swift` | native Control Strip app — no BTT/MTMR needed |
 | `host/build.sh` | builds `~/Applications/UsageBar.app` (CLT only, no Xcode) |
@@ -52,8 +53,8 @@ degrades to `!shape` instead of crashing or silently showing a wrong number.
 ## Install
 
 ```sh
-chmod +x ~/.pi/agent/extensions/touchbar-usage/bin/pi-usagebar
-~/.pi/agent/extensions/touchbar-usage/bin/pi-usagebar   # should print a line
+chmod +x ~/.pi/agent/extensions/pi-agent-extensions/touchbar-usage/bin/pi-usagebar
+~/.pi/agent/extensions/pi-agent-extensions/touchbar-usage/bin/pi-usagebar   # should print a line
 ```
 
 Enable the extension in pi, then `/touchbar-usage status`.
@@ -108,7 +109,7 @@ macOS drops the private selector.
 
 Touch Bar → `+` → **Shell Script / Task Widget**
 
-- Script path: `~/.pi/agent/extensions/touchbar-usage/bin/pi-usagebar`
+- Script path: `~/.pi/agent/extensions/pi-agent-extensions/touchbar-usage/bin/pi-usagebar`
 - Launch path `/bin/sh`, parameters `-c`
 - Run every `60` seconds
 - Uncheck "run script in background" so stdout becomes the button title
@@ -120,7 +121,7 @@ Touch Bar → `+` → **Shell Script / Task Widget**
 ```json
 {
   "type": "shellScriptTitledButton",
-  "source": { "filePath": "~/.pi/agent/extensions/touchbar-usage/bin/pi-usagebar" },
+  "source": { "filePath": "~/.pi/agent/extensions/pi-agent-extensions/touchbar-usage/bin/pi-usagebar" },
   "refreshInterval": 60,
   "align": "left"
 }
@@ -135,8 +136,10 @@ Every pi session polls, but normally only one process per 15-second interval doe
 - lease reclaimed on TTL **or** dead-PID (`kill(pid, 0)`), so a tmux pane
   killed mid-fetch does not wedge the others for 90 seconds
 - `rename()` publish, so the Touch Bar host never reads a torn file
-- `os.homedir()` / `dscl` everywhere — `$HOME` is unreliable under a tmux
-  server that outlived its shell, and absent under launchd
+- Home resolution uses `os.userInfo().homedir`, falling back to `os.homedir()`;
+  `$HOME` can be unreliable under a tmux server that outlived its shell.
+- `PI_USAGE_HOME` is a test/sandbox-only override. Never use it to redirect
+  production state; automated tests set it to a fresh temporary home.
 
 ## Troubleshooting
 

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import browserExtension from "../extensions/macos-browser-control.ts";
+import browserExtension from "../index.ts";
 
 const tools = new Map<string, any>();
 let finish: (value: unknown) => void;
