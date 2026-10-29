@@ -1,4 +1,5 @@
 mod commands;
+mod commander;
 mod conpty;
 mod control;
 mod ipc;
@@ -82,6 +83,18 @@ enum Commands {
     Wait(WaitArgs),
     /// Print an event whenever a session starts asking, stalls, or ends.
     Watch(WatchArgs),
+    /// Start a named agent lab.
+    Spawn(commander::SpawnArgs),
+    /// Record a lab checkpoint in the persistent ledger.
+    Checkpoint(commander::NoteArgs),
+    /// Record a decision in the persistent ledger.
+    Decide(commander::NoteArgs),
+    /// Print recent checkpoint and decision ledger entries.
+    Ledger(commander::LedgerArgs),
+    /// Close a lab and its hosted process.
+    Close(commander::CloseArgs),
+    /// Resume a lab from recent ledger notes.
+    Resume(commander::ResumeArgs),
 }
 
 #[derive(Debug, Args)]
@@ -262,6 +275,9 @@ impl TypingArgs {
 
 #[derive(Debug, Args)]
 struct AskArgs {
+    /// Commander lab name (use `--lab NAME` when addressing a lab).
+    #[arg(long = "lab", value_name = "NAME")]
+    lab_name: Option<String>,
     #[command(flatten)]
     connection: SocketArgs,
     /// Text to type, followed by Enter. Omit to only wait for the screen to settle.
@@ -291,6 +307,9 @@ struct AskArgs {
 
 #[derive(Debug, Args)]
 struct SendArgs {
+    /// Commander lab name (use `--lab NAME` when addressing a lab).
+    #[arg(long = "lab", value_name = "NAME")]
+    lab_name: Option<String>,
     #[command(flatten)]
     connection: SocketArgs,
     /// Text to type. Exact UTF-8 bytes are sent.
@@ -322,6 +341,9 @@ struct SendArgs {
 
 #[derive(Debug, Args)]
 struct ScreenArgs {
+    /// Commander lab name for `screen LAB`.
+    #[arg(value_name = "LAB")]
+    lab_name: Option<String>,
     #[command(flatten)]
     connection: SocketArgs,
     /// Print only the last N non-empty lines.
@@ -350,6 +372,9 @@ struct KeyArgs {
 
 #[derive(Debug, Args)]
 struct WaitArgs {
+    /// Commander lab name (when supplied positionally).
+    #[arg(value_name = "LAB")]
+    lab_name: Option<String>,
     #[command(flatten)]
     connection: SocketArgs,
     /// No output for this many milliseconds.
@@ -401,6 +426,9 @@ struct WatchArgs {
 
 #[derive(Debug, Args)]
 struct StatusArgs {
+    /// Commander lab name (when supplied positionally); otherwise inspect a host socket.
+    #[arg(value_name = "LAB")]
+    lab_name: Option<String>,
     #[command(flatten)]
     connection: SocketArgs,
     /// Print JSON instead of text.
@@ -477,19 +505,40 @@ pub fn execute(cli: Cli) -> Result<i32> {
     match cli.command {
         Commands::Run(args) => run(args),
         Commands::Host(args) => host(args),
-        Commands::Send(args) => commands::send(args),
-        Commands::Ask(args) => commands::ask(args),
-        Commands::Screen(args) => commands::screen(args),
+        Commands::Send(args) => match args.lab_name.clone() {
+            Some(name) => commander::send(&name, &args.text, args.enter),
+            None => commands::send(args),
+        },
+        Commands::Ask(args) => match args.lab_name.clone() {
+            Some(name) => commander::ask(&name, &args.text),
+            None => commands::ask(args),
+        },
+        Commands::Screen(args) => match args.lab_name.clone() {
+            Some(name) => commander::screen(&name),
+            None => commands::screen(args),
+        },
         Commands::Attach(args) => attach(args),
         Commands::Foreground(args) => foreground(args),
         Commands::Socket(args) => print_default_socket(args),
         Commands::Open(args) => commands::open(args),
         Commands::List(args) => commands::list(args),
-        Commands::Status(args) => commands::status(args),
+        Commands::Status(args) => match args.lab_name {
+            Some(name) => commander::status(&name),
+            None => commands::status(args),
+        },
         Commands::Stop(args) => commands::stop(args),
         Commands::Key(args) => commands::key(args),
-        Commands::Wait(args) => commands::wait(args),
+        Commands::Wait(args) => match args.lab_name {
+            Some(name) => commander::wait(&name, args.timeout, args.idle_ms.unwrap_or(1000)),
+            None => commands::wait(args),
+        },
         Commands::Watch(args) => commands::watch(args),
+        Commands::Spawn(args) => commander::spawn(args),
+        Commands::Checkpoint(args) => commander::checkpoint(args),
+        Commands::Decide(args) => commander::decide(args),
+        Commands::Ledger(args) => commander::ledger(args),
+        Commands::Close(args) => commander::close(args),
+        Commands::Resume(args) => commander::resume(args),
     }
 }
 

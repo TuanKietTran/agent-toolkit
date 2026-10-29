@@ -68,4 +68,4 @@ See [`specs/`](specs/) for prioritized problems and acceptance criteria.
 
 ## Commander skill
 
-[`skills/lab-commander`](skills/lab-commander) is a skill plus `labctl` CLI for Pi, Claude Code and Codex. It drives this tool to spawn, brief, monitor, checkpoint, resume and close interactive agent labs. Install with `skills/lab-commander/install.sh`.
+[`skills/lab-commander`](skills/lab-commander) describes using `agent-cli-lab` with Pi sessions to open, brief, monitor and close interactive labs. Its `labctl` command is only a compatibility shim that execs `agent-cli-lab` with the supplied arguments. Install with `skills/lab-commander/install.sh`.
