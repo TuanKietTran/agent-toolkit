@@ -5,7 +5,7 @@ set -eu
 name=$1; shift; timeout=${1:-1800}; [ "$#" -eq 0 ] || shift
 status_file=
 while [ "$#" -gt 0 ]; do case $1 in --status) status_file=$2; shift 2;; *) echo "unknown option: $1" >&2; exit 2;; esac; done
-start=$(date +%s); previous_count=0; idle_count=0; previous_screen=
+start=$(date +%s); previous_count=0; markers_initialized=0; idle_count=0; previous_screen=
 main_cli=0
 agent-cli-lab open --help >/dev/null 2>&1 && main_cli=1
 while :; do
@@ -17,12 +17,14 @@ while :; do
   fi
   if [ -n "$status_file" ] && [ -f "$status_file" ]; then
     count=$(grep -Ec '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]' "$status_file" || true)
-    if [ "$count" -gt "$previous_count" ]; then tail -n 1 "$status_file"; exit 0; fi
+    if [ "$markers_initialized" -eq 1 ] && [ "$count" -gt "$previous_count" ]; then tail -n 1 "$status_file"; exit 0; fi
     previous_count=$count
+    markers_initialized=1
   else
     count=$(printf '%s\n' "$screen" | grep -Ec '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]' || true)
-    if [ "$count" -gt "$previous_count" ]; then printf '%s\n' "$screen"; exit 0; fi
+    if [ "$markers_initialized" -eq 1 ] && [ "$count" -gt "$previous_count" ]; then printf '%s\n' "$screen"; exit 0; fi
     previous_count=$count
+    markers_initialized=1
   fi
   if printf '%s\n' "$screen" | grep -iE 'LAB-BLOCKED|usage limit|rate limit' >/dev/null; then printf '%s\n' "$screen"; exit 0; fi
   if [ "$main_cli" -eq 1 ]; then
