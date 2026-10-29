@@ -148,8 +148,8 @@ One.
 
 - `client/system1_client.py` - `options`, `send`, `template`, `pick`
   (`pip install -r client/requirements.txt` is only needed for `options`)
-- `client/test_system1_client.py` - 18 stdlib tests, no network or key needed:
-  `python -m unittest discover -s orchestrator-options/client -p "test_*.py"`
+- `client/test_system1_client.py` - 19 stdlib tests, no network or key needed:
+  `python3 -m unittest discover -s skills/orchestrator-options/client -p 'test_*.py'`
 - `examples/ruxt-labs.briefing.json` - a real briefing (running three jobs
   with a manager), valid input for `send`
 - `plugin/system1-options/` - `/system1 <task>` command and a pane that shows

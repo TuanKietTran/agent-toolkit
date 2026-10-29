@@ -8,7 +8,7 @@ const PANE = 'system1-options'
 // for the machine: on Windows `python3` is usually the Store stub. Read defensively, so a runtime without
 // `process` still falls back to the original values. Not loaded or tested in Claude Code yet.
 const env = (globalThis as { process?: { env?: Record<string, string | undefined>; platform?: string } }).process
-const CLIENT = env?.env?.SYSTEM1_CLIENT ?? 'orchestrator-options/client/system1_client.py'
+const CLIENT = env?.env?.SYSTEM1_CLIENT ?? 'skills/orchestrator-options/client/system1_client.py'
 const PYTHON = env?.env?.SYSTEM1_PYTHON ?? (env?.platform === 'win32' ? 'python' : 'python3')
 const TEN_MINUTES = 600_000
 
