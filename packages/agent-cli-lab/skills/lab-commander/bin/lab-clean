@@ -1,0 +1,39 @@
+#!/bin/sh
+# Remove resources owned by named lab(s), without touching notes or arbitrary files.
+set -eu
+[ "$#" -ge 1 ] || { echo "Usage: lab-clean <name>|--all [--workspace W]" >&2; exit 2; }
+selection=$1; shift
+workspace=$PWD
+while [ "$#" -gt 0 ]; do
+  case $1 in --workspace) [ "$#" -ge 2 ] || exit 2; workspace=$2; shift 2;; *) echo "unknown option: $1" >&2; exit 2;; esac
+done
+workspace=$(cd "$workspace" 2>/dev/null && pwd) || { echo "workspace not found" >&2; exit 1; }
+if [ "$selection" = --all ]; then
+  names=$(agent-cli-lab list 2>/dev/null | awk 'NR>1 && $1 ~ /^[A-Za-z0-9_.-]+$/ {print $1}')
+else names=$selection
+fi
+for name in $names; do
+  case $name in ''|*[!A-Za-z0-9_.-]*) echo "invalid lab name: $name" >&2; exit 2;; esac
+  # Main CLI stop handles host and socket cleanup. Legacy 0.1.0 fallback sends Ctrl-C.
+  if agent-cli-lab stop -n "$name" >/dev/null 2>&1; then
+    echo "stopped $name"
+  else
+    agent-cli-lab send -s "$name" -c >/dev/null 2>&1 || true
+    echo "sent Ctrl-C to $name (legacy fallback)"
+  fi
+  for path in "$workspace/tmp/$name" "$workspace/logs/$name.jsonl" "$workspace/logs/$name.host.log"; do
+    if [ -e "$path" ]; then rm -rf "$path"; echo "removed $path"; fi
+  done
+done
+# ls prunes orphaned sockets on 0.1.0; list confirms main-CLI sessions.
+if agent-cli-lab --version 2>&1 | grep -q '0\.1\.0'; then agent-cli-lab ls; else agent-cli-lab list; fi
+cat <<'EOF'
+Finalize run-owned resources: archive/delete Pi handoff.json from the session
+folder (usually ~/.pi/agent/sessions/<encoded-cwd>; handoff stores it in
+SessionManager.getSessionDir()), watcher/brief/temp/build files, and secret-bearing
+recordings. Keep notes/ and reports. Confirm no host process remains; terminate an
+identified orphan and remove only its confirmed stale socket. Cancel Pi start_job
+jobs. For finished worktrees use git worktree remove <path>, git worktree prune,
+and delete merged worker branches. These resources require their owning workspace
+and are intentionally not guessed or deleted by this helper.
+EOF

@@ -7,69 +7,80 @@ description: >
 
 # Lab commander
 
-Use `agent-cli-lab` to host/control PTYs and `labctl` for commander-side state,
-ledger, and workflows. These are different tools: `labctl` is a Python controller,
-not a shim. Run `./install.sh` to link this skill and `labctl` into Claude Code,
-Codex, and Pi skill locations and `~/.local/bin`.
+Use `agent-cli-lab` to host and control PTYs. `labctl` is a compatibility shim:
+it executes `agent-cli-lab` with the supplied arguments. Run `./install.sh` to
+install/upgrade the package binary and link this skill plus `labctl`, `lab-clean`,
+and `lab-watch` into Claude Code, Codex, and Pi.
 
 ## Binary and commands
 
-The installer requires an independently installed `agent-cli-lab` on `PATH`; it
-installs only the `labctl` script from this skill. The documented direct CLI is
-the 0.1.0 interface: `run`, `host`, `send`, `ask`, `screen`, `attach`,
-`foreground`, `ls`, and `socket`. Select a session with `-s/--name`. `host`
-accepts `-C` (columns), `-R` (rows), and `-r` (recording); `send` accepts
-`-e` (submit), `-c` (Ctrl-C), and `-d` (delay); `ask` accepts `-i` (idle wait)
-and `-t` (timeout). Do not use `open`, `status`, `watch`, `key`, `stop`,
-`send --paced`, or `send --file` with this version.
-
-Typical direct session:
+`install.sh` runs `cargo install --locked --path <package-dir>` and prints the
+installed version. Require the main-package CLI feature set: `open`,
+`send --paced --file`, `status`, `watch`, `key`, and `stop`. This package currently
+reports version 0.1.0 for both the older installed binary and the newer source build,
+so verify the required commands with `agent-cli-lab --help` rather than relying on
+version text alone. Select sessions
+with `-n/--name`; consult `agent-cli-lab <command> --help` for flags. Example:
 
 ```sh
-agent-cli-lab host -s worker -C 160 -R 50 -r logs/worker.jsonl -- pi --no-session
-agent-cli-lab screen -s worker
-agent-cli-lab send -s worker -e 'Read BRIEF.md and execute.'
-agent-cli-lab send -s worker -c
+agent-cli-lab open -n worker --cwd ~/repo -- pi --no-session
+agent-cli-lab send -n worker --file BRIEF.md --paced
+agent-cli-lab status -n worker
+agent-cli-lab stop -n worker
 ```
 
-For other direct options, consult `agent-cli-lab <command> --help` on the
-installed binary.
+**Legacy 0.1.0:** if `agent-cli-lab --version` reports 0.1.0, use
+`host -s <name> -- <cmd>` for a background host, `send -s`, `screen -s`,
+`ask -s`, and `ls`; there is no `stop`, so send `/quit` or Ctrl-C twice. Run
+`./install.sh` to upgrade before using the commands above.
 
 ## Commander workflow
 
-`labctl` manages agent-specific launches, lab records, status, waits, resume,
-and an append-only decision/checkpoint ledger under `$LABCTL_HOME` (default
-`~/.lab-commander`). Its commands are `spawn`, `ask`, `screen`, `send`, `status`,
-`ls`, `wait`, `checkpoint`, `decide`, `resume`, `close`, and `ledger`; use
-`labctl <command> --help` for flags. Example:
+Use `open --cwd <repo> -- pi --no-session` or `host` to start a lab; use `send`,
+`screen`, `status`, `wait`, `watch`, and `stop` to control it. `labctl` forwards
+all arguments unchanged. Example: `labctl open -n worker --cwd ~/repo -- pi --no-session`.
 
-```sh
-labctl spawn worker --agent pi --cwd ~/repo --no-open -- pi --no-session
-labctl ask worker -f BRIEF.md
-labctl status worker
-labctl checkpoint worker 'finished inventory; beginning edits'
-labctl wait worker
-labctl close worker
-```
+## Clean up resources
+
+Before a lab is closed for good, archive or delete its Pi handoff (`handoff.json`)
+from the session directory, so a later session reusing that directory cannot inherit
+stale state. The handoff extension stores it in `ctx.sessionManager.getSessionDir()`.
+Keep `notes/` and reports; remove run-specific briefs, watcher scripts, temporary
+build/scratch directories, and recordings containing secrets when no longer needed.
+
+Run `lab-clean <name> [--workspace W]` or `lab-clean --all [--workspace W]`.
+It stops named sessions (`stop -n` on the main CLI; Ctrl-C fallback on 0.1.0),
+removes conventional `$W/tmp/<name>` and `$W/logs/<name>` artifacts, and lists
+sessions to confirm/prune sockets. It never deletes notes or arbitrary workspace
+files. For unmanaged hosts, send `/quit` or Ctrl-C twice, confirm the `agent-cli-lab
+host` process exited (terminate an identified orphan), then remove any leftover
+socket only after confirming it is stale. Archive/delete Pi handoffs and run-owned
+temp files as described below. Cancel Pi `start_job` jobs. For finished worktrees,
+run `git worktree remove <path>`, `git worktree prune`, and delete the merged
+per-worker branch. Keep notes and reports.
 
 ## Operating protocol
 
 - Use one worktree per worker that edits code; keep probe workers read-only.
 - Brief with one line pointing to the brief file: Enter submits immediately in Pi.
-- Never end your turn while workers are running. Monitor in a blocking bash loop
-  kept below the tool timeout; inspect screens and append-only status logs.
-- Pi's `Working` spinner means busy. Text sent while busy queues and is delivered.
-- Screens scroll and recordings are raw ANSI; preserve durable checkpoints as
-  marker lines in append-only `status/<name>.log` files.
-- Print and log `LAB-CHECKPOINT <done / next>` at phase boundaries. Finish with
-  `LAB-DONE <result>` or `LAB-BLOCKED <reason>`; markers start at column 0.
-- In briefs, indent marker examples (for example, `- \`LAB-DONE result\``) so
-  echoed brief text is not mistaken for a worker result.
 - Ignore stale markers from before the latest prompt. Check the actual screen and
   status log before deciding a worker is finished or blocked.
 - Pi supports `--model provider/id`, `--thinking <level>`, `--models <list>` for
   Ctrl+P cycling, and `-na` for untrusted clones; change model in-session with
   `/model <id>`.
 - Work unattended. Do not ask the user; report exact blockers to the manager.
+- Interactive Pi managers must not end their turn while workers run. Monitor in a
+  blocking bash loop kept below the tool timeout. Pi's `Working` spinner means busy;
+  text sent while busy queues and will be delivered.
+- Screens scroll (often about 50 rows) and recordings are raw ANSI. Use append-only
+  `status/<name>.log` marker lines as durable checkpoints.
+- Brief workers with one line pointing to a file because Enter submits immediately.
+  Indent marker examples in briefs (for example, `- \`LAB-DONE result\``) to avoid
+  false completion detections. Pi supports `--model provider/id`, `--thinking <lvl>`,
+  `--models <list>` for Ctrl+P cycling, and `-na` for untrusted clones; switch with
+  `/model <id>`. Keep `repo/`, `wt/<lab>/`, `notes/`, `status/`, `briefs/`, and `logs/`
+  separate; use one worktree per editing worker.
+- Use `lab-watch <name> [timeout-seconds]` to watch for idle, status markers,
+  blockers, usage limits, a gone lab, or timeout.
 - Do not push, publish, merge to the default branch, change visibility, or write
   secrets unless explicitly authorized.
