@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import { PI_EVENT } from "../core/events.ts";
 import { TemporalCapture } from "./temporal-capture.ts";
 import windowsBrowserControl from "./windows.ts";
+import browserBridge from "./bridge-pi.ts";
 
 // --- Browser constants: local literals live together here. ---
 const PARENT = ".";
@@ -190,6 +191,7 @@ type WatchState = { controller: AbortController; windowId: number; intervalMs: n
 type WatchFrame = { hash: string; fingerprint: Buffer; title: string; content?: string };
 
 export default function browserControl(pi: ExtensionAPI) {
+  browserBridge(pi);
   if (platform() === "win32") return windowsBrowserControl(pi);
   let helperPromise: Promise<string> | undefined;
   let trail: Point[] = [];
