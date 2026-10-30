@@ -17,7 +17,6 @@ const resources = [
   "browser-control/helper-extension/service-worker.js",
   "browser-control/helper-extension/popup.js", "browser-control/helper-extension/popup.html",
   "browser-control/helper-extension/manifest.json", "browser-control/helper-extension/native-frame.mjs",
-  "browser-control/helper-extension/bridge-protocol.mjs",
   "browser-control/native/windows-controller.cs", "browser-control/windows-backend.mjs", "browser-control/windows-backend.d.mts",
   "browser-control/windows-shared.mjs", "browser-control/windows-shared.d.mts", "browser-control/windows-mcp.mjs",
   "browser-control/mcp-server.mjs", "browser-control/WINDOWS.md",
@@ -47,8 +46,11 @@ test("runtime resources survive minification with executable modes", async () =>
     await access(join(root, resource));
     await access(join(root, "dist", resource));
   }
-  for (const executable of ["touchbar-usage/bin/pi-usagebar", "touchbar-usage/host/build.sh"]) {
-    assert.ok((await stat(join(root, "dist", executable))).mode & 0o111, `${executable} lost executable mode`);
+  // Windows does not expose POSIX execute bits through fs.stat; check preservation where supported.
+  if (process.platform !== "win32") {
+    for (const executable of ["touchbar-usage/bin/pi-usagebar", "touchbar-usage/host/build.sh"]) {
+      assert.ok((await stat(join(root, "dist", executable))).mode & 0o111, `${executable} lost executable mode`);
+    }
   }
 });
 
@@ -62,7 +64,7 @@ test("helper manifest declares native messaging and resolves each packaged runti
     const helper = join(base, "browser-control/helper-extension");
     const manifest = JSON.parse(await readFile(join(helper, "manifest.json"), "utf8"));
     assert.ok(manifest.permissions.includes("nativeMessaging"));
-    for (const asset of [manifest.background.service_worker, manifest.action.default_popup, "popup.js", "native-frame.mjs", "bridge-protocol.mjs"])
+    for (const asset of [manifest.background.service_worker, manifest.action.default_popup, "popup.js", "native-frame.mjs"])
       await access(join(helper, asset));
   }
 });

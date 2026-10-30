@@ -49,7 +49,7 @@ test("stdio MCP child calls the real broker/native host through a protocol mock 
   }
   const broker = windows
     ? spawn(manifest.path, ["--broker", "--config", installed.configPath], { env, stdio: ["ignore", "ignore", "pipe"] })
-    : spawn(process.execPath, [host, "--broker", "--config", configPath, "--test-only-insecure-pipe"], { env, stdio: ["ignore", "ignore", "pipe"] });
+    : spawn(process.execPath, [host, "--broker", "--config", configPath], { env, stdio: ["ignore", "ignore", "pipe"] });
   children.push(broker);
   let brokerErr = ""; broker.stderr.on("data", b => brokerErr += b);
   let ready = false;
@@ -61,7 +61,7 @@ test("stdio MCP child calls the real broker/native host through a protocol mock 
 
   const native = windows
     ? spawn(manifest.path, [`chrome-extension://${"a".repeat(32)}/`], { env, stdio: ["pipe", "pipe", "pipe"] })
-    : spawn(process.execPath, [host, "--native", "--config", configPath, "--test-only-insecure-pipe"], { env, stdio: ["pipe", "pipe", "pipe"] });
+    : spawn(process.execPath, [host, "--native", "--config", configPath], { env, stdio: ["pipe", "pipe", "pipe"] });
   children.push(native);
   let nativeErr = "", nativeBuf = Buffer.alloc(0), nativeSession, granted = false;
   const nativeMessageTypes = [];
