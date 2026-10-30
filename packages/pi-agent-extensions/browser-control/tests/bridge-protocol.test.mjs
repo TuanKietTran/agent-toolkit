@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  ACTIONS, MAX_MESSAGE_BYTES, decodeMessage, encodeMessage, validateRequest,
+  ACTIONS, MAX_IMAGE_BASE64_BYTES, MAX_MESSAGE_BYTES, MAX_TEXT_BYTES, decodeMessage, encodeMessage, validateRequest,
   validateResponse, validateNativeRequest, validateNativeResponse,
 } from "../bridge-protocol.mjs";
 
@@ -24,7 +24,7 @@ test("rejects malformed, unknown, unsupported and ill-typed canonical requests",
 
 test("rejects oversize frames before parse and on encode", () => {
   assert.throws(() => decodeMessage(new Uint8Array(MAX_MESSAGE_BYTES + 1)), /maximum size/);
-  assert.throws(() => encodeMessage(request({ args: { data: "x".repeat(MAX_MESSAGE_BYTES) } })), /maximum size/);
+  assert.throws(() => encodeMessage(request({ action: "observe", args: { data: "x".repeat(MAX_MESSAGE_BYTES) } })), /missing or unknown fields/);
 });
 
 test("validates canonical success/error envelopes and bounded errors", () => {
@@ -37,6 +37,26 @@ test("validates canonical success/error envelopes and bounded errors", () => {
     response({ ok: false, error: { code: "NOPE", message: "x", retryable: false } }),
     { version: 1, id: "r1", session: "s1", ok: false, error: { code: "INTERNAL", message: "x".repeat(513), retryable: false } },
   ]) assert.throws(() => validateResponse(bad));
+});
+
+test("all action argument schemas are strict and bounded", () => {
+  const good = [
+    ["observe", {}], ["click", { x: 1, y: 2, button: "left" }],
+    ["type", { text: "hello" }], ["key", { key: "Enter", modifiers: ["Shift"] }],
+    ["scroll", { x: 1, y: 2, deltaX: 0, deltaY: -120 }],
+    ["navigate", { url: "https://example.com/path" }],
+  ];
+  for (const [action, args] of good) assert.equal(validateRequest(request({ action, args })).action, action);
+  const bad = [
+    ["observe", { extra: 1 }], ["click", { x: -1, y: 2, button: "left" }],
+    ["click", { x: 1, y: 2, button: "left", extra: true }],
+    ["type", { text: "x".repeat(MAX_TEXT_BYTES + 1) }],
+    ["key", { key: "Enter", modifiers: ["Shift", "Shift"] }],
+    ["key", { key: "\n" }], ["scroll", { x: 0, y: 0, deltaX: 10001, deltaY: 0 }],
+    ["navigate", { url: "javascript:alert(1)" }],
+    ["navigate", { url: "https://user:pass@example.com/" }],
+  ];
+  for (const [action, args] of bad) assert.throws(() => validateRequest(request({ action, args })), `${action} should reject invalid args`);
 });
 
 test("drag is one bounded action; malformed coordinates/buttons reject", () => {
@@ -66,6 +86,15 @@ test("validates native grants, canonical execute wrapper and correlated response
   assert.deepEqual(validateNativeRequest({ type: "execute", request: req }).request, req);
   assert.deepEqual(validateNativeResponse({ type: "executeResult", response: response() }).response, response());
   assert.throws(() => validateNativeRequest({ type: "execute", request: { ...req, target: "" } }));
+});
+
+test("observe image response is bounded below the 1 MiB envelope ceiling", () => {
+  const base64 = "A".repeat(MAX_IMAGE_BASE64_BYTES);
+  const valid = response({ result: { imageBase64: base64, mimeType: "image/png", width: 1920, height: 1080 } });
+  assert.equal(validateResponse(valid).ok, true);
+  assert.throws(() => validateResponse(response({ result: { imageBase64: `${base64}A` } })), /imageBase64|maximum message size/);
+  assert.throws(() => validateResponse(response({ result: { imageBase64: "not base64!" } })), /imageBase64/);
+  assert.throws(() => validateResponse(response({ result: { nested: "x".repeat(MAX_TEXT_BYTES + 1) } })), /too large/);
 });
 
 test("native cancel is request-scoped and dispatched status is explicit", () => {

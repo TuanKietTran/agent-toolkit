@@ -1,6 +1,9 @@
 export const PROTOCOL_VERSION = 1;
 export const MAX_MESSAGE_BYTES = 1024 * 1024;
 export const MAX_ERROR_BYTES = 512;
+export const MAX_TEXT_BYTES = 16 * 1024;
+export const MAX_IMAGE_BYTES = 700 * 1024;
+export const MAX_IMAGE_BASE64_BYTES = 4 * Math.ceil(MAX_IMAGE_BYTES / 3);
 export const ACTIONS = Object.freeze(["observe", "click", "drag", "type", "key", "scroll", "navigate"]);
 const ERRORS = new Set(["INVALID_REQUEST", "UNSUPPORTED_VERSION", "UNAUTHORIZED", "STALE_SESSION", "TARGET_NOT_FOUND", "UNSUPPORTED_ACTION", "CANCELLED", "TIMEOUT", "TOO_LARGE", "INTERNAL"]);
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
@@ -19,6 +22,62 @@ function err(e) {
   if (!ERRORS.has(e.code) || typeof e.message !== "string" || bytes(e.message) > MAX_ERROR_BYTES || typeof e.retryable !== "boolean") fail("invalid error object");
 }
 function coord(v, name) { if (!Number.isFinite(v) || v < 0 || v > 100000) fail(`invalid ${name}`); }
+function boundedResult(value, depth = 0) {
+  if (depth > 8) fail("result nesting too deep");
+  if (typeof value === "string") {
+    if (bytes(value) > MAX_TEXT_BYTES) fail("result string too large");
+    return;
+  }
+  if (typeof value === "number") { if (!Number.isFinite(value)) fail("non-finite result number"); return; }
+  if (value === null || typeof value === "boolean") return;
+  if (Array.isArray(value)) {
+    if (value.length > 1024) fail("result array too large");
+    for (const item of value) boundedResult(item, depth + 1);
+    return;
+  }
+  if (!record(value) || Object.keys(value).length > 128) fail("invalid result value");
+  for (const [key, item] of Object.entries(value)) {
+    if (key === "imageBase64") {
+      if (typeof item !== "string" || item.length > MAX_IMAGE_BASE64_BYTES || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(item)) fail("invalid or oversized imageBase64");
+      continue;
+    }
+    boundedResult(item, depth + 1);
+  }
+}
+function validateArgs(action, args) {
+  if (!record(args)) fail("args must be an object");
+  if (action === "observe") exact(args, []);
+  if (action === "click") {
+    exact(args, ["x", "y", "button"]); coord(args.x, "x"); coord(args.y, "y");
+    if (!["left", "middle", "right"].includes(args.button)) fail("invalid click button");
+  }
+  if (action === "drag") {
+    exact(args, ["start", "end", "button"]);
+    for (const [name, point] of [["start", args.start], ["end", args.end]]) {
+      if (!record(point)) fail(`invalid drag ${name}`);
+      exact(point, ["x", "y"]); coord(point.x, `${name}.x`); coord(point.y, `${name}.y`);
+    }
+    if (!["left", "middle", "right"].includes(args.button)) fail("invalid drag button");
+  }
+  if (action === "type") {
+    exact(args, ["text"]);
+    if (typeof args.text !== "string" || bytes(args.text) > MAX_TEXT_BYTES) fail("invalid or oversized text");
+  }
+  if (action === "key") {
+    exact(args, ["key", "modifiers"], ["key"]); str(args.key, "key", 64);
+    if (/[\u0000-\u001f]/.test(args.key)) fail("invalid key");
+    if (own(args, "modifiers") && (!Array.isArray(args.modifiers) || args.modifiers.length > 4 || new Set(args.modifiers).size !== args.modifiers.length || args.modifiers.some(m => !["Shift", "Ctrl", "Alt", "Meta"].includes(m)))) fail("invalid key modifiers");
+  }
+  if (action === "scroll") {
+    exact(args, ["x", "y", "deltaX", "deltaY"]); coord(args.x, "x"); coord(args.y, "y");
+    for (const axis of ["deltaX", "deltaY"]) if (!Number.isFinite(args[axis]) || Math.abs(args[axis]) > 10000) fail(`invalid ${axis}`);
+  }
+  if (action === "navigate") {
+    exact(args, ["url"]); str(args.url, "url", 2048);
+    let url; try { url = new URL(args.url); } catch { fail("invalid navigation URL"); }
+    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) fail("navigation URL must be credential-free HTTP(S)");
+  }
+}
 
 // Canonical broker envelope. Session, ID, and target are always supplied by the host client.
 export function validateRequest(v) {
@@ -27,15 +86,7 @@ export function validateRequest(v) {
   if (v.version !== PROTOCOL_VERSION) fail("unsupported version");
   str(v.id, "id", 128); str(v.session, "session"); str(v.target, "target");
   if (!ACTIONS.includes(v.action)) fail("unsupported action");
-  if (!record(v.args)) fail("args must be an object");
-  if (v.action === "drag") {
-    exact(v.args, ["start", "end", "button"]);
-    for (const [pointName, point] of [["start", v.args.start], ["end", v.args.end]]) {
-      if (!record(point)) fail(`invalid drag ${pointName}`);
-      exact(point, ["x", "y"]); coord(point.x, `${pointName}.x`); coord(point.y, `${pointName}.y`);
-    }
-    if (!["left", "middle", "right"].includes(v.args.button)) fail("invalid drag button");
-  }
+  validateArgs(v.action, v.args);
   return v;
 }
 export function validateResponse(v) {
@@ -44,8 +95,11 @@ export function validateResponse(v) {
   if (v.version !== PROTOCOL_VERSION) fail("unsupported version");
   str(v.id, "id", 128); str(v.session, "session");
   if (typeof v.ok !== "boolean") fail("ok must be boolean");
-  if (v.ok) { if (!own(v, "result") || !record(v.result) || own(v, "error")) fail("success requires result only"); }
-  else { if (own(v, "result") || !own(v, "error")) fail("failure requires error only"); err(v.error); }
+  if (v.ok) {
+    if (!own(v, "result") || !record(v.result) || own(v, "error")) fail("success requires result only");
+    boundedResult(v.result);
+  } else { if (own(v, "result") || !own(v, "error")) fail("failure requires error only"); err(v.error); }
+  if (bytes(JSON.stringify(v)) > MAX_MESSAGE_BYTES) fail("response exceeds maximum message size");
   return v;
 }
 
