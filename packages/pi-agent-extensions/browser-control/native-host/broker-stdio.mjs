@@ -3,7 +3,8 @@ import { Duplex } from "node:stream";
 import { MAX_MESSAGE_BYTES } from "../bridge-protocol.mjs";
 
 const OUTER_MAX = MAX_MESSAGE_BYTES;
-const RAW_CHUNK_MAX = 700 * 1024;
+// Match the C# relay's fixed raw-pipe chunk bound; base64 framing stays small.
+const RAW_CHUNK_MAX = 48 * 1024;
 const fail = (message) => { throw new Error(message); };
 function envelope(value) {
   const body = Buffer.from(JSON.stringify(value), "utf8");

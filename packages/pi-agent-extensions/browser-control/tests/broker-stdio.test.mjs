@@ -47,6 +47,13 @@ test("broker stdio multiplexes framed peer bytes and propagates independent peer
   peer.write(Buffer.from("host bytes"));
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(outputMessages.at(-1), { v: 1, type: "data", peer: "native-1", bytes: Buffer.from("host bytes").toString("base64") });
+  const large = Buffer.alloc(100 * 1024, 0x61);
+  await new Promise((resolve, reject) => peer.write(large, (error) => error ? reject(error) : resolve()));
+  await new Promise((resolve) => setImmediate(resolve));
+  const chunks = outputMessages.filter((message) => message.peer === "native-1" && message.type === "data").slice(1);
+  assert.ok(chunks.length >= 3);
+  assert.ok(chunks.every((message) => Buffer.from(message.bytes, "base64").length <= 48 * 1024));
+  assert.deepEqual(Buffer.concat(chunks.map((message) => Buffer.from(message.bytes, "base64"))), large);
   input.write(frame({ v: 1, type: "close", peer: "native-1" }));
   await new Promise((resolve) => peer.once("end", resolve));
   input.end();
