@@ -35,6 +35,10 @@ test("Chrome native 4-byte little-endian UTF-8 frame round trips bounded message
   const oversized = new Uint8Array(4); new DataView(oversized.buffer).setUint32(0, 1024 * 1024 + 1, true);
   assert.throws(() => decodeNativeFrame(oversized), /length/);
   assert.throws(() => decodeNativeFrame(Uint8Array.from([4, 0, 0, 0, 0xff, 0xff, 0xff, 0xff])), /encoded|UTF-8/i);
+  assert.throws(() => decodeNativeFrame(new Uint8Array([1, 2, 3])), /frame/i);
+  assert.throws(() => decodeNativeFrame(Uint8Array.from([1, 0, 0, 0, 0x7b])), /JSON|position/i);
+  const backing = new Uint8Array(frame.length + 7); backing.set(frame, 3);
+  assert.deepEqual(decodeNativeFrame(backing.subarray(3, 3 + frame.length)), { type: "hello", version: 1 });
   assert.throws(() => encodeNativeFrame({ data: "x".repeat(1024 * 1024) }), /too large/);
 });
 
