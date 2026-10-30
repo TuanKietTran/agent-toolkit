@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { encodeNativeFrame, decodeNativeFrame } from "./native-frame.mjs";
-import { MAX_IMAGE_BASE64_BYTES, validateNativeRequest, validateNativeResponse, validateRequest, validateResponse } from "./bridge-protocol.mjs";
+import { MAX_IMAGE_BASE64_BYTES, validateNativeRequest, validateNativeResponse, validateRequest, validateResponse } from "../bridge-protocol.mjs";
 import { connectNative, onNativeMessage, onUiMessage } from "./service-worker.js";
 
 const origin = "https://example.test";

@@ -1,7 +1,7 @@
 import {
   PROTOCOL_VERSION, MAX_IMAGE_BASE64_BYTES, validateNativeRequest, validateNativeResponse,
   validateRequest, validateResponse,
-} from "./bridge-protocol.mjs";
+} from "../bridge-protocol.mjs";
 
 const HOST = "com.pi_agent_extensions.browser_bridge";
 const MAX_BYTES = 1024 * 1024;

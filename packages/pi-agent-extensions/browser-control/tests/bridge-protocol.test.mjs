@@ -82,7 +82,12 @@ test("drag is one bounded action; malformed coordinates/buttons reject", () => {
 test("validates native bootstrap/catalog and host-issued opaque target mapping", () => {
   assert.equal(validateNativeRequest({ type: "hello", version: 1 }).type, "hello");
   assert.deepEqual(validateNativeResponse({ type: "ready", version: 1, session: "host-session", targets }), { type: "ready", version: 1, session: "host-session", targets });
-  assert.deepEqual(validateNativeResponse({ type: "targets", targets }), { type: "targets", targets });
+  assert.deepEqual(validateNativeResponse({ type: "targets", session: "host-session", targets }), { type: "targets", session: "host-session", targets });
+  assert.deepEqual(validateNativeResponse({ type: "targetsRequest", session: "host-session" }), { type: "targetsRequest", session: "host-session" });
+  assert.deepEqual(validateNativeRequest({ type: "targets", session: "host-session" }), { type: "targets", session: "host-session" });
+  assert.deepEqual(validateNativeRequest({ type: "targetInventory", session: "host-session", tabs: [{ tabId: 19, origin: "https://example.com", title: "Example" }] }).tabs[0], { tabId: 19, origin: "https://example.com", title: "Example" });
+  assert.throws(() => validateNativeRequest({ type: "targetInventory", session: "host-session", tabs: [{ tabId: 19, origin: "https://example.com", title: "Example", id: "invented" }] }));
+  assert.throws(() => validateNativeRequest({ type: "targetInventory", session: "host-session", tabs: [{ tabId: 19, origin: "https://example.com", title: "one" }, { tabId: 19, origin: "https://example.com", title: "duplicate" }] }));
   assert.throws(() => validateNativeResponse({ type: "ready", version: 1, session: "s", targets: [{ ...targets[0], id: "" }] }));
   assert.throws(() => validateNativeRequest({ type: "hello", version: 1, session: "magic" }));
 });
@@ -91,11 +96,11 @@ test("validates native grants, canonical execute wrapper and correlated response
   assert.equal(validateNativeRequest({ type: "authorize", session: "s", targetId: "t", origin: "https://example.com" }).type, "authorize");
   assert.throws(() => validateNativeRequest({ type: "authorize", session: "s", targetId: "t", origin: "https://example.com/path" }));
   const req = request();
-  assert.deepEqual(validateNativeRequest({ type: "request", request: req }).request, req);
-  assert.deepEqual(validateNativeResponse({ type: "response", response: response() }).response, response());
-  assert.deepEqual(validateNativeRequest({ type: "execute", request: req }).request, req);
-  assert.deepEqual(validateNativeResponse({ type: "executeResult", response: response() }).response, response());
-  assert.throws(() => validateNativeRequest({ type: "execute", request: { ...req, target: "" } }));
+  assert.deepEqual(validateNativeResponse({ type: "execute", request: req }).request, req);
+  assert.deepEqual(validateNativeRequest({ type: "executeResult", response: response() }).response, response());
+  assert.deepEqual(validateNativeResponse({ type: "cancel", session: "s", id: "r1" }).id, "r1");
+  assert.throws(() => validateNativeResponse({ type: "execute", request: { ...req, target: "" } }));
+  assert.throws(() => validateNativeResponse({ type: "targetsRequest", session: "s", extra: 1 }));
 });
 
 test("result depth, property, array, string, image and total response bounds are enforced", () => {
@@ -117,7 +122,7 @@ test("result depth, property, array, string, image and total response bounds are
 });
 
 test("native cancel is request-scoped and dispatched status is explicit", () => {
-  assert.equal(validateNativeRequest({ type: "cancel", session: "s", id: "r1" }).id, "r1");
-  assert.equal(validateNativeResponse({ type: "cancelled", session: "s", id: "r1", dispatched: true }).dispatched, true);
+  assert.equal(validateNativeResponse({ type: "cancel", session: "s", id: "r1" }).id, "r1");
+  assert.equal(validateNativeRequest({ type: "cancelled", session: "s", id: "r1", dispatched: true }).dispatched, true);
   assert.throws(() => validateNativeResponse({ type: "cancelled", session: "s", id: "r1", dispatched: "yes" }));
 });
