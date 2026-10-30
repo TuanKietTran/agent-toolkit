@@ -62,8 +62,9 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm run build:min
-      # No desktop/session is available on hosted CI; live interaction is opt-in locally.
+      # No desktop/session is available on hosted CI; only fixture/helper protocol tests run here.
       - run: node --test browser-control/tests/windows.test.ts
+      - run: node --test browser-control/tests/*.test.mjs browser-control/helper-extension/*.test.mjs browser-control/native-host/tests/*.test.mjs
 
   # single required status check for branch protection
   all-green:

@@ -1,26 +1,52 @@
-# Chromium helper native host (opt-in)
+# Brave-first Chromium helper setup
 
-The MV3 helper is at `helper-extension/`. The production host is `native-host/bridge-host.mjs` (Node.js >=20). The broker and Chrome Native Messaging endpoint are separate modes of that same implementation:
+The opt-in MV3 helper lives in `helper-extension/`. Brave is the documented first target. Zen is **not supported or live-verified** for this CDP helper. No browser install, extension install, registry write, or browser restart is performed by package scripts.
 
-```sh
-node /absolute/path/to/browser-control/native-host/bridge-host.mjs --broker
+## Build and inspect the helper
+
+From the package directory, run `npm run build:min` if you need the packaged `dist/` layout. The unpacked helper source directory is `browser-control/helper-extension/`; its runtime assets and local protocol module are tested in source and built layouts. The helper requests `debugger`, `storage`, `tabs`, and `nativeMessaging` permissions. Inspect those permissions and enable only when you intend to use the helper.
+
+1. Open `brave://extensions`.
+2. Enable **Developer mode** and choose **Load unpacked**.
+3. Select the absolute `packages/pi-agent-extensions/browser-control/helper-extension` directory.
+4. Open the helper popup, explicitly connect to the native host, and grant only intended HTTP(S) page origins/tabs. There is no inferred grant.
+
+## Host and broker
+
+The broker is explicitly operator-started; the installer does not start it. On Windows, after installing/compiling the native executable and registering the manifest as described below:
+
+```powershell
+& "$env:LOCALAPPDATA\PiBrowserBridge\bridge-host.exe" --broker --config "$env:LOCALAPPDATA\PiBrowserBridge\host-config.json"
 ```
 
-Start the broker explicitly before using the helper. Windows native-host packaging is ready, but the transport's broker currently fails closed on Windows until its current-user named-pipe DACL relay is integrated; do not treat the Windows bridge as operational before that blocker is closed. The Windows manifest `path` is the compiled `native-host/bridge-launcher.exe` and has no `args` property. Chrome launches it with the extension origin argument; the tiny .NET Framework launcher loads owner-only `%LOCALAPPDATA%/PiBrowserBridge/host-config.json` (`nodeExecutable`, `hostScript`, `socketPath`), validates ownership/allowed paths, and relays raw stdin/stdout to `node <bridge-host.mjs> --native --config <absolute-host-config.json>`. Unix/macOS uses a generated executable shell launcher which execs Node with the same script and mode. The broker is not automatically started by the installer. The runtime endpoint is deterministic per user (Windows named pipe derived from current-user SID; Unix/macOS `${XDG_RUNTIME_DIR:-/tmp}/pi-browser-bridge-<uid>.sock`) and does not depend on environment inherited by Chrome. `PI_BROWSER_BRIDGE_SOCKET` is an optional override for isolated tests and explicitly configured deployments.
+The launcher starts one Node `bridge-host.mjs --broker-stdio --config <same-config>` child. That child owns all bridge sessions, grants, target IDs, and routing. The Windows executable uses a path-only native-host manifest, a protected per-user config, an owner/SYSTEM/Administrators DACL, remote-client rejection, and first-instance pipe creation. Chrome/Brave's extension-origin argv is checked; Chrome Native Messaging frame bytes are relayed without modification. Unix/macOS retain the Node owner-only Unix socket transport.
 
-Generate the manifest without changing the machine:
+## Safe installer modes and Brave registration
 
-```sh
-node native-host/install.mjs --dry-run --extension-id <EXACT_32_CHAR_CHROME_EXTENSION_ID>
-```
-
-Fixture output only (safe for packaging tests; on Windows this compiles the launcher locally with .NET Framework `csc.exe` and writes only under the fixture directory):
+The installer defaults to Brave and has non-writing dry-run plus fixture output modes:
 
 ```sh
-node native-host/install.mjs --install --fixture /tmp/pi-bridge-fixture --extension-id <EXACT_32_CHAR_CHROME_EXTENSION_ID>
-node native-host/install.mjs --uninstall --fixture /tmp/pi-bridge-fixture
+node browser-control/native-host/install.mjs --dry-run --browser brave --extension-id <EXACT_32_CHAR_BRAVE_EXTENSION_ID>
+node browser-control/native-host/install.mjs --install --fixture /tmp/pi-bridge-fixture --browser brave --extension-id <EXACT_32_CHAR_BRAVE_EXTENSION_ID> --pipe-name '\\.\pipe\pi-browser-bridge-0123456789abcdef0123456789abcdef'
+node browser-control/native-host/install.mjs --uninstall --fixture /tmp/pi-bridge-fixture --browser brave --pipe-name '\\.\pipe\pi-browser-bridge-0123456789abcdef0123456789abcdef'
 ```
 
-No extension ID is guessed. For a real install, use `--install --extension-id <exact-id>` after reviewing the generated manifest. Unix/macOS writes the per-user Chrome `NativeMessagingHosts` manifest location. On Windows the script compiles the small C# launcher, writes owner-only config/install directories, and writes the per-user manifest file only. It prints the exact registry key requiring separate, manual opt-in; it never runs `reg`, writes the registry, changes browser installation, or restarts a browser. `--uninstall` removes generated manifest/launcher/config only; on Windows registry cleanup is manual. Do not use a placeholder ID for real registration.
+Windows fixture install compiles the C# launcher locally with .NET Framework `csc.exe` and writes only beneath the fixture directory. It never registers the manifest or touches the registry. For a real install, review dry-run output, then explicitly run `--install --browser brave --extension-id <exact id>`; the installer writes per-user manifest/config files and prints, but does not perform, the registration step.
 
-The helper requests `debugger`, `storage`, `tabs`, and `nativeMessaging` permissions. Install/enable the unpacked helper explicitly, inspect its requested permissions, and grant access only to intended tabs/sites in its UI. Chrome must be restarted after native-host registration changes where required by the browser; reload/restart the helper service worker after replacing extension files. Already-running browser processes may cache native-host registration, so restarting Chrome may be necessary before the host is discovered. Start/restart the broker separately in the operator's terminal. Native browser input remains experimental; no live browser validation is claimed here.
+On Windows, set the default value of this **current-user** key to the printed manifest path:
+
+`HKEY_CURRENT_USER\Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\com.pi_agent_extensions.browser_bridge`
+
+On macOS/Linux, Brave discovers the manifest in its per-user `NativeMessagingHosts` directory. The installer never writes Windows registry keys, launches Brave, or restarts it. Native-host registration changes may require fully exiting and restarting an already-running Brave process; extension source changes require reloading the unpacked extension (and its service worker). Uninstall removes only generated manifest/launcher/config files; Windows registry cleanup is manual.
+
+### Explicit Chrome option
+
+Chrome is supported as an explicit packaging option; there is no silent Chrome-only default. Use `--browser chrome`, load the same unpacked helper through `chrome://extensions`, and register the generated manifest at:
+
+`HKEY_CURRENT_USER\Software\Google\Chrome\NativeMessagingHosts\com.pi_agent_extensions.browser_bridge`
+
+The Chrome key is likewise printed only; package scripts do not write it. Brave remains the default/documented setup.
+
+## Tool scope and limitations
+
+The helper dispatches **background page-targeted CDP input only** through the shared browser bridge. MCP exposes this helper/page-dispatch path only. It does not expose the existing Windows foreground input tools. Existing `win_browser_*` PostMessage/SendInput foreground/background capabilities remain Pi tools only; the MCP foreground-tools integration is a known gap, not an implicit fallback. Zen is not supported/live-verified for this CDP helper, and no live Chromium compatibility is claimed by the fixture tests.

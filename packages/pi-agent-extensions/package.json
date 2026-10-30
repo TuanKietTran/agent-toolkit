@@ -13,7 +13,7 @@
   "license": "MIT",
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "npm run build:min && node --test core/dev/*.test.ts claude-cli/*.test.ts browser-control/tests/*.test.ts browser-control/native-host/tests/*.test.mjs touchbar-usage/tests/*.test.mjs tests/*.test.mjs",
+    "test": "npm run build:min && node --test core/dev/*.test.ts claude-cli/*.test.ts browser-control/tests/*.test.ts browser-control/tests/*.test.mjs browser-control/helper-extension/*.test.mjs browser-control/native-host/tests/*.test.mjs touchbar-usage/tests/*.test.mjs tests/*.test.mjs",
     "install:tui": "node ./tui/install-layout.mjs",
     "build:min": "node scripts/minify.mjs"
   },
