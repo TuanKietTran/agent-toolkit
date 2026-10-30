@@ -232,8 +232,7 @@ export async function runNativeHost({ socketPath, configPath, input = process.st
   });
   let ready = false, nativeSession;
   const sendNative = (v) => {
-    if (["execute", "cancel"].includes(v.type) || (v.type === "targets" && v.targets === undefined)) validateNativeRequest(v);
-    else validateNativeResponse(v);
+    validateNativeResponse(v);
     const b = Buffer.from(JSON.stringify(v));
     if (b.length > MAX) throw new Error("Native message exceeds 1 MiB");
     const h = Buffer.alloc(4); h.writeUInt32LE(b.length); output.write(Buffer.concat([h, b]));

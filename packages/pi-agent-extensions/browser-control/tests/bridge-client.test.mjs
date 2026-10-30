@@ -62,7 +62,7 @@ test("rejects oversized request before transport and malformed/oversized broker 
 test("authentication rejection and stale/revoked sessions fail closed", async () => {
   const broker = new FixtureBroker(); broker.mode = "unauthorized";
   const client = createBridgeClient({ connect: async () => broker, timeoutMs: 20 });
-  await assert.rejects(client.connect(), /authentication failed|timed out/i); await client.close();
+  await assert.rejects(client.connect(), /invalid session|authentication failed|timed out/i); await client.close();
   const stale = new FixtureBroker(); const other = await connected(stale); stale.mode = "stale";
   await assert.rejects(other.request("observe", {}, { targetId: "opaque-target" }), /stale broker response/i);
   await other.close();
