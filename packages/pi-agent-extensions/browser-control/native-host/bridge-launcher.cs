@@ -40,7 +40,10 @@ public static class BridgeLauncher {
     sealed class Peer {
         public NamedPipeServerStream Stream;
         public object WriteLock = new object();
+        public object CloseLock = new object();
         public volatile bool Closed;
+        public bool LocalCloseSent;
+        public bool RemoteCloseReceived;
     }
     [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public int Length; public IntPtr SecurityDescriptor; public bool InheritHandle; }
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -201,8 +204,10 @@ public static class BridgeLauncher {
         if (String.IsNullOrEmpty(peer) || peer.Length > 64 || (type != "data" && type != "close") || (type == "data" && (msg.Count != 4 || !(msg["bytes"] is string))) || (type == "close" && msg.Count != 3)) throw new InvalidDataException("Invalid Node mux frame fields");
     }
     static void ClosePeer(string id, Peer peer) {
-        Peer ignored; Peers.TryRemove(id, out ignored);
-        peer.Closed = true; try { peer.Stream.Dispose(); } catch { }
+        Peer ignored;
+        lock (peer.CloseLock) { peer.RemoteCloseReceived = true; peer.Closed = true; }
+        Peers.TryRemove(id, out ignored);
+        try { peer.Stream.Dispose(); } catch { }
     }
     static async Task PipePeer(NamedPipeServerStream pipe, CancellationToken cancel) {
         string id = Guid.NewGuid().ToString("N");
@@ -220,7 +225,13 @@ public static class BridgeLauncher {
                 WriteMux(broker, new { v = 1, type = "data", peer = id, bytes = Convert.ToBase64String(chunk) });
             }
         } catch (OperationCanceledException) { }
-        finally { Trace("mux.in type=close peer=" + id + " length=0"); WriteMux(broker, new { v = 1, type = "close", peer = id }); ClosePeer(id, peer); }
+        finally {
+            bool sendClose;
+            lock (peer.CloseLock) { sendClose = !peer.RemoteCloseReceived && !peer.LocalCloseSent; if (sendClose) peer.LocalCloseSent = true; }
+            if (sendClose) { Trace("mux.in type=close peer=" + id + " length=0"); WriteMux(broker, new { v = 1, type = "close", peer = id }); }
+            else Trace("mux.in close already acknowledged peer=" + id);
+            if (sendClose) { peer.Closed = true; try { peer.Stream.Dispose(); } catch { } }
+        }
     }
     static int StartBroker(HostConfig config, string path) {
         broker = StartNode(config, "--broker-stdio", path);
