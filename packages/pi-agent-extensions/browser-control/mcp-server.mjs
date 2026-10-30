@@ -83,5 +83,5 @@ export async function serve({ input = process.stdin, output = process.stdout, cl
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1].replaceAll("\\", "/")}`).href) {
-  serve({ client: createBridgeClient({ socketPath: process.env.PI_BROWSER_BRIDGE_SOCKET }) }).catch(e => { process.stderr.write(`browser MCP server: ${e?.message ?? e}\n`); process.exitCode = 1; });
+  serve().catch(e => { process.stderr.write(`browser MCP server: ${e?.message ?? e}\n`); process.exitCode = 1; });
 }
