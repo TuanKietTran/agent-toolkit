@@ -23,7 +23,9 @@ function fakeChrome({ url = `${origin}/page`, command } = {}) {
 async function bootstrap(fake) {
   connectNative(fake.api);
   assert.deepEqual(fake.posted[0], { type: "hello", version: 1 });
-  await onNativeMessage({ type: "ready", version: 1, session: "opaque-session", targets: [{ id: "opaque-target", tabId: 4, origin, title: "page" }] }, fake.api);
+  const task = fake.messageListeners.at(-1)({ type: "ready", version: 1, session: "opaque-session", targets: [{ id: "opaque-target", tabId: 4, origin, title: "page" }] });
+  assert.equal(typeof task?.then, "function", "native message event exposes its async handling task to fixtures");
+  await task;
 }
 
 

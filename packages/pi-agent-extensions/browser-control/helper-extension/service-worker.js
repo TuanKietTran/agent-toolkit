@@ -33,7 +33,13 @@ function originOf(url) {
 export function connectNative(chromeApi = chrome) {
   if (nativePort) return;
   nativePort = chromeApi.runtime.connectNative(HOST);
-  nativePort.onMessage.addListener(message => { void onNativeMessage(message, chromeApi); });
+  nativePort.onMessage.addListener(message => {
+    const task = onNativeMessage(message, chromeApi);
+    // Chrome ignores Port listener return values, but returning the task lets native-host
+    // fixtures and embedders await the complete relay without changing MV3 behavior.
+    task.catch(() => {});
+    return task;
+  });
   nativePort.onDisconnect.addListener(() => reset("native host disconnected"));
   chromeApi.tabs.onUpdated?.addListener((tabId, changeInfo) => {
     if (changeInfo.url) invalidateTab(tabId, chromeApi, "navigation");
