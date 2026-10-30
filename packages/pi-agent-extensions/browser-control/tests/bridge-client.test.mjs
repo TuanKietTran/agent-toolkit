@@ -23,8 +23,9 @@ class FixtureBroker extends EventEmitter {
       if (msg.type === "hello") return this.send({ type: "ready", version: 1, id: msg.id, session: this.mode === "unauthorized" ? "" : this.session, targets: this.targets });
       if (msg.type === "targets") return this.send({ type: "targets", id: msg.id, session: this.session, targets: this.targets });
       if (msg.type === "request") {
+        if (this.mode === "unknown-field") return this.send({ type: "response", id: msg.id, session: this.session, unexpected: true, response: { version: 1, id: msg.request.id, session: this.session, ok: true, result: {} } });
         if (this.mode === "hang") return;
-        if (this.mode === "stale") return this.send({ type: "response", id: msg.id, session: "revoked", response: {} });
+        if (this.mode === "stale") return this.send({ type: "response", id: msg.id, session: "revoked", response: { version: 1, id: msg.request.id, session: "revoked", ok: true, result: { accepted: true } } });
         return this.send({ type: "response", id: msg.id, session: this.session, response: { version: 1, id: msg.request.id, session: this.session, ok: true, result: { accepted: true } } });
       }
     });
@@ -34,12 +35,12 @@ class FixtureBroker extends EventEmitter {
   end(done) { this.emit("close"); done?.(); }
   destroy() { this.emit("close"); }
 }
-const connected = async (broker) => { const c = createBridgeClient({ connect: async () => broker, timeoutMs: 50 }); await c.connect(); return c; };
+const connected = async (broker) => { const c = createBridgeClient({ connect: async () => broker, timeoutMs: 50 }); await c.connect(); await c.listTargets(); return c; };
 
 test("actual framed IPC join, catalog and canonical request/response", async () => {
   const broker = new FixtureBroker(), client = await connected(broker);
   assert.deepEqual(await client.listTargets(), broker.targets);
-  const result = await client.request("click", { x: 3, y: 4 }, { targetId: "opaque-target" });
+  const result = await client.request("click", { x: 3, y: 4, button: "left" }, { targetId: "opaque-target" });
   assert.equal(result.ok, true); assert.equal(result.result.accepted, true);
   const request = broker.writes.map((b) => JSON.parse(b.subarray(4).toString())).find((m) => m.type === "request");
   assert.equal(request.request.session, broker.session); assert.equal(request.request.target, "opaque-target");
@@ -48,9 +49,9 @@ test("actual framed IPC join, catalog and canonical request/response", async () 
 });
 
 test("rejects oversized request before transport and malformed/oversized broker frames", async () => {
-  const never = createBridgeClient({ connect: async () => { throw Error("must not connect"); } });
-  await assert.rejects(never.request("type", { text: "x".repeat(1024 * 1024) }, { targetId: "t" }), /1 MiB/);
-  await never.close();
+  const bounded = await connected(new FixtureBroker());
+  await assert.rejects(bounded.request("type", { text: "x".repeat(300_000) }, { targetId: "opaque-target" }), /oversized text/);
+  await bounded.close();
   for (const mode of ["malformed", "oversized"]) {
     const broker = new FixtureBroker(); broker.mode = mode;
     const client = createBridgeClient({ connect: async () => broker, timeoutMs: 25 });
@@ -65,14 +66,17 @@ test("authentication rejection and stale/revoked sessions fail closed", async ()
   const stale = new FixtureBroker(); const other = await connected(stale); stale.mode = "stale";
   await assert.rejects(other.request("observe", {}, { targetId: "opaque-target" }), /stale broker response/i);
   await other.close();
+  const malformed = new FixtureBroker(); const strictClient = await connected(malformed); malformed.mode = "unknown-field";
+  await assert.rejects(strictClient.request("observe", {}, { targetId: "opaque-target" }), /wrapper fields/i);
+  await strictClient.close();
 });
 
 test("cancellation and timeout send best-effort cancel and report uncertain outcome", async () => {
   const broker = new FixtureBroker(); const client = await connected(broker); broker.mode = "hang";
-  const ac = new AbortController(); const pending = client.request("click", {}, { targetId: "opaque-target", signal: ac.signal });
+  const ac = new AbortController(); const pending = client.request("click", { x: 2, y: 3, button: "left" }, { targetId: "opaque-target", signal: ac.signal });
   await new Promise((r) => setImmediate(r)); ac.abort();
   await assert.rejects(pending, /uncertain outcome|cancelled/i);
-  await assert.rejects(client.request("click", {}, { targetId: "opaque-target", timeoutMs: 10 }), /uncertain/i);
+  await assert.rejects(client.request("click", { x: 2, y: 3, button: "left" }, { targetId: "opaque-target", timeoutMs: 10 }), /uncertain/i);
   assert.ok(broker.writes.some((b) => JSON.parse(b.subarray(4).toString()).type === "cancel"));
   await client.close();
 });

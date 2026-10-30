@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createBridgeClient } from "../bridge-client.mjs";
-import * as protocol from "../../../../../bic-protocol/packages/pi-agent-extensions/browser-control/bridge-protocol.mjs";
+import * as protocol from "../bridge-protocol.mjs";
 
 const SESSION = "host-issued-session", TARGET = "host-target-opaque";
 const frame = (v) => { const b = Buffer.from(JSON.stringify(v)); const h = Buffer.alloc(4); h.writeUInt32LE(b.length); return Buffer.concat([h, b]); };
@@ -15,7 +15,7 @@ const frame = (v) => { const b = Buffer.from(JSON.stringify(v)); const h = Buffe
 test("temporary IPC -> broker/native relay -> mock CDP executor: auth, result, cancel, drag cleanup", async () => {
   const pipe = process.platform === "win32" ? `\\\\.\\pipe\\pi-bridge-${randomUUID()}` : join(tmpdir(), `pi-bridge-${randomUUID()}.sock`);
   const extension = { granted: true, mouseUp: 0, async execute(request, signal) {
-    protocol.validateRequest(request);
+    protocol.validateNativeRequest({ type: "execute", request });
     if (!this.granted) return { version: 1, id: request.id, session: SESSION, ok: false, error: { code: "UNAUTHORIZED", message: "Target authorization denied", retryable: false } };
     if (request.action === "drag") {
       try { await new Promise((resolve, reject) => {
@@ -45,15 +45,19 @@ test("temporary IPC -> broker/native relay -> mock CDP executor: auth, result, c
           }
           const abort = new AbortController(); current.set(m.request.id, abort);
           extension.execute(m.request, abort.signal).then((response) => {
-            current.delete(m.request.id); protocol.validateResponse(response);
-            send({ type: "response", id: m.id, session: SESSION, response });
+            current.delete(m.request.id);
+            const relayed = { type: "executeResult", response };
+            protocol.validateNativeResponse(relayed);
+            send({ type: "response", id: m.id, session: SESSION, response: relayed.response });
           }, () => {
             current.delete(m.request.id);
-            send({ type: "response", id: m.id, session: SESSION, response: { version: 1, id: m.request.id, session: SESSION, ok: false, error: { code: "CANCELLED", message: "Cancelled; effect may be uncertain", retryable: false } } });
+            const relayed = { type: "executeResult", response: { version: 1, id: m.request.id, session: SESSION, ok: false, error: { code: "CANCELLED", message: "Cancelled; effect may be uncertain", retryable: false } } };
+            protocol.validateNativeResponse(relayed);
+            send({ type: "response", id: m.id, session: SESSION, response: relayed.response });
           });
         } else if (m.type === "cancel") {
+          protocol.validateNativeRequest(m);
           current.get(m.id)?.abort();
-          send({ type: "cancelled", id: m.id, session: SESSION, dispatched: current.has(m.id) });
         }
       }
     });
@@ -63,12 +67,12 @@ test("temporary IPC -> broker/native relay -> mock CDP executor: auth, result, c
   try {
     assert.equal((await client.connect()).session, SESSION);
     assert.equal((await client.listTargets())[0].id, TARGET);
-    const ok = await client.request("click", { x: 4, y: 8 }, { targetId: TARGET });
+    const ok = await client.request("click", { x: 4, y: 8, button: "left" }, { targetId: TARGET });
     protocol.validateResponse(ok); assert.equal(ok.result.accepted, true);
     const drag = await client.request("drag", { start: { x: 1, y: 2 }, end: { x: 10, y: 20 }, button: "left" }, { targetId: TARGET });
     assert.equal(drag.ok, true); assert.equal(extension.mouseUp, 1);
     extension.granted = false;
-    const denied = await client.request("click", { x: 1, y: 1 }, { targetId: TARGET });
+    const denied = await client.request("click", { x: 1, y: 1, button: "left" }, { targetId: TARGET });
     assert.equal(denied.error.code, "UNAUTHORIZED");
     extension.granted = true;
     const controller = new AbortController();
