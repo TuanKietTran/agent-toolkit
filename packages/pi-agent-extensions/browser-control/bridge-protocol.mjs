@@ -109,7 +109,21 @@ export function validateResponse(v) {
 export function validateNativeRequest(v) {
   if (!record(v)) fail("native request must be an object");
   if (v.type === "hello") { exact(v, ["type", "version"]); if (v.version !== PROTOCOL_VERSION) fail("unsupported version"); return v; }
-  if (v.type === "targets") { exact(v, ["type"]); return v; }
+  if (v.type === "targets") { exact(v, ["type", "session"]); str(v.session, "session"); return v; }
+  if (v.type === "targetInventory") {
+    exact(v, ["type", "session", "tabs"]); str(v.session, "session");
+    if (!Array.isArray(v.tabs) || v.tabs.length > 256) fail("invalid target inventory");
+    const ids = new Set();
+    for (const tab of v.tabs) {
+      if (!record(tab)) fail("invalid inventory tab");
+      exact(tab, ["tabId", "origin", "title"]);
+      if (!Number.isSafeInteger(tab.tabId) || tab.tabId < 0 || ids.has(tab.tabId)) fail("invalid or duplicate inventory tabId");
+      ids.add(tab.tabId);
+      if (!validOrigin(tab.origin)) fail("invalid inventory origin");
+      if (typeof tab.title !== "string" || bytes(tab.title) > 4096) fail("invalid inventory title");
+    }
+    return v;
+  }
   if (v.type === "authorize") {
     exact(v, ["type", "session", "targetId", "origin"]); str(v.session, "session"); str(v.targetId, "targetId");
     if (!validOrigin(v.origin)) fail("invalid origin"); return v;
@@ -117,7 +131,8 @@ export function validateNativeRequest(v) {
   if (v.type === "revoke") { exact(v, ["type", "session", "targetId"]); str(v.session, "session"); str(v.targetId, "targetId"); return v; }
   if (v.type === "request") { exact(v, ["type", "request"]); validateRequest(v.request); return v; }
   if (v.type === "cancel") { exact(v, ["type", "session", "id"]); str(v.session, "session"); str(v.id, "id", 128); return v; }
-  if (v.type === "execute") { exact(v, ["type", "request"]); validateRequest(v.request); return v; }
+  if (v.type === "executeResult") { exact(v, ["type", "response"]); validateResponse(v.response); return v; }
+  if (v.type === "cancelled") { exact(v, ["type", "session", "id", "dispatched"]); str(v.session, "session"); str(v.id, "id", 128); if (typeof v.dispatched !== "boolean") fail("invalid dispatched flag"); return v; }
   fail("unsupported native request type");
 }
 export function validateNativeResponse(v) {
@@ -126,11 +141,12 @@ export function validateNativeResponse(v) {
     exact(v, ["type", "version", "session", "targets"]); if (v.version !== PROTOCOL_VERSION) fail("unsupported version");
     str(v.session, "session"); targetList(v.targets, true); return v;
   }
-  if (v.type === "targets") { exact(v, ["type", "targets"]); targetList(v.targets, false); return v; }
+  if (v.type === "targetsRequest") { exact(v, ["type", "session"]); str(v.session, "session"); return v; }
+  if (v.type === "targets") { exact(v, ["type", "session", "targets"]); str(v.session, "session"); targetList(v.targets, false); return v; }
   if (v.type === "authorized") { exact(v, ["type", "session", "targetId", "origin"]); str(v.session, "session"); str(v.targetId, "targetId"); if (!validOrigin(v.origin)) fail("invalid origin"); return v; }
   if (v.type === "revoked") { exact(v, ["type", "session", "targetId", "reason"]); str(v.session, "session"); str(v.targetId, "targetId"); str(v.reason, "reason", 512); return v; }
-  if (v.type === "response" || v.type === "executeResult") { exact(v, ["type", "response"]); validateResponse(v.response); return v; }
-  if (v.type === "cancelled") { exact(v, ["type", "session", "id", "dispatched"]); str(v.session, "session"); str(v.id, "id", 128); if (typeof v.dispatched !== "boolean") fail("invalid dispatched flag"); return v; }
+  if (v.type === "execute") { exact(v, ["type", "request"]); validateRequest(v.request); return v; }
+  if (v.type === "cancel") { exact(v, ["type", "session", "id"]); str(v.session, "session"); str(v.id, "id", 128); return v; }
   if (v.type === "error") { exact(v, ["type", "code", "message"]); if (!ERRORS.has(v.code) || typeof v.message !== "string" || bytes(v.message) > MAX_ERROR_BYTES) fail("invalid native error"); return v; }
   fail("unsupported native response type");
 }

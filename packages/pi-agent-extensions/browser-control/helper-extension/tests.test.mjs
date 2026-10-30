@@ -12,7 +12,7 @@ function fakeChrome({ url = `${origin}/page`, command } = {}) {
   const port = { postMessage: value => posted.push(value), onMessage: { addListener: fn => messageListeners.push(fn) }, onDisconnect: { addListener: fn => disconnectListeners.push(fn) } };
   const api = {
     runtime: { id: "extension-id", connectNative: name => { assert.equal(name, "com.pi_agent_extensions.browser_bridge"); return port; }, sendMessage: async () => {}, onMessage: { addListener: () => {} } },
-    tabs: { get: async () => ({ id: 4, url }) },
+    tabs: { get: async () => ({ id: 4, url }), query: async () => [{ id: 4, url, title: "page" }], onUpdated: { addListener: () => {} }, onRemoved: { addListener: () => {} } },
     debugger: {
       attach: async () => {}, detach: async () => {},
       sendCommand: async (_target, method, args) => { calls.push({ method, args }); return command?.(method, args) || (method === "Page.captureScreenshot" ? { data: "aGVsbG8=" } : {}); },
@@ -44,11 +44,19 @@ test("Chrome native 4-byte little-endian UTF-8 frame round trips bounded message
 
 test("frozen control bootstrap, target, grant/revoke, execute and cancellation schemas validate", () => {
   assert.deepEqual(validateNativeRequest({ type: "hello", version: 1 }), { type: "hello", version: 1 });
-  assert.deepEqual(validateNativeResponse({ type: "ready", version: 1, session: "s", targets: [{ id: "t", tabId: 2, origin, title: "page" }] }).session, "s");
+  assert.deepEqual(validateNativeResponse({ type: "ready", version: 1, session: "s", targets: [] }).session, "s");
+  assert.doesNotThrow(() => validateNativeResponse({ type: "targetsRequest", session: "s" }));
+  assert.doesNotThrow(() => validateNativeRequest({ type: "targets", session: "s" }));
+  assert.doesNotThrow(() => validateNativeRequest({ type: "targetInventory", session: "s", tabs: [{ tabId: 3, origin, title: "page" }] }));
+  assert.throws(() => validateNativeRequest({ type: "targetInventory", session: "s", tabs: [{ tabId: 3, origin, title: "one" }, { tabId: 3, origin, title: "duplicate" }] }));
+  assert.doesNotThrow(() => validateNativeResponse({ type: "targets", session: "s", targets: [{ id: "opaque", tabId: 3, origin, title: "page" }] }));
+  assert.doesNotThrow(() => validateNativeResponse({ type: "execute", request }));
+  assert.doesNotThrow(() => validateNativeRequest({ type: "executeResult", response: { version: 1, id: "req-1", session: "opaque-session", ok: true, result: { accepted: true } } }));
   assert.doesNotThrow(() => validateNativeRequest({ type: "authorize", session: "s", targetId: "t", origin }));
   assert.doesNotThrow(() => validateNativeRequest({ type: "revoke", session: "s", targetId: "t" }));
-  assert.doesNotThrow(() => validateNativeRequest({ type: "execute", request }));
-  assert.doesNotThrow(() => validateNativeRequest({ type: "cancel", session: "s", id: "req-1" }));
+  assert.doesNotThrow(() => validateNativeResponse({ type: "execute", request }));
+  assert.doesNotThrow(() => validateNativeResponse({ type: "cancel", session: "s", id: "req-1" }));
+  assert.doesNotThrow(() => validateNativeRequest({ type: "cancelled", session: "s", id: "req-1", dispatched: false }));
   assert.throws(() => validateNativeRequest({ type: "authorize", session: "s", targetId: "t", origin: "javascript:alert(1)" }));
   assert.throws(() => validateNativeRequest({ type: "hello", version: 1, extra: true }));
 });
@@ -64,6 +72,19 @@ test("canonical action and response envelope is validated unchanged", () => {
 test("drag envelope is bounded by shared protocol and supports only one explicit gesture", () => {
   assert.doesNotThrow(() => validateRequest({ ...request, action: "drag", args: { start: { x: 1, y: 2 }, end: { x: 30, y: 40 }, button: "left" } }));
   assert.throws(() => validateRequest({ ...request, action: "drag", args: { start: { x: -1, y: 2 }, end: { x: 3, y: 4 }, button: "left" } }));
+});
+
+test("host target discovery requests live Chrome inventory without extension-created IDs", async () => {
+  const fake = fakeChrome(); await bootstrap(fake);
+  await onNativeMessage({ type: "targetsRequest", session: "opaque-session" }, fake.api);
+  const inventory = fake.posted.at(-1);
+  assert.equal(inventory.type, "targetInventory");
+  assert.equal(inventory.session, "opaque-session");
+  assert.deepEqual(inventory.tabs, [{ tabId: 4, origin, title: "page" }]);
+  assert.equal(Object.hasOwn(inventory.tabs[0], "id"), false);
+  await onNativeMessage({ type: "targets", session: "opaque-session", targets: [{ id: "broker-issued", tabId: 4, origin, title: "page" }] }, fake.api);
+  assert.deepEqual((await onUiMessage({ type: "get-state" }, fake.api)).targets.map(t => t.id), ["broker-issued"]);
+  fake.disconnectListeners[0]();
 });
 
 test("no connection/grant by default; explicit popup click requests authorization", async () => {
@@ -100,7 +121,7 @@ test("revoked grants and live-origin navigation deny actions at execution time",
   await onUiMessage({ type: "grant", targetId: "opaque-target", origin }, fake2.api);
   await onNativeMessage({ type: "authorized", session: "opaque-session", targetId: "opaque-target", origin }, fake2.api);
   await onNativeMessage({ type: "execute", request }, fake2.api);
-  assert.equal(fake2.posted.at(-1).response.error.code, "STALE_SESSION");
+  assert.equal(fake2.posted.at(-1).response.error.code, "UNAUTHORIZED");
   assert.equal(fake2.calls.length, 0);
   fake2.disconnectListeners[0]();
 });
