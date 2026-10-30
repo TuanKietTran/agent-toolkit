@@ -117,7 +117,7 @@ export function createBridgeClient(options = {}) {
       // Payload bound before connection or dispatch; host additionally validates canonical protocol.
       encode({ type: "request", request });
       if (!session) throw coded("STALE_SESSION", "Call connect() before request()");
-      const result = await exchange({ type: "request", request }, { signal, timeoutMs });
+      const result = await exchange({ type: "request", id: request.id, request }, { signal, timeoutMs });
       if (result.type !== "response" || !result.response || result.response.id !== request.id || result.response.session !== session) throw coded("INVALID_REQUEST", "Invalid broker action response");
       return result.response;
     },
