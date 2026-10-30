@@ -17,7 +17,8 @@ function exact(value, fields) {
 }
 class RelayPeer extends Duplex {
   constructor(id, send, onClose) {
-    super(); this.id = id; this.sendEnvelope = send; this.onPeerClose = onClose; this.peerClosed = false;
+    super(); this.id = id; this.sendEnvelope = send; this.onPeerClose = onClose;
+    this.sentClose = false; this.receivedClose = false;
   }
   _read() {}
   _write(chunk, _encoding, callback) {
@@ -29,28 +30,36 @@ class RelayPeer extends Duplex {
       callback();
     } catch (error) { callback(error); }
   }
+  sendClose() {
+    if (this.sentClose) return;
+    this.sentClose = true;
+    this.sendEnvelope({ v: 1, type: "close", peer: this.id });
+    this.finishClose();
+  }
+  finishClose() {
+    if (this.sentClose && this.receivedClose) this.onPeerClose(this.id);
+  }
   _final(callback) {
-    try { if (!this.peerClosed) this.sendEnvelope({ v: 1, type: "close", peer: this.id }); callback(); }
+    try { this.sendClose(); callback(); }
     catch (error) { callback(error); }
   }
   _destroy(error, callback) {
-    if (!this.peerClosed) {
-      this.peerClosed = true;
-      try { this.sendEnvelope({ v: 1, type: "close", peer: this.id }); } catch {}
-    }
-    this.onPeerClose(this.id);
+    try { this.sendClose(); }
+    catch (sendError) { error ||= sendError; }
+    this.finishClose();
     callback(error);
   }
   receive(bytes) {
-    if (this.destroyed || this.peerClosed) return;
+    if (this.destroyed || this.receivedClose) return;
     if (this.readableLength + bytes.length > OUTER_MAX * 2) fail("stdio relay peer input backlog exceeded");
     this.push(bytes);
   }
   peerEnd() {
-    if (this.peerClosed) return;
-    this.peerClosed = true;
+    if (this.receivedClose) return;
+    this.receivedClose = true;
     this.push(null);
-    this.onPeerClose(this.id);
+    try { this.sendClose(); }
+    finally { this.finishClose(); }
   }
 }
 
@@ -86,7 +95,7 @@ export async function runBrokerStdio({ input = process.stdin, output = process.s
         } else if (message.type === "data") {
           exact(message, ["v", "type", "peer", "bytes"]);
           const peer = peers.get(message.peer);
-          if (!peer || typeof message.bytes !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(message.bytes)) fail("invalid stdio peer data");
+          if (!peer || peer.sentClose || peer.receivedClose || typeof message.bytes !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(message.bytes)) fail("invalid stdio peer data");
           const raw = Buffer.from(message.bytes, "base64");
           if (!raw.length || raw.length > RAW_CHUNK_MAX || raw.toString("base64") !== message.bytes) fail("invalid or oversized stdio peer bytes");
           peer.receive(raw);

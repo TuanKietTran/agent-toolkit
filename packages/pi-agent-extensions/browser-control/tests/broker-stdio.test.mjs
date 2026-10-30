@@ -61,6 +61,24 @@ test("broker stdio multiplexes framed peer bytes and propagates independent peer
   assert.equal(brokerClosed, true);
 });
 
+test("Node-first close retains the peer tombstone until remote close and emits close once", async () => {
+  const input = new PassThrough(), output = new PassThrough();
+  let peer;
+  const messages = [];
+  let buffer = Buffer.alloc(0);
+  output.on("data", (chunk) => { const parsed = decodeFrames(Buffer.concat([buffer, chunk])); messages.push(...parsed.messages); buffer = parsed.rest; });
+  const done = runBrokerStdio({ input, output, onPeer: async (server) => { server.on("connection", (value) => { peer = value; }); return { close() {} }; } });
+  input.write(frame({ v: 1, type: "open", peer: "node-first" }));
+  await new Promise((resolve) => setImmediate(resolve));
+  peer.destroy();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(messages.filter((message) => message.type === "close").length, 1);
+  input.write(frame({ v: 1, type: "close", peer: "node-first" }));
+  input.end();
+  await done;
+  assert.equal(messages.filter((message) => message.type === "close").length, 1, "remote acknowledgement must not trigger a second close");
+});
+
 test("broker stdio rejects duplicate peers, malformed base64, and truncated EOF", async () => {
   for (const frames of [
     [ { v: 1, type: "open", peer: "x" }, { v: 1, type: "open", peer: "x" } ],
