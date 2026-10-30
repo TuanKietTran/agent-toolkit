@@ -1,5 +1,5 @@
-// .NET Framework 4.x / C# 5. This file builds bridge-host.exe. It is only a
-// secure named-pipe front end; the single Node child owns all broker state.
+// .NET Framework 4.x / C# 5. Manifest mode validates origin and relays raw
+// Native Messaging stdio to Node --native. --broker is the secure pipe front end.
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -257,29 +257,25 @@ public static class BridgeLauncher {
         }
         result.Append('\\', slashes * 2).Append('"'); return result.ToString();
     }
-    static int StartNative(HostConfig config) {
-        if (Environment.GetCommandLineArgs().Length != 2 || !String.Equals(Environment.GetCommandLineArgs()[1], config.extensionOrigin, StringComparison.Ordinal))
-            throw new UnauthorizedAccessException("Chrome origin argument does not match the configured extension ID");
-        using (NamedPipeClientStream pipe = new NamedPipeClientStream(".", PipeShortName(config.pipeName), PipeDirection.InOut, PipeOptions.Asynchronous)) {
-            pipe.Connect(5000);
-            if (!IsTrustedPeer(pipe.SafePipeHandle, false)) throw new UnauthorizedAccessException("Named pipe server process SID rejected");
-            return RelayChrome(pipe);
+    static async Task RelayStream(Stream input, Stream output) {
+        byte[] buffer = new byte[ChunkBytes]; int n;
+        while ((n = await input.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) != 0) {
+            await output.WriteAsync(buffer, 0, n).ConfigureAwait(false);
+            await output.FlushAsync().ConfigureAwait(false);
         }
     }
-    static string PipeShortName(string value) { return value.Substring(@"\\.\pipe\".Length); }
-    static int RelayChrome(NamedPipeClientStream pipe) {
+    static int StartNative(HostConfig config, string path) {
+        if (Environment.GetCommandLineArgs().Length != 2 || !String.Equals(Environment.GetCommandLineArgs()[1], config.extensionOrigin, StringComparison.Ordinal))
+            throw new UnauthorizedAccessException("Chrome origin argument does not match the configured extension ID");
+        Process child = StartNode(config, "--native", path);
         Stream input = Console.OpenStandardInput(), output = Console.OpenStandardOutput();
-        Task toPipe = Task.Factory.StartNew(async () => {
-            try { await input.CopyToAsync(pipe, ChunkBytes).ConfigureAwait(false); }
-            catch (IOException) { if (pipe.IsConnected) throw; }
-            finally { pipe.Dispose(); }
+        Task toNode = Task.Factory.StartNew(async () => {
+            try { await RelayStream(input, child.StandardInput.BaseStream).ConfigureAwait(false); }
+            finally { child.StandardInput.Close(); }
         }).Unwrap();
-        Task toChrome = Task.Factory.StartNew(async () => {
-            try { await pipe.CopyToAsync(output, ChunkBytes).ConfigureAwait(false); }
-            catch (ObjectDisposedException) { }
-            catch (IOException) { if (pipe.IsConnected) throw; }
-        }).Unwrap();
-        Task.WaitAll(toPipe, toChrome); return 0;
+        Task toChrome = Task.Factory.StartNew(() => RelayStream(child.StandardOutput.BaseStream, output)).Unwrap();
+        try { Task.WaitAll(toNode, toChrome); child.WaitForExit(); return child.ExitCode; }
+        finally { if (!child.HasExited) child.Kill(); child.Dispose(); }
     }
     public static int Main(string[] args) {
         try {
@@ -289,7 +285,7 @@ public static class BridgeLauncher {
             }
             configPath = ConfigPathFromExe();
             HostConfig config = LoadConfig(configPath);
-            return StartNative(config);
+            return StartNative(config, configPath);
         } catch (Exception error) { Console.Error.WriteLine("browser bridge launcher: " + error); return 1; }
     }
 }

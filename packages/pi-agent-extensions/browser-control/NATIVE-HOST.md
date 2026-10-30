@@ -19,7 +19,7 @@ The broker is explicitly operator-started; the installer does not start it. On W
 & "$env:LOCALAPPDATA\PiBrowserBridge\bridge-host.exe" --broker --config "$env:LOCALAPPDATA\PiBrowserBridge\host-config.json"
 ```
 
-The launcher starts one Node `bridge-host.mjs --broker-stdio --config <same-config>` child. That child owns all bridge sessions, grants, target IDs, and routing. The Windows executable uses a path-only native-host manifest, a protected per-user config, an owner/SYSTEM/Administrators DACL, remote-client rejection, and first-instance pipe creation. Chrome/Brave's extension-origin argv is checked; Chrome Native Messaging frame bytes are relayed without modification. Unix/macOS retain the Node owner-only Unix socket transport.
+The launcher uses two distinct modes. For Chrome/Brave's path-only manifest invocation, it validates the exact extension-origin argv, starts Node `bridge-host.mjs --native --config <config>`, and relays Chrome's raw Native Messaging stdin/stdout to that child; Node retains the Native Messaging translator and validators. It does not connect Chrome frames directly to the broker pipe. The explicitly operator-started `--broker` mode creates the owner/SYSTEM/Administrators DACL pipe, rejects remote clients, requires first-instance creation, and starts one Node `bridge-host.mjs --broker-stdio --config <same-config>` child. Node owns all sessions, grants, target IDs, and routing. Unix/macOS retain the Node owner-only Unix socket transport.
 
 ## Safe installer modes and Brave registration
 

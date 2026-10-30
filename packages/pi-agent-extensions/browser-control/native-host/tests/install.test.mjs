@@ -23,9 +23,9 @@ async function waitPipe(name, child, timeout = 5000) {
   while (Date.now() < end) {
     if (child.exitCode !== null) throw new Error(`broker exited: ${child.exitCode}`);
     const connected = await new Promise(resolveConnect => {
-      const pipe = net.createConnection(name); pipe.once("connect", () => { pipe.destroy(); resolveConnect(true); }); pipe.once("error", () => resolveConnect(false));
+      const pipe = net.createConnection(name); pipe.once("connect", () => resolveConnect(pipe)); pipe.once("error", () => resolveConnect(null));
     });
-    if (connected) return;
+    if (connected) return connected;
     await new Promise(r => setTimeout(r, 20));
   }
   throw new Error("Timed out waiting for secured named pipe");
@@ -68,42 +68,56 @@ test("fixture installer writes path-only manifest and owner config; uninstall re
   } finally { await rm(fixture, { recursive: true, force: true }); }
 });
 
-test("production bridge-host.exe starts secured broker and relays Chrome frames through one Node stdio child", { skip: process.platform !== "win32" }, async t => {
-  const fixture = await mkdtemp(join(tmpdir(), "pi bridge relay "));
-  const tree = join(fixture, "browser-control", "native-host");
-  await mkdir(tree, { recursive: true });
-  const nodeHost = join(tree, "bridge-host.mjs");
-  await writeFile(nodeHost, muxEchoHost());
+test("manifest.path runs the real Node native host and returns ready plus broker-assigned target catalog", { skip: process.platform !== "win32" }, async t => {
+  const nativeHost = process.env.PI_BROWSER_BRIDGE_HOST_SCRIPT ?? resolve(dirname(installer), "bridge-host.mjs");
+  try { await readFile(nativeHost); } catch { t.skip(`transport-owned real bridge-host.mjs not present: ${nativeHost}`); return; }
+  const { encodeNativeFrame, decodeNativeFrame } = await import("../../helper-extension/native-frame.mjs");
+  const fixture = await mkdtemp(join(tmpdir(), "pi bridge native "));
   const relayPipe = `\\\\.\\pipe\\pi-browser-bridge-${randomUUID().replace(/-/g, "").slice(0, 32)}`;
-  const installed = invoke(["--install", "--fixture", fixture, "--extension-id", extensionId, "--pipe-name", relayPipe, "--node", process.execPath, "--host-script", nodeHost, "--csc", csc]);
+  const installed = invoke(["--install", "--fixture", fixture, "--extension-id", extensionId, "--pipe-name", relayPipe, "--node", process.execPath, "--host-script", nativeHost, "--csc", csc]);
   const manifest = JSON.parse(await readFile(installed.manifestPath, "utf8"));
   const config = join(fixture, "PiBrowserBridge", "host-config.json");
   const broker = spawn(manifest.path, ["--broker", "--config", config], { stdio: ["ignore", "ignore", "pipe"] });
-  let nativeProcess;
-  let diagnostic = "";
-  broker.stderr.on("data", d => { diagnostic += d; });
+  let nativeProcess, readinessProbe, diagnostics = "";
+  broker.stderr.on("data", d => { diagnostics += d; });
   t.after(async () => {
     if (nativeProcess && nativeProcess.exitCode === null) { nativeProcess.kill(); await new Promise(r => nativeProcess.once("exit", r)); }
+    if (readinessProbe && !readinessProbe.destroyed) { readinessProbe.destroy(); await new Promise(resolveClose => readinessProbe.once("close", resolveClose)); }
     if (broker.exitCode === null) { broker.kill(); await new Promise(r => broker.once("exit", r)); }
     await rm(fixture, { recursive: true, force: true });
   });
-  await waitPipe(relayPipe, broker);
-  const frame = encodeFrame({ type: "hello", version: 1, payload: "binary ✓" });
+  readinessProbe = await waitPipe(relayPipe, broker);
+  assert.equal(broker.exitCode, null, `broker failed before native launch: ${diagnostics}`);
   const native = nativeProcess = spawn(manifest.path, [`chrome-extension://${extensionId}/`], { stdio: ["pipe", "pipe", "pipe"] });
-  const output = [];
-  let nativeDiagnostic = "";
-  native.stdout.on("data", chunk => output.push(chunk));
-  const nativeDone = new Promise((resolveDone, rejectDone) => {
-    native.stderr.on("data", chunk => { nativeDiagnostic += chunk; });
-    native.once("error", rejectDone);
-    native.once("exit", code => code === 0 ? resolveDone() : rejectDone(new Error(`${stderr} ${diagnostic}`)));
+  let buffered = Buffer.alloc(0), messages = [], wake;
+  native.stdout.on("data", chunk => {
+    buffered = Buffer.concat([buffered, chunk]);
+    while (buffered.length >= 4 && buffered.length >= buffered.readUInt32LE(0) + 4) {
+      const size = buffered.readUInt32LE(0), frame = buffered.subarray(0, size + 4); buffered = buffered.subarray(size + 4);
+      messages.push(decodeNativeFrame(new Uint8Array(frame))); wake?.(); wake = undefined;
+    }
   });
-  native.stdin.write(frame);
-  const end = Date.now() + 5000;
-  while (Buffer.concat(output).length < frame.length && Date.now() < end && native.exitCode === null) await new Promise(r => setTimeout(r, 10));
-  assert.deepEqual(Buffer.concat(output), frame, `manifest.path must relay frames before stdin closes; nativeExit=${native.exitCode}, nativeStderr=${nativeDiagnostic}, brokerExit=${broker.exitCode}, brokerStderr=${diagnostic}`);
+  let nativeDiagnostics = ""; native.stderr.on("data", chunk => { nativeDiagnostics += chunk; });
+  const receive = async type => {
+    const end = Date.now() + 8000;
+    while (Date.now() < end) {
+      const index = messages.findIndex(message => message.type === type);
+      if (index >= 0) return messages.splice(index, 1)[0];
+      await Promise.race([new Promise(resolveWait => { wake = resolveWait; }), new Promise(resolveWait => setTimeout(resolveWait, 50))]);
+      if (native.exitCode !== null) break;
+    }
+    throw new Error(`Timed out waiting for ${type}; messages=${JSON.stringify(messages)} native=${nativeDiagnostics} broker=${diagnostics}`);
+  };
+  native.stdin.write(encodeNativeFrame({ type: "hello", version: 1 }));
+  const ready = await receive("ready");
+  assert.equal(ready.version, 1);
+  await receive("targetsRequest");
+  native.stdin.write(encodeNativeFrame({ type: "targetInventory", session: ready.session, tabs: [{ tabId: 17, origin: "https://example.test", title: "fixture tab" }] }));
+  const catalog = await receive("targets");
+  assert.equal(catalog.targets.length, 1);
+  assert.deepEqual({ tabId: catalog.targets[0].tabId, origin: catalog.targets[0].origin, title: catalog.targets[0].title }, { tabId: 17, origin: "https://example.test", title: "fixture tab" });
+  assert.notEqual(catalog.targets[0].id, "17", "broker assigns opaque target IDs");
   native.stdin.end();
-  await nativeDone;
 });
 
 test("broker fails closed if its pipe name was pre-created", { skip: process.platform !== "win32" }, async () => {
