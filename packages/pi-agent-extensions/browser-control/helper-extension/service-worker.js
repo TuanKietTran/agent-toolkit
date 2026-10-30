@@ -120,7 +120,7 @@ export async function onNativeMessage(raw, chromeApi = chrome) {
     if (message.session !== session) return;
     const item = pending.get(message.id);
     const dispatched = !!item?.dispatched;
-    if (item && !dispatched) item.cancelled = true;
+    if (item) item.cancelled = true;
     send({ type: "cancelled", session, id: message.id, dispatched });
     return;
   }
