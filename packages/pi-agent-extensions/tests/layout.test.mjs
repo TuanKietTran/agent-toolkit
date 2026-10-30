@@ -46,14 +46,18 @@ test("runtime resources survive minification with executable modes", async () =>
 });
 
 test("helper extension protocol imports resolve in source and built layouts", async () => {
-  for (const base of [root, join(root, "dist")]) {
-    const helper = join(base, "browser-control/helper-extension");
-    const worker = await readFile(join(helper, "service-worker.js"), "utf8");
-    assert.match(worker, /from [\"']\.\/bridge-protocol\.mjs[\"']/);
-    const protocol = await import(pathToFileURL(join(helper, "bridge-protocol.mjs")).href);
-    assert.equal(protocol.PROTOCOL_VERSION, 1);
-    assert.deepEqual(await readFile(join(base, "browser-control/bridge-protocol.mjs")), await readFile(join(helper, "bridge-protocol.mjs")));
-  }
+  const source = join(root, "browser-control");
+  const built = join(root, "dist/browser-control");
+  const sourceWorker = await readFile(join(source, "helper-extension/service-worker.js"), "utf8");
+  const builtWorker = await readFile(join(built, "helper-extension/service-worker.js"), "utf8");
+  assert.match(sourceWorker, /from [\"']\.\.\/bridge-protocol\.mjs[\"']/);
+  assert.match(builtWorker, /from [\"']\.\/bridge-protocol\.mjs[\"']/);
+  const sourceProtocol = await import(pathToFileURL(join(source, "bridge-protocol.mjs")).href);
+  const builtProtocol = await import(pathToFileURL(join(built, "bridge-protocol.mjs")).href);
+  const helperProtocol = await import(pathToFileURL(join(built, "helper-extension/bridge-protocol.mjs")).href);
+  assert.equal(sourceProtocol.PROTOCOL_VERSION, 1);
+  assert.equal(builtProtocol.PROTOCOL_VERSION, sourceProtocol.PROTOCOL_VERSION);
+  assert.deepEqual(await readFile(join(built, "bridge-protocol.mjs")), await readFile(join(built, "helper-extension/bridge-protocol.mjs")));
 });
 
 test("manifest extensions register against an inert fake Pi API", async () => {

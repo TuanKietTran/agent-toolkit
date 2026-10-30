@@ -68,6 +68,9 @@ for (const asset of ["service-worker.js", "popup.js", "popup.html", "manifest.js
 }
 await cp(bridgeProtocol, join(out, "browser-control", "bridge-protocol.mjs"));
 await cp(bridgeProtocol, join(helperOut, "bridge-protocol.mjs"));
+const workerOut = join(helperOut, "service-worker.js");
+const worker = await readFile(workerOut, "utf8");
+await writeFile(workerOut, worker.replace(/from ([\"'])\.\.\/bridge-protocol\.mjs\1/g, "from $1./bridge-protocol.mjs$1"));
 
 // Manifest for the minified package: every declared entry must have a built counterpart.
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));
