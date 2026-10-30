@@ -5,6 +5,7 @@ import { MAX_MESSAGE_BYTES } from "../bridge-protocol.mjs";
 const OUTER_MAX = MAX_MESSAGE_BYTES;
 // Match the C# relay's fixed raw-pipe chunk bound; base64 framing stays small.
 const RAW_CHUNK_MAX = 48 * 1024;
+const trace = (line) => { if (process.env.PI_BROWSER_BRIDGE_TRACE === "1") process.stderr.write(`[PI-BRIDGE-TRACE] ${line}\\n`); };
 const fail = (message) => { throw new Error(message); };
 function envelope(value) {
   const body = Buffer.from(JSON.stringify(value), "utf8");
@@ -70,9 +71,28 @@ class RelayPeer extends Duplex {
  * socket-shaped connection API. It contains no session/grant/routing logic. */
 export async function runBrokerStdio({ input = process.stdin, output = process.stdout, onPeer } = {}) {
   const connections = new EventEmitter();
-  const peers = new Map();
+  const peers = new Map(), labels = new Map(), wireBuffersIn = new Map(), wireBuffersOut = new Map();
+  let nextPeerLabel = 1;
+  const wireTrace = (id, direction, raw) => {
+    const buffers = direction === "in" ? wireBuffersIn : wireBuffersOut;
+    let buffer = Buffer.concat([buffers.get(id) || Buffer.alloc(0), raw]);
+    while (buffer.length >= 4) {
+      const size = buffer.readUInt32LE(0);
+      if (!size || size > OUTER_MAX || buffer.length < size + 4) break;
+      let type = "invalid";
+      try { const value = JSON.parse(buffer.subarray(4, size + 4).toString("utf8")); type = typeof value.type === "string" && /^[A-Za-z][A-Za-z0-9]{0,39}$/.test(value.type) ? value.type : "invalid"; } catch {}
+      trace(`peer=${labels.get(id) || "unknown"} wire-${direction} type=${type}`);
+      buffer = buffer.subarray(size + 4);
+    }
+    buffers.set(id, buffer);
+  };
   const send = (message) => {
     if (output.writableLength > OUTER_MAX * 4) fail("stdio relay output backlog exceeded");
+    if (message.type === "data") {
+      const raw = Buffer.from(message.bytes, "base64");
+      trace(`mux-out data ${labels.get(message.peer) || "unknown"} length=${raw.length}`);
+      wireTrace(message.peer, "out", raw);
+    } else if (message.type === "close") trace(`mux-out close ${labels.get(message.peer) || "unknown"}`);
     output.write(envelope(message));
   }
   const remove = (id, peer) => { if (peers.get(id) === peer) peers.delete(id); };
@@ -93,6 +113,9 @@ export async function runBrokerStdio({ input = process.stdin, output = process.s
         if (message.type === "open") {
           exact(message, ["v", "type", "peer"]);
           if (typeof message.peer !== "string" || !message.peer || message.peer.length > 128 || peers.has(message.peer) || peers.size >= 64) fail("invalid, duplicate, or excessive stdio peer");
+          const label = `peer#${nextPeerLabel++}`;
+          labels.set(message.peer, label);
+          trace(`mux-in open ${label}`);
           const peer = new RelayPeer(message.peer, send, remove);
           peers.set(message.peer, peer); connections.emit("connection", peer);
         } else if (message.type === "data") {
@@ -101,18 +124,23 @@ export async function runBrokerStdio({ input = process.stdin, output = process.s
           if (!peer || peer.sentClose || peer.receivedClose || typeof message.bytes !== "string" || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(message.bytes)) fail("invalid stdio peer data");
           const raw = Buffer.from(message.bytes, "base64");
           if (!raw.length || raw.length > RAW_CHUNK_MAX || raw.toString("base64") !== message.bytes) fail("invalid or oversized stdio peer bytes");
+          trace(`mux-in data ${labels.get(message.peer) || "unknown"} length=${raw.length}`);
+          wireTrace(message.peer, "in", raw);
           peer.receive(raw);
         } else if (message.type === "close") {
           exact(message, ["v", "type", "peer"]);
           const peer = peers.get(message.peer);
           if (!peer) fail("close for unknown stdio peer");
+          trace(`mux-in close ${labels.get(message.peer) || "unknown"}`);
           peer.peerEnd();
         } else fail("unknown stdio relay message type");
       }
     }
     if (buffer.length) fail("truncated stdio relay frame at EOF");
+    trace("broker-stdio input EOF");
   } finally {
     for (const peer of peers.values()) peer.peerEnd();
     await broker?.close?.();
+    trace("broker state engine stopped");
   }
 }
