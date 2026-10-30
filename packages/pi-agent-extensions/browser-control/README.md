@@ -2,6 +2,8 @@
 
 **Windows:** [Existing-session Brave control (Zen experimental)](WINDOWS.md). The same `index.ts` registers `win_browser_*` tools on Windows without restarting the browser, enabling a debug port, or copying its profile. See the Windows guide for installation, input safety, limits, and live smoke-test results.
 
+The optional stdio MCP server reuses the browser bridge client. Operator-opt-in Windows foreground tools (`windows_foreground_*`) are disabled and not advertised by default; on Windows enable them only in the MCP server's environment with `PI_BROWSER_MCP_ENABLE_WINDOWS_FOREGROUND=1`. After opt-in, the MCP session still starts with its foreground surface off and requires `windows_foreground_surface(action="on")`, then a fresh `windows_foreground_observe`; actions refuse if that same browser window is no longer foreground. No fallback to the extension/background backend occurs. Run with `node ./browser-control/mcp-server.mjs` or the installed `pi-browser-mcp` command.
+
 **macOS:** The existing `mac_browser_*` backend and behavior are unchanged; documented below.
 
 ## macOS

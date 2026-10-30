@@ -84,7 +84,9 @@ for (const entry of pkg.pi.extensions) {
 }
 await writeFile(join(out, "package.json"), `${JSON.stringify({
   name: `${pkg.name}-min`, version: pkg.version, private: true, type: "module", license: pkg.license,
-  dependencies: pkg.dependencies, pi: { extensions },
+  dependencies: pkg.dependencies,
+  ...(pkg.bin ? { bin: pkg.bin } : {}),
+  pi: { extensions },
 }, null, 2)}\n`);
 
 const kb = (n) => (n / 1024).toFixed(1);

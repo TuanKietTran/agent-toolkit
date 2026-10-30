@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createInterface } from "node:readline";
+import { WindowsMcpSession, windowsMcpEnabled, windowsMcpTools } from "./windows-mcp.mjs";
 
 const tools = [
   { name: "browser_targets", description: "List currently available browser targets (authorization is still required).", inputSchema: { type: "object", properties: {}, additionalProperties: false } },
@@ -14,11 +15,13 @@ const tools = [
 const actions = Object.fromEntries(tools.slice(1).map(t => [t.name, t.name.slice("browser_".length)]));
 const err = (id, code, message) => ({ jsonrpc: "2.0", id, error: { code, message } });
 
-export async function serve({ input = process.stdin, output = process.stdout, client } = {}) {
+export async function serve({ input = process.stdin, output = process.stdout, client, windowsAdapter } = {}) {
   if (!client) {
     const { createBridgeClient } = await import("./bridge-client.mjs");
     client = createBridgeClient({ socketPath: process.env.PI_BROWSER_BRIDGE_SOCKET });
   }
+  if (!windowsAdapter && windowsMcpEnabled()) windowsAdapter = new WindowsMcpSession();
+  const advertisedWindowsTools = windowsAdapter ? windowsMcpTools : [];
   let initialized = false, closed = false;
   const active = new Map();
   const send = value => output.write(`${JSON.stringify(value)}\n`);
@@ -38,7 +41,7 @@ export async function serve({ input = process.stdin, output = process.stdout, cl
       }
       if (!initialized) throw Object.assign(new Error("Server not initialized"), { rpc: -32002 });
       if (m.method === "ping") return hasId && send({ jsonrpc: "2.0", id: m.id, result: {} });
-      if (m.method === "tools/list") return send({ jsonrpc: "2.0", id: m.id, result: { tools } });
+      if (m.method === "tools/list") return send({ jsonrpc: "2.0", id: m.id, result: { tools: [...tools, ...advertisedWindowsTools] } });
       if (m.method !== "tools/call") throw Object.assign(new Error("Method not found"), { rpc: -32601 });
       const { name, arguments: args = {} } = m.params ?? {};
       if (name === "browser_targets") {
@@ -46,6 +49,12 @@ export async function serve({ input = process.stdin, output = process.stdout, cl
         return send({ jsonrpc: "2.0", id: m.id, result: { content: [{ type: "text", text: JSON.stringify(targets) }] } });
       }
       const action = actions[name];
+      if (!action && advertisedWindowsTools.some(tool => tool.name === name)) {
+        const controller = new AbortController(); if (hasId) active.set(m.id, controller);
+        try { send({ jsonrpc: "2.0", id: m.id, result: await windowsAdapter.call(name, args, controller.signal) }); }
+        finally { if (hasId) active.delete(m.id); }
+        return;
+      }
       if (!action) throw Object.assign(new Error("Unknown tool"), { rpc: -32602 });
       const { targetId, ...actionArgs } = args;
       if (typeof targetId !== "string" || !targetId) throw Object.assign(new Error("targetId is required"), { rpc: -32602 });

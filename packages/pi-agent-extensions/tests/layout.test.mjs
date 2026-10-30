@@ -18,7 +18,9 @@ const resources = [
   "browser-control/helper-extension/popup.js", "browser-control/helper-extension/popup.html",
   "browser-control/helper-extension/manifest.json", "browser-control/helper-extension/native-frame.mjs",
   "browser-control/helper-extension/bridge-protocol.mjs",
-  "browser-control/native/windows-controller.cs", "browser-control/WINDOWS.md",
+  "browser-control/native/windows-controller.cs", "browser-control/windows-backend.mjs", "browser-control/windows-backend.d.mts",
+  "browser-control/windows-shared.mjs", "browser-control/windows-shared.d.mts", "browser-control/windows-mcp.mjs",
+  "browser-control/mcp-server.mjs", "browser-control/WINDOWS.md",
   "browser-control/README.md", "claude-cli/README.md", "claude-cli/LICENSE",
 ];
 
@@ -34,6 +36,8 @@ test("source and built manifests resolve every declared extension", async () => 
     assert.equal(sourceManifest.pi.extensions.filter((item) => item === entry).length, 1, `${entry} must be declared once`);
   }
   assert.equal(sourceManifest.pi.extensions.length, builtManifest.pi.extensions.length);
+  assert.equal(sourceManifest.bin["pi-browser-mcp"], "./browser-control/mcp-server.mjs");
+  assert.deepEqual(builtManifest.bin, sourceManifest.bin);
   await assertManifestEntries(root, sourceManifest.pi.extensions);
   await assertManifestEntries(join(root, "dist"), builtManifest.pi.extensions);
 });
@@ -90,6 +94,13 @@ test("helper extension protocol imports resolve in source and built layouts", as
   assert.deepEqual(await readFile(join(built, "bridge-protocol.mjs")), await readFile(join(built, "helper-extension/bridge-protocol.mjs")));
 });
 
+test("source and built MCP adapter assets load on the Node runtime", async () => {
+  for (const base of [root, join(root, "dist")]) {
+    const adapter = await import(pathToFileURL(join(base, "browser-control/windows-mcp.mjs")));
+    assert.equal(typeof adapter.WindowsMcpSession, "function");
+    assert.ok(adapter.windowsMcpTools.some(tool => tool.name === "windows_foreground_act"));
+  }
+});
 test("manifest extensions register against an inert fake Pi API", async () => {
   for (const [base, entries] of [[root, sourceManifest.pi.extensions], [join(root, "dist"), builtManifest.pi.extensions]]) {
     for (const entry of entries) {

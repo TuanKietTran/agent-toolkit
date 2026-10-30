@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WindowsNative } from "./windows-native.ts";
 import { assertSameWindow, browserSetting, validatedUrl, windowPoint, type Point, type WindowInfo, type WindowsView } from "./windows-protocol.ts";
+import { prepareWindowsAction } from "./windows-shared.mjs";
 
 const actions = ["move", "click", "focus_click", "double_click", "right_click", "drag", "scroll", "type", "key", "wait", "reset_trail"] as const;
 const surfaceKey = "win-browser-surface-state";
@@ -104,21 +105,10 @@ export default function windowsBrowserControl(pi: ExtensionAPI) {
       if (params.action === "reset_trail") { pointer = undefined; return { content: text("Virtual cursor reset"), details: { action: String(params.action), view, pointer } }; }
       if (!enabled) throw new Error("Browser surface input is off; use win_browser_surface on");
       const current = await observed(signal);
-      const request: Record<string, unknown> = { ...params, ...expected(current), modifiers: params.modifiers?.join(",") };
-      if (params.action === "type") {
-        if (params.text === undefined) throw new Error("type requires text");
-        if (params.text.length * ((params.interval_ms ?? 8) + 2) > 20_000) throw new Error("Typing batch exceeds 20 seconds; shorten it or reduce interval_ms");
-      } else if (params.action === "key") {
-        if (!params.key) throw new Error("key requires key");
-      } else {
-        const at = params.action === "scroll" && params.x === undefined && params.y === undefined
-          ? { x: Math.floor(current.width / 2), y: Math.floor(current.height / 2) } : windowPoint(current, params.x, params.y);
-        Object.assign(request, at);
-        if (params.action === "drag") {
-          const end = windowPoint(current, params.target_x, params.target_y);
-          Object.assign(request, { target_x: end.x, target_y: end.y });
-        }
-      }
+      const request = prepareWindowsAction(current, current, params, { enabled });
+      // Reuse the exact same request validator/mapping as the standalone foreground MCP adapter.
+      // The Pi path still supports its historical background default and focus_click behavior.
+      Object.assign(request, expected(current));
       const result = await native.run<Record<string, unknown>>(request, signal);
       if (typeof request.x === "number" && typeof request.y === "number") pointer = params.action === "drag" ? { x: request.target_x as number, y: request.target_y as number } : { x: request.x, y: request.y };
       await sleep(150, signal);

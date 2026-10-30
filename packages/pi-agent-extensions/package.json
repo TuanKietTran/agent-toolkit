@@ -11,6 +11,7 @@
     "pi-package"
   ],
   "license": "MIT",
+  "bin": { "pi-browser-mcp": "./browser-control/mcp-server.mjs" },
   "scripts": {
     "check": "tsc --noEmit",
     "test": "npm run build:min && node --test core/dev/*.test.ts claude-cli/*.test.ts browser-control/tests/*.test.ts browser-control/tests/*.test.mjs browser-control/helper-extension/*.test.mjs browser-control/native-host/tests/*.test.mjs touchbar-usage/tests/*.test.mjs tests/*.test.mjs",
