@@ -63,7 +63,8 @@ for await (const file of walk(root)) {
 const helperSource = join(root, "browser-control", "helper-extension");
 const helperOut = join(out, "browser-control", "helper-extension");
 await mkdir(helperOut, { recursive: true });
-for (const asset of ["service-worker.js", "popup.js", "popup.html", "manifest.json", "native-frame.mjs"]) {
+const helperRuntimeAssets = ["service-worker.js", "popup.js", "popup.html", "manifest.json", "native-frame.mjs"];
+for (const asset of helperRuntimeAssets) {
   await cp(join(helperSource, asset), join(helperOut, asset));
 }
 await cp(bridgeProtocol, join(out, "browser-control", "bridge-protocol.mjs"));

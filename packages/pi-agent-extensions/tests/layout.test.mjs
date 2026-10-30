@@ -48,6 +48,11 @@ test("runtime resources survive minification with executable modes", async () =>
   }
 });
 
+test("helper runtime assets, including the canonical native frame codec, survive build unchanged", async () => {
+  for (const asset of ["popup.js", "popup.html", "manifest.json", "native-frame.mjs"])
+    assert.deepEqual(await readFile(join(root, "browser-control/helper-extension", asset)), await readFile(join(root, "dist/browser-control/helper-extension", asset)), `${asset} must be packaged byte-for-byte`);
+});
+
 test("helper manifest declares native messaging and resolves each packaged runtime asset", async () => {
   for (const base of [root, join(root, "dist")]) {
     const helper = join(base, "browser-control/helper-extension");
