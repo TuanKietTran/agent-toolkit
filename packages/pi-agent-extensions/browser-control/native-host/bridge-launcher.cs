@@ -194,7 +194,13 @@ public static class BridgeLauncher {
                 byte[] data = Convert.FromBase64String(encoded);
                 Trace("mux.out type=data peer=" + peer + " length=" + data.Length);
                 if (data.Length == 0 || data.Length > ChunkBytes || Convert.ToBase64String(data) != encoded) throw new InvalidDataException("Node returned malformed or oversized peer data");
-                if (!endpoint.Closed) await endpoint.Stream.WriteAsync(data, 0, data.Length, cancellation).ConfigureAwait(false);
+                lock (endpoint.WriteLock) {
+                    if (!endpoint.Closed) {
+                        try { endpoint.Stream.Write(data, 0, data.Length); }
+                        catch (IOException) { if (!endpoint.Closed) throw; Trace("mux.out data ignored for closing peer=" + peer); }
+                        catch (ObjectDisposedException) { if (!endpoint.Closed) throw; Trace("mux.out data ignored for closing peer=" + peer); }
+                    }
+                }
             } else if (type == "close") { Trace("mux.out type=close peer=" + peer + " length=0"); ClosePeer(peer, endpoint); }
             else throw new InvalidDataException("Unexpected Node mux response type");
         }
@@ -208,7 +214,6 @@ public static class BridgeLauncher {
     static void RemoveClosedPeer(string id, Peer peer) {
         Peer current;
         if (Peers.TryGetValue(id, out current) && Object.ReferenceEquals(current, peer)) Peers.TryRemove(id, out current);
-        try { peer.Stream.Dispose(); } catch { }
     }
     static void ClosePeer(string id, Peer peer) {
         bool acknowledge = false, complete;
@@ -217,7 +222,7 @@ public static class BridgeLauncher {
             if (!peer.LocalCloseSent) { peer.LocalCloseSent = true; acknowledge = true; }
             complete = peer.LocalCloseSent && peer.RemoteCloseReceived;
         }
-        try { peer.Stream.Dispose(); } catch { }
+        lock (peer.WriteLock) { try { peer.Stream.Dispose(); } catch { } }
         if (acknowledge) { Trace("mux.in close acknowledgement peer=" + id); WriteMux(broker, new { v = 1, type = "close", peer = id }); }
         if (complete) RemoveClosedPeer(id, peer);
     }
@@ -225,7 +230,8 @@ public static class BridgeLauncher {
         string id = Guid.NewGuid().ToString("N");
         Peer peer = new Peer { Stream = pipe };
         lock (PeerSetLock) {
-            if (Peers.Count >= MaxTrackedPeers || !Peers.TryAdd(id, peer)) throw new InvalidOperationException("Duplicate or excessive peer ID");
+            if (Peers.Count >= MaxTrackedPeers) { pipe.Dispose(); Trace("pipe rejected: closing peer limit reached"); return; }
+            if (!Peers.TryAdd(id, peer)) { pipe.Dispose(); throw new InvalidOperationException("Duplicate peer ID"); }
         }
         Trace("mux.in type=open peer=" + id + " length=0");
         WriteMux(broker, new { v = 1, type = "open", peer = id });
@@ -249,7 +255,7 @@ public static class BridgeLauncher {
             }
             if (sendClose) { Trace("mux.in type=close peer=" + id + " length=0"); WriteMux(broker, new { v = 1, type = "close", peer = id }); }
             else Trace("mux.in close already sent peer=" + id);
-            try { peer.Stream.Dispose(); } catch { }
+            lock (peer.WriteLock) { try { peer.Stream.Dispose(); } catch { } }
             if (complete) RemoveClosedPeer(id, peer);
         }
     }
