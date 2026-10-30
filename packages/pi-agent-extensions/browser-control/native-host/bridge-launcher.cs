@@ -197,8 +197,8 @@ public static class BridgeLauncher {
                 lock (endpoint.WriteLock) {
                     if (!endpoint.Closed) {
                         try { endpoint.Stream.Write(data, 0, data.Length); }
-                        catch (IOException) { if (!endpoint.Closed) throw; Trace("mux.out data ignored for closing peer=" + peer); }
-                        catch (ObjectDisposedException) { if (!endpoint.Closed) throw; Trace("mux.out data ignored for closing peer=" + peer); }
+                        catch (IOException) { MarkKnownPeerClosing(endpoint, peer); }
+                        catch (ObjectDisposedException) { MarkKnownPeerClosing(endpoint, peer); }
                     }
                 }
             } else if (type == "close") { Trace("mux.out type=close peer=" + peer + " length=0"); ClosePeer(peer, endpoint); }
@@ -214,6 +214,11 @@ public static class BridgeLauncher {
     static void RemoveClosedPeer(string id, Peer peer) {
         Peer current;
         if (Peers.TryGetValue(id, out current) && Object.ReferenceEquals(current, peer)) Peers.TryRemove(id, out current);
+    }
+    static void MarkKnownPeerClosing(Peer peer, string id) {
+        lock (peer.CloseLock) peer.Closed = true;
+        Trace("mux.out write failed for known peer; closing peer=" + id);
+        try { peer.Stream.Dispose(); } catch { }
     }
     static void ClosePeer(string id, Peer peer) {
         bool acknowledge = false, complete;
@@ -245,6 +250,8 @@ public static class BridgeLauncher {
                 WriteMux(broker, new { v = 1, type = "data", peer = id, bytes = Convert.ToBase64String(chunk) });
             }
         } catch (OperationCanceledException) { }
+        catch (IOException) { if (!peer.Closed) throw; }
+        catch (ObjectDisposedException) { if (!peer.Closed) throw; }
         finally {
             bool sendClose, complete;
             lock (peer.CloseLock) {
