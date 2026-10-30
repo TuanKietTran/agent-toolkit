@@ -47,6 +47,10 @@ Chrome is supported as an explicit packaging option; there is no silent Chrome-o
 
 The Chrome key is likewise printed only; package scripts do not write it. Brave remains the default/documented setup.
 
-## Tool scope and limitations
+## MCP tool scope and Windows foreground opt-in
 
-The helper dispatches **background page-targeted CDP input only** through the shared browser bridge. MCP exposes this helper/page-dispatch path only. It does not expose the existing Windows foreground input tools. Existing `win_browser_*` PostMessage/SendInput foreground/background capabilities remain Pi tools only; the MCP foreground-tools integration is a known gap, not an implicit fallback. Zen is not supported/live-verified for this CDP helper, and no live Chromium compatibility is claimed by the fixture tests.
+The browser helper/bridge exposes background, page-targeted CDP actions. On Windows, the stdio MCP server also offers the existing foreground controller through the shared Windows backend and action-preparation seam; it does not duplicate the native actuator. These tools are hidden by default. To advertise them, set `PI_BROWSER_MCP_ENABLE_WINDOWS_FOREGROUND=1` in the MCP server process environment.
+
+Even after opt-in, foreground input starts **off on every MCP process launch**. Call `windows_foreground_surface` with `action: "on"` to enable it for that MCP session; use `action: "off"` or `"status"` as needed. Before input, call `windows_foreground_observe` to select/capture an existing Brave/Zen browser window (read-only; it does not focus the window). Then call `windows_foreground_act` for supported click, drag, scroll, type, or key input. Actions require the last observed window to remain active/foreground; foreground actions can interrupt the user. The tool refuses when the observation is stale, the surface is off, or the target window is no longer foreground. It does not retry through the extension/CDP background path or fall back to another input mode. Keep the environment opt-in unset unless this user-visible foreground behavior is explicitly intended.
+
+Zen remains unsupported/live-unverified for the CDP helper. Fixture tests make no live Chromium compatibility claim.
