@@ -163,6 +163,13 @@ public static class BridgeLauncher {
     static void WriteMux(Process child, object value) {
         byte[] json = Encoding.UTF8.GetBytes(Json.Serialize(value));
         if (json.Length == 0 || json.Length > MaxMuxFrame) throw new InvalidDataException("Node relay frame exceeds 1 MiB");
+        if (TraceEnabled) {
+            Dictionary<string, object> fields = Json.Deserialize<Dictionary<string, object>>(new UTF8Encoding(false, true).GetString(json));
+            string type = fields.ContainsKey("type") ? fields["type"] as string : "?";
+            string peer = fields.ContainsKey("peer") ? fields["peer"] as string : "?";
+            int dataLength = fields.ContainsKey("bytes") && fields["bytes"] is string ? Convert.FromBase64String((string)fields["bytes"]).Length : 0;
+            Trace("mux.write type=" + type + " peer=" + peer + " frameLength=" + (json.Length + 4) + " dataLength=" + dataLength);
+        }
         byte[] header = BitConverter.GetBytes((uint)json.Length);
         lock (NodeWriteLock) { child.StandardInput.BaseStream.Write(header, 0, 4); child.StandardInput.BaseStream.Write(json, 0, json.Length); child.StandardInput.BaseStream.Flush(); }
     }
@@ -220,6 +227,7 @@ public static class BridgeLauncher {
         CancellationTokenSource stop = new CancellationTokenSource();
         Task nodeOutput = ReadNodeFrames(broker, stop.Token);
         nodeOutput.ContinueWith(task => {
+            Trace("broker.stdout EOF hasExited=" + broker.HasExited + (broker.HasExited ? " exitCode=" + broker.ExitCode : ""));
             if (!broker.HasExited) {
                 Console.Error.WriteLine("Node stdio relay ended unexpectedly");
                 try { broker.Kill(); } catch { }
@@ -240,7 +248,8 @@ public static class BridgeLauncher {
             throw new InvalidOperationException("Node broker exited");
         } finally {
             stop.Cancel(); try { if (next != null) next.Dispose(); } catch { }
-            try { broker.StandardInput.Close(); } catch { }
+            Trace("broker.stdin close requested");
+            try { broker.StandardInput.Close(); Trace("broker.stdin close completed"); } catch (Exception error) { Trace("broker.stdin close error=" + error.GetType().Name); }
             if (!broker.HasExited) broker.Kill();
             try { nodeOutput.Wait(1000); } catch { }
             broker.Dispose();
@@ -253,7 +262,18 @@ public static class BridgeLauncher {
         info.UseShellExecute = false; info.CreateNoWindow = true;
         info.RedirectStandardInput = true; info.RedirectStandardOutput = true; info.RedirectStandardError = true;
         Process child = Process.Start(info);
-        Task.Factory.StartNew(() => child.StandardError.BaseStream.CopyTo(Console.OpenStandardError()));
+        child.EnableRaisingEvents = true;
+        child.Exited += (sender, eventArgs) => Trace("node.exit mode=" + mode + " hasExited=" + child.HasExited + " exitCode=" + child.ExitCode);
+        Trace("node.started mode=" + mode + " pid=" + child.Id + " hasExited=" + child.HasExited);
+        if (TraceEnabled) Task.Factory.StartNew(() => {
+            Stream errorStream = child.StandardError.BaseStream, errorOutput = Console.OpenStandardError();
+            byte[] buffer = new byte[4096]; int count;
+            while ((count = errorStream.Read(buffer, 0, buffer.Length)) != 0) {
+                errorOutput.Write(buffer, 0, count); errorOutput.Flush();
+                Trace("node.stderr bytes=" + count);
+            }
+        });
+        else Task.Factory.StartNew(() => child.StandardError.BaseStream.CopyTo(Console.OpenStandardError()));
         return child;
     }
     static string QuoteArg(string value) {
