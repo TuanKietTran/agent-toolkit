@@ -49,7 +49,7 @@ test("stdio MCP child calls the real broker/native host through a protocol mock 
       else if (m.type === "execute") {
         protocol.validateNativeRequest(m);
         const req = m.request;
-        const timer = setTimeout(() => { inFlight.delete(req.id); nativeSend({ type: "executeResult", response: { version: 1, id: req.id, session: req.session, ok: true, result: { accepted: true } } }); }, req.action === "drag" ? 500 : 10);
+        const timer = setTimeout(() => { inFlight.delete(req.id); nativeSend({ type: "executeResult", response: { version: 1, id: req.id, session: req.session, ok: true, result: req.action === "observe" ? { accepted: true, imageBase64: "aGVsbG8=", mimeType: "image/jpeg" } : { accepted: true } } }); }, req.action === "drag" ? 500 : 10);
         inFlight.set(req.id, timer);
       }
       else if (m.type === "cancel") { protocol.validateNativeRequest(m); cancellationSeen = true; clearTimeout(inFlight.get(m.id)); inFlight.delete(m.id); nativeSend({ type: "cancelled", session: m.session, id: m.id, dispatched: true }); }
@@ -84,16 +84,18 @@ test("stdio MCP child calls the real broker/native host through a protocol mock 
     await eventually(() => granted);
     const result = await rpc("tools/call", { name: "browser_click", arguments: { targetId: "mock-target", x: 12, y: 15 } });
     assert.equal(result.result.content[0].text, JSON.stringify({ accepted: true }));
+    const observed = await rpc("tools/call", { name: "browser_observe", arguments: { targetId: "mock-target" } });
+    assert.deepEqual(observed.result.content[0], { type: "image", data: "aGVsbG8=", mimeType: "image/jpeg" });
     // Cancellation is exercised through the actual protocol route using a separate MCP call.
     // Send cancellation after dispatch; the fixture reports completion if it wins the race.
     const cancelId = ++id;
     mcpChild.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id: cancelId, method: "tools/call", params: { name: "browser_drag", arguments: { targetId: "mock-target", start: { x: 1, y: 1 }, end: { x: 4, y: 4 } } } })}\n`);
     await delay(20);
     mcpChild.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/cancelled", params: { requestId: cancelId } })}\n`);
-    await eventually(() => cancellationSeen);
-    // Client cancellation is reported as an MCP error; dispatched effects remain uncertain.
+    // The in-flight MCP call must return a cancellation error; effects after dispatch remain uncertain.
     await eventually(() => replies.some(x => x.id === cancelId));
     assert.ok(replies.find(x => x.id === cancelId).error);
+    // The bridge cancellation is best effort; the mock keeps a delayed response to exercise the race.
     mcpChild.stdin.end();
     await new Promise(r => mcpChild.once("exit", r));
     assert.equal(stdout.trim(), "", "no non-JSON trailing stdout");

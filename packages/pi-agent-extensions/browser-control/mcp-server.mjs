@@ -58,7 +58,8 @@ export async function serve({ input = process.stdin, output = process.stdout, cl
         const result = response.result ?? {};
         const content = [];
         if (typeof result.text === "string") content.push({ type: "text", text: result.text });
-        if (typeof result.image === "string") content.push({ type: "image", data: result.image, mimeType: result.mimeType ?? "image/png" });
+        const imageBase64 = typeof result.imageBase64 === "string" ? result.imageBase64 : result.image;
+        if (typeof imageBase64 === "string") content.push({ type: "image", data: imageBase64, mimeType: /^image\/(png|jpeg|webp)$/.test(result.mimeType ?? "") ? result.mimeType : "image/png" });
         if (!content.length) content.push({ type: "text", text: JSON.stringify(result) });
         send({ jsonrpc: "2.0", id: m.id, result: { content, isError: false } });
       } finally { if (hasId) active.delete(m.id); }

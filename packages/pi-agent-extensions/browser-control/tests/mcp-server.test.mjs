@@ -12,7 +12,7 @@ test("MCP initialize, tools, action, image, errors, and cancellation use bridge 
     async request(action, args, opts) {
       calls.push({ action, args, opts });
       if (args.text === "fail") return { ok: false, error: { code: "UNAUTHORIZED", message: "Denied" } };
-      if (args.text === "image") return { ok: true, result: { image: "aGVsbG8=", mimeType: "image/png" } };
+      if (args.text === "image") return { version: 1, id: "mock-request", session: "mock-session", ok: true, result: { accepted: true, imageBase64: "aGVsbG8=", mimeType: "image/jpeg" } };
       return { ok: true, result: { accepted: true } };
     }, async close() {},
   };
@@ -27,7 +27,7 @@ test("MCP initialize, tools, action, image, errors, and cancellation use bridge 
   const messages = text.trim().split("\n").map(JSON.parse);
   assert.equal(messages[0].result.serverInfo.name, "pi-browser-bridge");
   assert.ok(messages[1].result.tools.some(t => t.name === "browser_observe"));
-  assert.deepEqual(messages[2].result.content[0], { type: "image", data: "aGVsbG8=", mimeType: "image/png" });
+  assert.deepEqual(messages[2].result.content[0], { type: "image", data: "aGVsbG8=", mimeType: "image/jpeg" });
   assert.equal(messages[3].error.code, -32000);
   assert.equal(messages[4].error.code, -32602);
   assert.equal(calls[0].action, "type");
