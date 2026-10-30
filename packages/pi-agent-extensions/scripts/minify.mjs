@@ -7,6 +7,7 @@ import { transform } from "esbuild";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const out = join(root, "dist");
+const bridgeProtocol = join(root, "browser-control", "bridge-protocol.mjs");
 const keep = new Set(["core", "dist", "node_modules", "scripts", "tests"]);
 const skipFile = (path) => /(?:\.test\.(?:ts|mjs)|\/live-[^/]+\.ts)$/.test(path)
   || /(?:^|\/)(?:\.build|target|node_modules)(?:\/|$)/.test(path)
@@ -56,6 +57,17 @@ for await (const file of walk(root)) {
     await cp(file, dest, { recursive: false, preserveTimestamps: true });
   }
 }
+
+// The MV3 extension is loaded directly from its unpacked directory, so preserve its
+// exact runtime files and put the canonical protocol module beside the service worker.
+const helperSource = join(root, "browser-control", "helper-extension");
+const helperOut = join(out, "browser-control", "helper-extension");
+await mkdir(helperOut, { recursive: true });
+for (const asset of ["service-worker.js", "popup.js", "popup.html", "manifest.json", "native-frame.mjs"]) {
+  await cp(join(helperSource, asset), join(helperOut, asset));
+}
+await cp(bridgeProtocol, join(out, "browser-control", "bridge-protocol.mjs"));
+await cp(bridgeProtocol, join(helperOut, "bridge-protocol.mjs"));
 
 // Manifest for the minified package: every declared entry must have a built counterpart.
 const pkg = JSON.parse(await readFile(join(root, "package.json"), "utf8"));

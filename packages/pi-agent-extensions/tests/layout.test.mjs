@@ -11,6 +11,10 @@ const resources = [
   "touchbar-usage/src/usage.mjs", "touchbar-usage/src/runtime-files.mjs",
   "touchbar-usage/host/main.swift", "touchbar-usage/host/build.sh", "touchbar-usage/bin/pi-usagebar",
   "browser-control/native/chrome-control.js", "browser-control/native/macos-controller.swift",
+  "browser-control/bridge-protocol.mjs", "browser-control/helper-extension/service-worker.js",
+  "browser-control/helper-extension/popup.js", "browser-control/helper-extension/popup.html",
+  "browser-control/helper-extension/manifest.json", "browser-control/helper-extension/native-frame.mjs",
+  "browser-control/helper-extension/bridge-protocol.mjs",
   "browser-control/native/windows-controller.cs", "browser-control/WINDOWS.md",
   "browser-control/README.md", "claude-cli/README.md", "claude-cli/LICENSE",
 ];
@@ -38,6 +42,17 @@ test("runtime resources survive minification with executable modes", async () =>
   }
   for (const executable of ["touchbar-usage/bin/pi-usagebar", "touchbar-usage/host/build.sh"]) {
     assert.ok((await stat(join(root, "dist", executable))).mode & 0o111, `${executable} lost executable mode`);
+  }
+});
+
+test("helper extension protocol imports resolve in source and built layouts", async () => {
+  for (const base of [root, join(root, "dist")]) {
+    const helper = join(base, "browser-control/helper-extension");
+    const worker = await readFile(join(helper, "service-worker.js"), "utf8");
+    assert.match(worker, /from [\"']\.\/bridge-protocol\.mjs[\"']/);
+    const protocol = await import(pathToFileURL(join(helper, "bridge-protocol.mjs")).href);
+    assert.equal(protocol.PROTOCOL_VERSION, 1);
+    assert.deepEqual(await readFile(join(base, "browser-control/bridge-protocol.mjs")), await readFile(join(helper, "bridge-protocol.mjs")));
   }
 });
 
