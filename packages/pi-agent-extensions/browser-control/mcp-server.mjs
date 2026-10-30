@@ -67,14 +67,17 @@ export async function serve({ input = process.stdin, output = process.stdout, cl
     }
   }
   const rl = createInterface({ input, crlfDelay: Infinity });
+  const tasks = new Set();
   for await (const line of rl) {
     if (closed) break;
     if (Buffer.byteLength(line) > 1024 * 1024) { send(err(null, -32700, "Message too large")); continue; }
     let message;
     try { message = JSON.parse(line); } catch { send(err(null, -32700, "Parse error")); continue; }
-    await handle(message);
+    const task = handle(message).catch(e => { process.stderr.write(`browser MCP request failed: ${e?.message ?? e}\\n`); });
+    tasks.add(task); task.finally(() => tasks.delete(task));
   }
   closed = true; for (const c of active.values()) c.abort();
+  await Promise.allSettled(tasks);
   await client.close();
 }
 
