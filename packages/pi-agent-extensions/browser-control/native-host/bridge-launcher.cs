@@ -32,6 +32,8 @@ public static class BridgeLauncher {
     static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = MaxMuxFrame };
     static readonly object NodeWriteLock = new object();
     static readonly ConcurrentDictionary<string, Peer> Peers = new ConcurrentDictionary<string, Peer>();
+    static bool TraceEnabled { get { return Environment.GetEnvironmentVariable("PI_BROWSER_BRIDGE_TRACE") == "1"; } }
+    static void Trace(string message) { if (TraceEnabled) Console.Error.WriteLine("browser bridge trace: " + message); }
     static Process broker;
     static string configPath;
 
@@ -179,9 +181,10 @@ public static class BridgeLauncher {
             if (type == "data") {
                 string encoded = (string)msg["bytes"];
                 byte[] data = Convert.FromBase64String(encoded);
+                Trace("mux.out type=data peer=" + peer + " length=" + data.Length);
                 if (data.Length == 0 || data.Length > ChunkBytes || Convert.ToBase64String(data) != encoded) throw new InvalidDataException("Node returned malformed or oversized peer data");
                 if (!endpoint.Closed) await endpoint.Stream.WriteAsync(data, 0, data.Length, cancellation).ConfigureAwait(false);
-            } else if (type == "close") ClosePeer(peer, endpoint);
+            } else if (type == "close") { Trace("mux.out type=close peer=" + peer + " length=0"); ClosePeer(peer, endpoint); }
             else throw new InvalidDataException("Unexpected Node mux response type");
         }
     }
@@ -198,17 +201,19 @@ public static class BridgeLauncher {
         string id = Guid.NewGuid().ToString("N");
         Peer peer = new Peer { Stream = pipe };
         if (!Peers.TryAdd(id, peer)) throw new InvalidOperationException("Duplicate peer ID");
+        Trace("mux.in type=open peer=" + id + " length=0");
         WriteMux(broker, new { v = 1, type = "open", peer = id });
         byte[] buffer = new byte[ChunkBytes];
         try {
             while (!cancel.IsCancellationRequested) {
                 int n = await pipe.ReadAsync(buffer, 0, buffer.Length, cancel).ConfigureAwait(false);
                 if (n == 0) break;
+                Trace("pipe.in peer=" + id + " length=" + n);
                 byte[] chunk = new byte[n]; Buffer.BlockCopy(buffer, 0, chunk, 0, n);
                 WriteMux(broker, new { v = 1, type = "data", peer = id, bytes = Convert.ToBase64String(chunk) });
             }
         } catch (OperationCanceledException) { }
-        finally { WriteMux(broker, new { v = 1, type = "close", peer = id }); ClosePeer(id, peer); }
+        finally { Trace("mux.in type=close peer=" + id + " length=0"); WriteMux(broker, new { v = 1, type = "close", peer = id }); ClosePeer(id, peer); }
     }
     static int StartBroker(HostConfig config, string path) {
         broker = StartNode(config, "--broker-stdio", path);
@@ -229,6 +234,7 @@ public static class BridgeLauncher {
                 next = NewServer(config.pipeName, false);
                 waiting.WaitForConnection();
                 if (IsRemote(waiting.SafePipeHandle) || !IsTrustedPeer(waiting.SafePipeHandle, true)) { waiting.Dispose(); continue; }
+                Trace("pipe.accepted mode=broker config=" + path);
                 Task.Factory.StartNew(() => PipePeer(waiting, stop.Token), TaskCreationOptions.LongRunning).Unwrap();
             }
             throw new InvalidOperationException("Node broker exited");
@@ -241,7 +247,9 @@ public static class BridgeLauncher {
         }
     }
     static Process StartNode(HostConfig config, string mode, string configFile) {
-        ProcessStartInfo info = new ProcessStartInfo(config.nodeExecutable, QuoteArg(config.hostScript) + " " + mode + " --config " + QuoteArg(configFile));
+        string arguments = QuoteArg(config.hostScript) + " " + mode + " --config " + QuoteArg(configFile);
+        Trace("node.start mode=" + mode + " config=" + configFile + " argv=" + config.nodeExecutable + " " + arguments);
+        ProcessStartInfo info = new ProcessStartInfo(config.nodeExecutable, arguments);
         info.UseShellExecute = false; info.CreateNoWindow = true;
         info.RedirectStandardInput = true; info.RedirectStandardOutput = true; info.RedirectStandardError = true;
         Process child = Process.Start(info);
@@ -267,6 +275,7 @@ public static class BridgeLauncher {
     static int StartNative(HostConfig config, string path) {
         if (Environment.GetCommandLineArgs().Length != 2 || !String.Equals(Environment.GetCommandLineArgs()[1], config.extensionOrigin, StringComparison.Ordinal))
             throw new UnauthorizedAccessException("Chrome origin argument does not match the configured extension ID");
+        Trace("native.start mode=--native config=" + path);
         Process child = StartNode(config, "--native", path);
         Stream input = Console.OpenStandardInput(), output = Console.OpenStandardOutput();
         Task toNode = Task.Factory.StartNew(async () => {
