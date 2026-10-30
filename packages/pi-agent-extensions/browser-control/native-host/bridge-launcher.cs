@@ -56,7 +56,7 @@ public static class BridgeLauncher {
     public static int Main() {
         try {
             HostConfig config = ReadConfig();
-            ProcessStartInfo info = new ProcessStartInfo(config.nodeExecutable, Quote(config.hostScript) + " --native");
+            ProcessStartInfo info = new ProcessStartInfo(config.nodeExecutable, Quote(config.hostScript) + " --native --config " + Quote(ConfigPath()));
             info.UseShellExecute = false; info.CreateNoWindow = true;
             info.EnvironmentVariables["PI_BROWSER_BRIDGE_SOCKET"] = config.socketPath;
             info.RedirectStandardInput = true; info.RedirectStandardOutput = true; info.RedirectStandardError = true;

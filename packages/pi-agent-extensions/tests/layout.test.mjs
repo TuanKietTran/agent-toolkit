@@ -13,7 +13,7 @@ const resources = [
   "browser-control/native/chrome-control.js", "browser-control/native/macos-controller.swift",
   "browser-control/bridge-protocol.mjs", "browser-control/NATIVE-HOST.md",
   "browser-control/native-host/install.mjs", "browser-control/native-host/bridge-launcher.cs",
-  "browser-control/native-host/tests/install.test.mjs", "browser-control/native-host/bridge-host.mjs",
+  "browser-control/native-host/bridge-host.mjs",
   "browser-control/helper-extension/service-worker.js",
   "browser-control/helper-extension/popup.js", "browser-control/helper-extension/popup.html",
   "browser-control/helper-extension/manifest.json", "browser-control/helper-extension/native-frame.mjs",
@@ -48,6 +48,27 @@ test("runtime resources survive minification with executable modes", async () =>
   }
 });
 
+test("helper manifest declares native messaging and resolves each packaged runtime asset", async () => {
+  for (const base of [root, join(root, "dist")]) {
+    const helper = join(base, "browser-control/helper-extension");
+    const manifest = JSON.parse(await readFile(join(helper, "manifest.json"), "utf8"));
+    assert.ok(manifest.permissions.includes("nativeMessaging"));
+    for (const asset of [manifest.background.service_worker, manifest.action.default_popup, "popup.js", "native-frame.mjs", "bridge-protocol.mjs"])
+      await access(join(helper, asset));
+  }
+});
+
+test("helper native frame codec loads unchanged from source and built layouts", async () => {
+  const sourcePath = join(root, "browser-control/helper-extension/native-frame.mjs");
+  const builtPath = join(root, "dist/browser-control/helper-extension/native-frame.mjs");
+  assert.deepEqual(await readFile(sourcePath), await readFile(builtPath));
+  const [sourceCodec, builtCodec] = await Promise.all([import(pathToFileURL(sourcePath).href), import(pathToFileURL(builtPath).href)]);
+  const message = { type: "hello", version: 1, text: "frame ✓" };
+  const sourceFrame = sourceCodec.encodeNativeFrame(message);
+  assert.deepEqual(builtCodec.decodeNativeFrame(sourceFrame), message);
+  assert.deepEqual(builtCodec.encodeNativeFrame(message), sourceFrame);
+});
+
 test("helper extension protocol imports resolve in source and built layouts", async () => {
   const source = join(root, "browser-control");
   const built = join(root, "dist/browser-control");
@@ -60,6 +81,7 @@ test("helper extension protocol imports resolve in source and built layouts", as
   const helperProtocol = await import(pathToFileURL(join(built, "helper-extension/bridge-protocol.mjs")).href);
   assert.equal(sourceProtocol.PROTOCOL_VERSION, 1);
   assert.equal(builtProtocol.PROTOCOL_VERSION, sourceProtocol.PROTOCOL_VERSION);
+  assert.deepEqual(await readFile(join(source, "bridge-protocol.mjs")), await readFile(join(built, "bridge-protocol.mjs")));
   assert.deepEqual(await readFile(join(built, "bridge-protocol.mjs")), await readFile(join(built, "helper-extension/bridge-protocol.mjs")));
 });
 

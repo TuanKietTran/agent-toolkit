@@ -48,7 +48,8 @@ test("Windows launcher compiled by fixture installer relays framed bytes without
     const { mkdir, writeFile } = await import("node:fs/promises");
     await mkdir(tree, { recursive: true });
     const echoScript = join(tree, "bridge-host.mjs");
-    await writeFile(echoScript, "process.stdin.pipe(process.stdout);\n");
+    const expectedConfig = resolve(fixture, "PiBrowserBridge", "host-config.json");
+    await writeFile(echoScript, `const i=process.argv.indexOf("--config");if(i<0||process.argv[i+1]!==${JSON.stringify(expectedConfig)})process.exit(3);process.stdin.pipe(process.stdout);\n`);
     const csc = "C:/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe";
     const output = invoke(["--install", "--fixture", fixture, "--extension-id", extensionId, "--socket", socketPath, "--node", process.execPath, "--host-script", echoScript, "--csc", csc]);
     const manifest = JSON.parse(await readFile(output.manifestPath, "utf8"));

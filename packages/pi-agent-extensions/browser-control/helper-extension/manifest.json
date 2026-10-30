@@ -3,7 +3,7 @@
   "name": "Pi Browser Control Helper",
   "version": "1.0.0",
   "description": "Opt-in, target-scoped browser control over an explicitly started native host.",
-  "permissions": ["debugger", "tabs"],
+  "permissions": ["debugger", "storage", "tabs", "nativeMessaging"],
   "background": { "service_worker": "service-worker.js", "type": "module" },
   "action": { "default_popup": "popup.html", "default_title": "Browser control grants" }
 }
