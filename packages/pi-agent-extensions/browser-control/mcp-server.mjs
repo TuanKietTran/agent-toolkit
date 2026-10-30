@@ -18,7 +18,7 @@ const err = (id, code, message) => ({ jsonrpc: "2.0", id, error: { code, message
 export async function serve({ input = process.stdin, output = process.stdout, client, windowsAdapter } = {}) {
   if (!client) {
     const { createBridgeClient } = await import("./bridge-client.mjs");
-    client = createBridgeClient({ socketPath: process.env.PI_BROWSER_BRIDGE_SOCKET });
+    client = createBridgeClient({ socketPath: process.env.PI_BROWSER_BRIDGE_SOCKET, configPath: process.env.PI_BROWSER_BRIDGE_CONFIG });
   }
   if (!windowsAdapter && windowsMcpEnabled()) windowsAdapter = new WindowsMcpSession();
   const advertisedWindowsTools = windowsAdapter ? windowsMcpTools : [];

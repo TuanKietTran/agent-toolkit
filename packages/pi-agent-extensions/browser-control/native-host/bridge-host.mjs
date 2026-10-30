@@ -10,7 +10,6 @@ import { loadRuntimeConfig } from "./runtime-config.mjs";
 import { validateRequest, validateResponse, validateNativeRequest, validateNativeResponse, MAX_MESSAGE_BYTES } from "../bridge-protocol.mjs";
 
 const MAX = MAX_MESSAGE_BYTES;
-const trace = (line) => { if (process.env.PI_BROWSER_BRIDGE_TRACE === "1") process.stderr.write(`[PI-BRIDGE-TRACE] ${line}\\n`); };
 const sessionId = () => randomUUID();
 const errorResponse = (req, code, message) => ({ version: 1, id: req.id, session: req.session, ok: false, error: { code, message: message.slice(0, 512), retryable: false } });
 function encode(message) {
@@ -39,12 +38,11 @@ class Frames {
         const bytes = this.buffer.subarray(4, n + 4); this.buffer = this.buffer.subarray(n + 4);
         const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
         if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid IPC message object");
-        trace(`ipc-in type=${typeof value.type === "string" ? value.type : "invalid"}`);
         this.onMessage(value);
       }
     } catch (error) { this.onError(error); this.socket.destroy(); }
   }
-  send(value) { trace(`ipc-out type=${typeof value.type === "string" ? value.type : "invalid"}`); this.socket.write(encode(value)); }
+  send(value) { this.socket.write(encode(value)); }
 }
 function strict(value, required, allowed = required) {
   if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((k) => !allowed.includes(k)) || required.some((k) => !Object.hasOwn(value, k))) throw new Error("Invalid broker IPC message fields");
@@ -58,7 +56,6 @@ export async function startBroker(socketPath, { connectionServer } = {}) {
     const localPath = socketPath.startsWith("/");
     if (!localPath) throw new Error("Broker requires a local Unix socket");
   }
-  trace("broker-state-engine starting");
   const clients = new Set(), inflight = new Map(), completedIds = new Set();
   let nativeSession = sessionId();
   const MAX_INFLIGHT = 128, REQUEST_LIFETIME_MS = 30_000;
@@ -237,7 +234,6 @@ export async function runNativeHost({ socketPath, configPath, input = process.st
   let ready = false, nativeSession;
   const sendNative = (v) => {
     validateNativeResponse(v);
-    trace(`native-out type=${v.type}`);
     const b = Buffer.from(JSON.stringify(v));
     if (b.length > MAX) throw new Error("Native message exceeds 1 MiB");
     const h = Buffer.alloc(4); h.writeUInt32LE(b.length); output.write(Buffer.concat([h, b]));
@@ -253,7 +249,6 @@ export async function runNativeHost({ socketPath, configPath, input = process.st
     if (msg.type === "error") { validateNativeResponse(msg); sendNative(msg); return; }
     throw new Error("Unexpected broker relay message");
   }, (error) => { if (!socket.destroyed) process.stderr.write(`browser bridge IPC closed: ${error.stack ?? error.message}\n`); });
-  trace("native-bridge sending nativeJoin");
   broker.send({ type: "nativeJoin", version: 1 });
   let buffer = Buffer.alloc(0), hello = false;
   for await (const chunk of input) {
@@ -264,7 +259,6 @@ export async function runNativeHost({ socketPath, configPath, input = process.st
       if (buffer.length < n + 4) break;
       const bytes = buffer.subarray(4, n + 4); buffer = buffer.subarray(n + 4);
       const message = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
-      trace(`native-in type=${typeof message.type === "string" ? message.type : "invalid"}`);
       if (!hello) {
         validateNativeRequest(message);
         if (message.type !== "hello") throw new Error("Expected native hello");
@@ -291,7 +285,6 @@ export async function runNativeHost({ socketPath, configPath, input = process.st
       } else throw new Error("Unsupported native message");
     }
   }
-  trace("native-bridge input EOF; ending broker peer");
   socket.end();
 }
 
@@ -300,14 +293,12 @@ async function main() {
   const mode = args[0];
   const configIndex = args.indexOf("--config");
   const configPath = configIndex >= 0 ? args[configIndex + 1] : (process.platform === "win32" ? defaultConfigPath() : undefined);
-  trace(`process mode=${mode || "none"} config=${basename(configPath || "default")}`);
   if (configIndex >= 0 && !configPath) throw new Error("--config requires a file path");
   const config = await loadRuntimeConfig(configPath, { required: process.platform === "win32" });
   const socketPath = resolveSocketPath(config.pipeName || config.socketPath);
   if (mode === "--broker-stdio") {
     if (process.platform === "win32" && !config.pipeName) throw new Error("Windows broker worker requires configured pipeName");
     await runBrokerStdio({ onPeer: (connectionServer) => startBroker(undefined, { connectionServer }) });
-    trace("broker-stdio child output ended");
     return;
   }
   if (mode === "--broker") {

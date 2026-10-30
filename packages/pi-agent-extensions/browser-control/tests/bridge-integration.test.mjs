@@ -15,7 +15,7 @@ const frame = (v) => { const b = Buffer.from(JSON.stringify(v)); const h = Buffe
 test("temporary IPC -> broker/native relay -> mock CDP executor: auth, result, cancel, drag cleanup", async () => {
   const pipe = process.platform === "win32" ? `\\\\.\\pipe\\pi-bridge-${randomUUID()}` : join(tmpdir(), `pi-bridge-${randomUUID()}.sock`);
   const extension = { granted: true, mouseUp: 0, async execute(request, signal) {
-    protocol.validateNativeRequest({ type: "execute", request });
+    protocol.validateNativeResponse({ type: "execute", request });
     if (!this.granted) return { version: 1, id: request.id, session: SESSION, ok: false, error: { code: "UNAUTHORIZED", message: "Target authorization denied", retryable: false } };
     if (request.action === "drag") {
       try { await new Promise((resolve, reject) => {
@@ -47,12 +47,12 @@ test("temporary IPC -> broker/native relay -> mock CDP executor: auth, result, c
           extension.execute(m.request, abort.signal).then((response) => {
             current.delete(m.request.id);
             const relayed = { type: "executeResult", response };
-            protocol.validateNativeResponse(relayed);
+            protocol.validateNativeRequest(relayed);
             send({ type: "response", id: m.id, session: SESSION, response: relayed.response });
           }, () => {
             current.delete(m.request.id);
             const relayed = { type: "executeResult", response: { version: 1, id: m.request.id, session: SESSION, ok: false, error: { code: "CANCELLED", message: "Cancelled; effect may be uncertain", retryable: false } } };
-            protocol.validateNativeResponse(relayed);
+            protocol.validateNativeRequest(relayed);
             send({ type: "response", id: m.id, session: SESSION, response: relayed.response });
           });
         } else if (m.type === "cancel") {
@@ -68,7 +68,7 @@ test("temporary IPC -> broker/native relay -> mock CDP executor: auth, result, c
     assert.equal((await client.connect()).session, SESSION);
     assert.equal((await client.listTargets())[0].id, TARGET);
     const ok = await client.request("click", { x: 4, y: 8, button: "left" }, { targetId: TARGET });
-    protocol.validateResponse(ok); assert.equal(ok.result.accepted, true);
+    protocol.validateResponse(ok); assert.equal(ok.ok, true, JSON.stringify(ok)); assert.equal(ok.result.accepted, true, JSON.stringify(ok));
     const drag = await client.request("drag", { start: { x: 1, y: 2 }, end: { x: 10, y: 20 }, button: "left" }, { targetId: TARGET });
     assert.equal(drag.ok, true); assert.equal(extension.mouseUp, 1);
     extension.granted = false;
