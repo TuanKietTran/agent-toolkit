@@ -47,14 +47,24 @@ test("all action argument schemas are strict and bounded", () => {
     ["navigate", { url: "https://example.com/path" }],
   ];
   for (const [action, args] of good) assert.equal(validateRequest(request({ action, args })).action, action);
+  assert.equal(validateRequest(request({ action: "click", args: { x: 100000, y: 100000, button: "right" } })).action, "click");
+  assert.equal(validateRequest(request({ action: "type", args: { text: "x".repeat(MAX_TEXT_BYTES) } })).action, "type");
+  assert.equal(validateRequest(request({ action: "key", args: { key: "K".repeat(64), modifiers: ["Shift", "Ctrl", "Alt", "Meta"] } })).action, "key");
+  assert.equal(validateRequest(request({ action: "scroll", args: { x: 100000, y: 0, deltaX: -10000, deltaY: 10000 } })).action, "scroll");
+  const maxUrl = `https://e.com/${"a".repeat(2048 - "https://e.com/".length)}`;
+  assert.equal(validateRequest(request({ action: "navigate", args: { url: maxUrl } })).action, "navigate");
   const bad = [
     ["observe", { extra: 1 }], ["click", { x: -1, y: 2, button: "left" }],
+    ["click", { x: 100001, y: 2, button: "left" }], ["click", { x: 1, y: 2 }],
     ["click", { x: 1, y: 2, button: "left", extra: true }],
-    ["type", { text: "x".repeat(MAX_TEXT_BYTES + 1) }],
+    ["type", { text: "x".repeat(MAX_TEXT_BYTES + 1) }], ["type", { value: "bad key" }],
+    ["key", { key: "K".repeat(65) }], ["key", { key: "x", modifiers: ["Hyper"] }],
     ["key", { key: "Enter", modifiers: ["Shift", "Shift"] }],
     ["key", { key: "\n" }], ["scroll", { x: 0, y: 0, deltaX: 10001, deltaY: 0 }],
+    ["scroll", { x: 100001, y: 0, deltaX: 0, deltaY: 0 }],
     ["navigate", { url: "javascript:alert(1)" }],
     ["navigate", { url: "https://user:pass@example.com/" }],
+    ["navigate", { url: `https://e.com/${"a".repeat(2049 - "https://e.com/".length)}` }],
   ];
   for (const [action, args] of bad) assert.throws(() => validateRequest(request({ action, args })), `${action} should reject invalid args`);
 });
@@ -88,13 +98,22 @@ test("validates native grants, canonical execute wrapper and correlated response
   assert.throws(() => validateNativeRequest({ type: "execute", request: { ...req, target: "" } }));
 });
 
-test("observe image response is bounded below the 1 MiB envelope ceiling", () => {
-  const base64 = "A".repeat(MAX_IMAGE_BASE64_BYTES);
-  const valid = response({ result: { imageBase64: base64, mimeType: "image/png", width: 1920, height: 1080 } });
-  assert.equal(validateResponse(valid).ok, true);
-  assert.throws(() => validateResponse(response({ result: { imageBase64: `${base64}A` } })), /imageBase64|maximum message size/);
+test("result depth, property, array, string, image and total response bounds are enforced", () => {
+  const validImage = "A".repeat(MAX_IMAGE_BASE64_BYTES - 2) + "==";
+  assert.equal(validateResponse(response({ result: { imageBase64: validImage } })).ok, true);
+  assert.throws(() => validateResponse(response({ result: { imageBase64: "A".repeat(MAX_IMAGE_BASE64_BYTES) } })), /decoded image/);
   assert.throws(() => validateResponse(response({ result: { imageBase64: "not base64!" } })), /imageBase64/);
   assert.throws(() => validateResponse(response({ result: { nested: "x".repeat(MAX_TEXT_BYTES + 1) } })), /too large/);
+
+  let depthEight = true;
+  for (let i = 0; i < 7; i++) depthEight = { child: depthEight };
+  assert.equal(validateResponse(response({ result: { nested: depthEight } })).ok, true);
+  let tooDeep = depthEight;
+  for (let i = 0; i < 2; i++) tooDeep = { child: tooDeep };
+  assert.throws(() => validateResponse(response({ result: tooDeep })), /nesting/);
+  assert.throws(() => validateResponse(response({ result: Object.fromEntries(Array.from({ length: 129 }, (_, i) => [`k${i}`, true])) })), /invalid result/);
+  assert.throws(() => validateResponse(response({ result: { items: Array(1025).fill(true) } })), /array too large/);
+  assert.throws(() => validateResponse(response({ result: { items: Array(100).fill("x".repeat(MAX_TEXT_BYTES)) } })), /maximum message size/);
 });
 
 test("native cancel is request-scoped and dispatched status is explicit", () => {

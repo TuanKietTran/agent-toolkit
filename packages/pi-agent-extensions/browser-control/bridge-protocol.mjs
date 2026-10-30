@@ -39,6 +39,8 @@ function boundedResult(value, depth = 0) {
   for (const [key, item] of Object.entries(value)) {
     if (key === "imageBase64") {
       if (typeof item !== "string" || item.length > MAX_IMAGE_BASE64_BYTES || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(item)) fail("invalid or oversized imageBase64");
+      const padding = item.endsWith("==") ? 2 : item.endsWith("=") ? 1 : 0;
+      if (Math.floor(item.length / 4) * 3 - padding > MAX_IMAGE_BYTES) fail("decoded image exceeds maximum size");
       continue;
     }
     boundedResult(item, depth + 1);
