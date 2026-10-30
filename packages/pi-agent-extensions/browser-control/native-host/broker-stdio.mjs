@@ -18,7 +18,7 @@ function exact(value, fields) {
 class RelayPeer extends Duplex {
   constructor(id, send, onClose) {
     super(); this.id = id; this.sendEnvelope = send; this.onPeerClose = onClose;
-    this.sentClose = false; this.receivedClose = false;
+    this.sentClose = false; this.receivedClose = false; this.finishedClose = false;
   }
   _read() {}
   _write(chunk, _encoding, callback) {
@@ -37,7 +37,10 @@ class RelayPeer extends Duplex {
     this.finishClose();
   }
   finishClose() {
-    if (this.sentClose && this.receivedClose) this.onPeerClose(this.id);
+    if (!this.finishedClose && this.sentClose && this.receivedClose) {
+      this.finishedClose = true;
+      this.onPeerClose(this.id, this);
+    }
   }
   _final(callback) {
     try { this.sendClose(); callback(); }
@@ -72,7 +75,7 @@ export async function runBrokerStdio({ input = process.stdin, output = process.s
     if (output.writableLength > OUTER_MAX * 4) fail("stdio relay output backlog exceeded");
     output.write(envelope(message));
   }
-  const remove = (id) => peers.delete(id);
+  const remove = (id, peer) => { if (peers.get(id) === peer) peers.delete(id); };
   const broker = await onPeer(connections);
   let buffer = Buffer.alloc(0);
   try {
