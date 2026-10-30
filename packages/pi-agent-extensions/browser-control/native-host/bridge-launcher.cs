@@ -224,7 +224,6 @@ public static class BridgeLauncher {
         try {
             // FILE_FLAG_FIRST_PIPE_INSTANCE makes pre-creation/squatting fail closed.
             next = NewServer(config.pipeName, true);
-            Console.Error.WriteLine("secure named pipe ready");
             while (!broker.HasExited) {
                 NamedPipeServerStream waiting = next;
                 next = NewServer(config.pipeName, false);

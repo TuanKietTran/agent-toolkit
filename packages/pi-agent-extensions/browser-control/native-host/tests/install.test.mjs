@@ -81,15 +81,13 @@ test("production bridge-host.exe starts secured broker and relays Chrome frames 
   const broker = spawn(manifest.path, ["--broker", "--config", config], { stdio: ["ignore", "ignore", "pipe"] });
   let nativeProcess;
   let diagnostic = "";
-  let markReady;
-  const brokerReady = new Promise(resolveReady => { markReady = resolveReady; });
-  broker.stderr.on("data", d => { diagnostic += d; if (diagnostic.includes("secure named pipe ready")) markReady(); });
+  broker.stderr.on("data", d => { diagnostic += d; });
   t.after(async () => {
     if (nativeProcess && nativeProcess.exitCode === null) { nativeProcess.kill(); await new Promise(r => nativeProcess.once("exit", r)); }
     if (broker.exitCode === null) { broker.kill(); await new Promise(r => broker.once("exit", r)); }
     await rm(fixture, { recursive: true, force: true });
   });
-  await Promise.race([brokerReady, new Promise((_, reject) => setTimeout(() => reject(new Error(`broker pipe startup timeout: ${diagnostic}`)), 5000))]);
+  await waitPipe(relayPipe, broker);
   const frame = encodeFrame({ type: "hello", version: 1, payload: "binary ✓" });
   const native = nativeProcess = spawn(manifest.path, [`chrome-extension://${extensionId}/`], { stdio: ["pipe", "pipe", "pipe"] });
   const output = [];
