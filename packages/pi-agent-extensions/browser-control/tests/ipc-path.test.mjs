@@ -15,7 +15,7 @@ test("default IPC endpoint is deterministic and per-user", () => {
 
 test("Windows production broker refuses the unsecured Node named-pipe default", async () => {
   if (process.platform !== "win32") return;
-  await assert.rejects(startBroker(defaultSocketPath()), /cannot apply the required current-user named-pipe DACL/i);
+  await assert.rejects(startBroker(defaultSocketPath()), /ACL-secured C# relay/i);
 });
 
 test("explicit and test override paths take precedence", () => {

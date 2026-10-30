@@ -51,7 +51,7 @@ export function createBridgeClient(options = {}) {
     if (options.socketPath) return openSocket(options.socketPath);
     const configPath = options.configPath ?? (process.platform === "win32" ? defaultConfigPath() : undefined);
     const config = await loadRuntimeConfig(configPath, { required: process.platform === "win32" });
-    return openSocket(config.socketPath);
+    return openSocket(config.pipeName || config.socketPath);
   });
   let channel, session, connecting, closed = false;
   const targetCatalog = new Map();
@@ -64,11 +64,11 @@ export function createBridgeClient(options = {}) {
     if (message.type === "ready") {
       exact(message, ["type", "version", "id", "session", "targets"], ["type", "version", "id", "session"]);
       if (message.version !== 1 || typeof message.id !== "string" || typeof message.session !== "string") throw coded("INVALID_REQUEST", "Invalid broker ready frame");
-      if (message.targets !== undefined) validateNativeResponse({ type: "targets", targets: message.targets });
+      if (message.targets !== undefined) validateNativeResponse({ type: "targets", session: message.session, targets: message.targets });
       if (message.session) session = message.session;
     } else if (message.type === "targets") {
       exact(message, ["type", "id", "session", "targets"]);
-      validateNativeResponse({ type: "targets", targets: message.targets });
+      validateNativeResponse({ type: "targets", session: message.session, targets: message.targets });
     } else if (message.type === "response") {
       exact(message, ["type", "id", "session", "response"]);
       validateResponse(message.response);
@@ -123,30 +123,38 @@ export function createBridgeClient(options = {}) {
   }
   async function exchange(message, { signal, timeoutMs = timeoutDefault } = {}) {
     if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || timeoutMs > 120_000) throw new RangeError("Invalid timeoutMs");
-    if (signal?.aborted) throw signal.reason ?? coded("CANCELLED", "Cancelled before dispatch");
+    if (signal?.aborted) throw coded("CANCELLED", "Cancelled before dispatch");
     await connect();
+    if (signal?.aborted) throw coded("CANCELLED", "Cancelled before dispatch");
     const id = message.id ?? randomUUID();
     const payload = encode({ ...message, id, session });
     return new Promise((resolve, reject) => {
-      const p = { resolve, reject, cleanup: undefined };
+      const p = { resolve, reject, cleanup: undefined, dispatched: false };
       const finish = (error) => { pending.delete(id); clearTimeout(p.timer); p.cleanup?.(); error ? reject(error) : undefined; };
-      p.timer = setTimeout(() => {
+      const rememberAbandoned = () => {
         abandoned.add(id);
         if (abandoned.size > 512) abandoned.delete(abandoned.values().next().value);
+      };
+      const cancelAfterDispatch = () => {
+        rememberAbandoned();
+        finish(coded("CANCELLED", "Cancelled; dispatched outcome may be uncertain"));
+        try { channel?.write(encode({ type: "cancel", session, id })); } catch {}
+      };
+      p.timer = setTimeout(() => {
+        rememberAbandoned();
         finish(coded("TIMEOUT", "Timed out; dispatched outcome may be uncertain"));
         try { channel?.write(encode({ type: "cancel", session, id })); } catch {}
       }, timeoutMs);
       if (signal) {
-        const abort = () => {
-          abandoned.add(id);
-          if (abandoned.size > 512) abandoned.delete(abandoned.values().next().value);
-          finish(coded("CANCELLED", "Cancelled; dispatched outcome may be uncertain"));
-          try { channel?.write(encode({ type: "cancel", session, id })); } catch {}
-        };
+        const abort = () => p.dispatched ? cancelAfterDispatch() : finish(coded("CANCELLED", "Cancelled before dispatch"));
         signal.addEventListener("abort", abort, { once: true });
         p.cleanup = () => signal.removeEventListener("abort", abort);
       }
       pending.set(id, p);
+      // AbortSignal is checked after listener registration and immediately before write,
+      // closing the abort-during-connect/dispatch race without sending cancel for an unsent action.
+      if (signal?.aborted) { finish(coded("CANCELLED", "Cancelled before dispatch")); return; }
+      p.dispatched = true;
       try { channel.write(payload); } catch (e) { finish(e); }
     });
   }

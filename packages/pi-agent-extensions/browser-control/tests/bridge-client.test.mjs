@@ -71,6 +71,20 @@ test("authentication rejection and stale/revoked sessions fail closed", async ()
   await strictClient.close();
 });
 
+test("abort before or during broker readiness never dispatches an action frame", async () => {
+  const broker = new FixtureBroker(), client = await connected(broker);
+  const before = broker.writes.filter((b) => JSON.parse(b.subarray(4).toString()).type === "request").length;
+  const already = new AbortController(); already.abort();
+  await assert.rejects(client.request("click", { x: 1, y: 1, button: "left" }, { targetId: "opaque-target", signal: already.signal }), /before dispatch/i);
+  const during = new AbortController();
+  const pending = client.request("click", { x: 2, y: 2, button: "left" }, { targetId: "opaque-target", signal: during.signal });
+  during.abort();
+  await assert.rejects(pending, /before dispatch/i);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(broker.writes.filter((b) => JSON.parse(b.subarray(4).toString()).type === "request").length, before);
+  await client.close();
+});
+
 test("cancellation and timeout send best-effort cancel and report uncertain outcome", async () => {
   const broker = new FixtureBroker(); const client = await connected(broker); broker.mode = "hang";
   const ac = new AbortController(); const pending = client.request("click", { x: 2, y: 3, button: "left" }, { targetId: "opaque-target", signal: ac.signal });
