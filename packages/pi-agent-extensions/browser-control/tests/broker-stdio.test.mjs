@@ -79,15 +79,41 @@ test("Node-first close retains the peer tombstone until remote close and emits c
   assert.equal(messages.filter((message) => message.type === "close").length, 1, "remote acknowledgement must not trigger a second close");
 });
 
-test("broker stdio rejects duplicate peers, malformed base64, and truncated EOF", async () => {
+test("two peer closes leave the survivor relay usable", async () => {
+  const input = new PassThrough(), output = new PassThrough();
+  const peers = new Map(), messages = [];
+  let buffer = Buffer.alloc(0);
+  output.on("data", (chunk) => { const parsed = decodeFrames(Buffer.concat([buffer, chunk])); messages.push(...parsed.messages); buffer = parsed.rest; });
+  const done = runBrokerStdio({ input, output, onPeer: async (server) => {
+    server.on("connection", (peer) => peers.set(peer.id, peer));
+    return { close() {} };
+  } });
+  for (const id of ["raw-one", "raw-two", "survivor"]) input.write(frame({ v: 1, type: "open", peer: id }));
+  await new Promise((resolve) => setImmediate(resolve));
+  for (const id of ["raw-one", "raw-two"]) input.write(frame({ v: 1, type: "close", peer: id }));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(messages.filter((message) => message.type === "close" && ["raw-one", "raw-two"].includes(message.peer)).length, 2);
+  const request = Buffer.from("survivor action");
+  const received = new Promise((resolve) => peers.get("survivor").once("data", resolve));
+  input.write(frame({ v: 1, type: "data", peer: "survivor", bytes: request.toString("base64") }));
+  assert.deepEqual(await received, request);
+  peers.get("survivor").write(Buffer.from("survivor response"));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.ok(messages.some((message) => message.type === "data" && message.peer === "survivor" && Buffer.from(message.bytes, "base64").toString() === "survivor response"));
+  input.write(frame({ v: 1, type: "close", peer: "survivor" }));
+  input.end(); await done;
+});
+
+test("broker stdio rejects duplicate peers, malformed base64, unknown close peers, and truncated EOF", async () => {
   for (const frames of [
     [ { v: 1, type: "open", peer: "x" }, { v: 1, type: "open", peer: "x" } ],
     [ { v: 1, type: "open", peer: "x" }, { v: 1, type: "data", peer: "x", bytes: "%%%" } ],
+    [ { v: 1, type: "close", peer: "unknown" } ],
   ]) {
     const input = new PassThrough(), output = new PassThrough();
     const done = runBrokerStdio({ input, output, onPeer: async () => ({ close() {} }) });
     input.write(Buffer.concat(frames.map(frame)));
-    await assert.rejects(done, /duplicate|invalid/i);
+    await assert.rejects(done, /duplicate|invalid|unknown/i);
     output.destroy();
   }
   const input = new PassThrough(), output = new PassThrough();
