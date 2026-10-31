@@ -63,14 +63,14 @@ async function stop(child) {
 }
 class McpProcessClient {
   constructor(child) {
-    this.child = child; this.nextId = 1; this.pending = new Map(); this.buffer = ""; this.parseError = null; this.stderr = ""; this.traceTypes = [];
+    this.child = child; this.nextId = 1; this.pending = new Map(); this.buffer = ""; this.parseError = null; this.stderr = "";
     child.stdout.setEncoding("utf8");
     child.stdout.on("data", chunk => {
       this.buffer += chunk;
       for (;;) {
         const end = this.buffer.indexOf("\n"); if (end < 0) break;
         const line = this.buffer.slice(0, end); this.buffer = this.buffer.slice(end + 1);
-        try { const message = JSON.parse(line); if (message.jsonrpc !== "2.0") throw new Error("non-JSON-RPC stdout"); this.traceTypes.push(`response:${message.id}:${message.result ? "result" : "error"}`); const done = this.pending.get(message.id); if (done) { this.pending.delete(message.id); done(message); } }
+        try { const message = JSON.parse(line); if (message.jsonrpc !== "2.0") throw new Error("non-JSON-RPC stdout"); const done = this.pending.get(message.id); if (done) { this.pending.delete(message.id); done(message); } }
         catch (error) { this.parseError = error; }
       }
     });
@@ -79,7 +79,7 @@ class McpProcessClient {
   request(method, params = {}) {
     const id = this.nextId++; this.lastId = id;
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`MCP ${method} timeout; argv=${JSON.stringify(this.child.spawnargs)} exit=${this.child.exitCode} stdoutTypes=${this.traceTypes.join(",")} partialBytes=${Buffer.byteLength(this.buffer)} stderr=${this.stderr}`)); }, 5000);
+      const timer = setTimeout(() => { this.pending.delete(id); reject(new Error(`MCP ${method} timeout`)); }, 5000);
       this.pending.set(id, message => { clearTimeout(timer); resolve(message); });
       this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
     });
@@ -118,11 +118,7 @@ test("production broker relay + actual helper service worker + bridge client and
   let broker, native, relay, client, mcpChild;
   const openSockets = new Set();
   let traceStage = "fixture-setup";
-  const stage = (name, promise) => { traceStage = name; return promise.catch(async error => {
-    const config = JSON.parse(await readFile(configPath, "utf8"));
-    error.message = `stage=${name}; brokerArgv=${JSON.stringify(broker?.spawnargs)}; nativeArgv=${JSON.stringify(native?.spawnargs)}; brokerExit=${broker?.exitCode}; nativeExit=${native?.exitCode}; configPath=${configPath}; configKeys=${Object.keys(config).sort().join(",")}; pipeConfigured=${Boolean(config.pipeName || config.socketPath)}; extensionTypes=${nativeMessageTypes.join(",")}; helperOutputTypes=${helperPostedTypes.join(",")}; nativeWriteEvents=${nativeWriteEvents.join(",")}; helperTaskStates=${helperTaskResults.join(",")}; cdpEvents=${cdpEvents.join(",")}; cdpMethods=${cdps.map(call => call.method).join(",")}; nativeStderr=${nativeDiagnostics}; brokerStderr=${brokerDiagnostics}; ${error.message}`;
-    throw error;
-  }); };
+  const stage = (_name, promise) => promise;
   t.after(async () => {
     for (const socket of openSockets) socket.destroy();
     await client?.close().catch(() => {});
