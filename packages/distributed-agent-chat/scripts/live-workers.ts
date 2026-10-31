@@ -2,14 +2,14 @@
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { agentWorker } from '../src/agent/worker';
-import type { Agent } from '../src/protocol';
+import type { Mode } from '../src/protocol';
 
 if (process.env.CONFIRM_LIVE_WORKERS !== 'YES') throw Error('Set CONFIRM_LIVE_WORKERS=YES to serve real Pi and Claude sessions');
 const room = process.env.ROOM || 'demo';
 if (!/^[A-Za-z0-9_-]{1,64}$/.test(room)) throw Error('Invalid ROOM');
 const shutdown = new AbortController();
 for (const signal of ['SIGINT', 'SIGTERM'] as const) process.once(signal, () => shutdown.abort());
-const tasks = (['pi', 'claude'] as Agent[]).map(async agent => {
+const tasks = (['pi', 'claude'] as const satisfies readonly Mode[]).map(async agent => {
   const cwd = resolve('.agent-data/live', agent, 'workspace');
   await mkdir(cwd, { recursive: true });
   const token = process.env[agent === 'pi' ? 'PI_TOKEN' : 'CLAUDE_TOKEN'];

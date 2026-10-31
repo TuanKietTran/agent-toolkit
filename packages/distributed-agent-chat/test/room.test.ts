@@ -38,6 +38,9 @@ test('real Workers SQLite runtime: auth, isolation, atomic claims, replay, fenci
   const s = await setup();
   try {
     assert.equal((await s.request('history', undefined, '')).status, 401);
+    const configured = await s.request('agents');
+    assert.deepEqual(configured.body.agents.map((a: any) => a.id).sort(), ['claude','pi']);
+    assert.ok(configured.body.agents.every((a: any) => !('token' in a)));
     await assert.rejects(agentWorker({ mode: 'mock', agent: 'pi', worker: 'bad-auth', room: 'test', url: (await s.url()).origin, token: 'invalid', cwd: process.cwd(), dataDir: '.wrangler/test' }, new AbortController().signal), /401/);
     assert.equal((await s.request('send', { id: 'bad', agent: 'pi', prompt: 'x' }, tokens.PI_TOKEN)).status, 401);
     assert.equal((await s.request('send', { id: 'one', agent: 'pi', prompt: 'hello' })).status, 201);
@@ -45,13 +48,15 @@ test('real Workers SQLite runtime: auth, isolation, atomic claims, replay, fenci
     assert.equal((await s.request('send', { id: 'two', agent: 'pi', prompt: 'busy' })).status, 409);
     assert.equal((await s.request('history', undefined, tokens.CHAT_TOKEN, 'other')).body.runs.length, 0);
     assert.equal((await s.request('agent/pi/claim', { worker: 'p', mode: 'pi' }, tokens.CLAUDE_TOKEN)).status, 401);
+    assert.equal((await s.request('agent/constructor/claim', { worker: 'phantom', mode: 'mock' }, tokens.PI_TOKEN)).status, 401);
+    assert.equal((await s.request('agent/__proto__/claim', { worker: 'phantom', mode: 'mock' }, tokens.PI_TOKEN)).status, 401);
     const claims = await Promise.all([1,2].map(() => s.request('agent/pi/claim', { worker: 'p', mode: 'mock' }, tokens.PI_TOKEN)));
     assert.equal(claims.filter(r => r.body.task).length, 1);
     const t = claims.find(r => r.body.task)!.body.task;
     assert.equal(t.resume, false);
     assert.equal((await s.request('agent/pi/update', { worker: 'p', id: t.id, seq: 2, update: { kind: 'delta', text: 'gap' } }, tokens.PI_TOKEN)).status, 409);
     for (let i = 0; i < 2; i++) assert.equal((await s.request('agent/pi/update', { worker: 'p', id: t.id, seq: 1, update: { kind: 'delta', text: 'Hi' } }, tokens.PI_TOKEN)).status, 200);
-    await s.request('agent/pi/update', { worker: 'p', id: t.id, seq: 2, update: { kind: 'session' } }, tokens.PI_TOKEN);
+    await s.request('agent/pi/update', { worker: 'p', id: t.id, seq: 2, update: { kind: 'session', providerSessionId: 'provider-session-1' } }, tokens.PI_TOKEN);
     await s.request('agent/pi/update', { worker: 'p', id: t.id, seq: 3, update: { kind: 'done' } }, tokens.PI_TOKEN);
     assert.equal((await s.request('history')).body.runs[0].text, 'Hi');
     await s.restart();
@@ -63,9 +68,29 @@ test('real Workers SQLite runtime: auth, isolation, atomic claims, replay, fenci
     assert.equal((await s.request('agent/pi/claim', { worker: 'other', mode: 'mock' }, tokens.PI_TOKEN)).status, 409);
     const resumed = (await s.request('agent/pi/claim', { worker: 'p', mode: 'mock' }, tokens.PI_TOKEN)).body.task;
     assert.equal(resumed.session_id, t.session_id); assert.equal(resumed.resume, true);
+    assert.equal(resumed.provider_session_id, 'provider-session-1');
     await s.request('cancel', { id: 'next' });
     assert.equal((await s.request('agent/pi/heartbeat', { worker: 'p', id: 'next' }, tokens.PI_TOKEN)).body.cancel, true);
     assert.equal((await s.request('agent/pi/update', { worker: 'p', id: 'next', seq: 1, update: { kind: 'delta', text: 'late' } }, tokens.PI_TOKEN)).status, 409);
+  } finally { await s.close(); }
+});
+
+test('agent activity API persists only safe summaries and rejects raw payload fields', async () => {
+  const s = await setup();
+  try {
+    await s.request('send', { id: 'activity-run', agent: 'pi', prompt: 'inspect' });
+    const task = (await s.request('agent/pi/claim', { worker: 'p', mode: 'mock' }, tokens.PI_TOKEN)).body.task;
+    const update = (seq: number, activity: unknown) => s.request('agent/pi/update', { worker: 'p', id: task.id, seq, update: { kind: 'activity', activity } }, tokens.PI_TOKEN);
+    assert.equal((await update(1, { type: 'tool', name: 'Read', status: 'started', arguments: 'secret prompt' })).status, 400);
+    assert.equal((await update(1, { type: 'tool', name: 'Read', status: 'started' })).status, 200);
+    assert.equal((await update(2, { type: 'usage', usage: { input: 12, output: 4, credential: 'secret' } })).status, 400);
+    assert.equal((await update(2, { type: 'usage', usage: { input: 12, output: 4 } })).status, 200);
+    const events = (await s.request('events?after=0')).body.events.filter((e: any) => e.kind === 'activity');
+    assert.deepEqual(events.map((e: any) => JSON.parse(e.data)), [
+      { type: 'tool', name: 'Read', status: 'started' },
+      { type: 'usage', usage: { input: 12, output: 4 } }
+    ]);
+    assert.equal(JSON.stringify(events).includes('secret'), false);
   } finally { await s.close(); }
 });
 

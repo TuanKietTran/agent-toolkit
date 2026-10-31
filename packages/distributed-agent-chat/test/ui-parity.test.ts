@@ -48,6 +48,12 @@ test('UI parity: static response structure only', async t => {
       assert.ok(select, '#agent select body missing');
       for (const agent of ['pi', 'claude']) assert.match(select[1], new RegExp(`<option\\b[^>]*\\bvalue=["']${agent}["']`));
     });
+    await t.test('dynamic agent labels use text content and activity events stay separate from reply text', () => {
+      assert.match(html, /option\.textContent=agent\.label/);
+      assert.match(html, /e\.kind==='delta'[^;]*runs\.get\(e\.run_id\)\.text\+=/);
+      assert.match(html, /e\.kind==='activity'&&runs\.has\(e\.run_id\)\)\{const value=data\.activity\|\|\{\};if\(value\.type==='tool'\)activities\.set\(e\.run_id/);
+      assert.match(html, /n\.activity\.textContent=activities\.get\(r\.id\)/);
+    });
     await t.test('send-button: this button is initially disabled', () => {
       assert.match(element('sendButton', 'button').attrs, /(?:^|\s)disabled(?:\s|=|$)/);
     });

@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import assert from 'node:assert/strict';
 import { runAdapter } from '../src/agent/adapters';
-import type { Agent, Task } from '../src/protocol';
+import type { Mode, Task } from '../src/protocol';
 
 if (process.env.CONFIRM_LIVE_AGENTS !== 'YES') throw Error('Set CONFIRM_LIVE_AGENTS=YES to invoke real providers');
 const cwd = await mkdtemp(join(tmpdir(), 'session-chat-live-'));
-for (const agent of ['pi', 'claude'] as Agent[]) {
+for (const agent of ['pi', 'claude'] as const satisfies readonly Mode[]) {
   const session = randomUUID();
   const marker = `recall_${randomUUID().replaceAll('-', '')}`;
   const base: Task = { id: randomUUID(), agent, prompt: '', text: '', status: 'running', mode: agent, error: '', session_id: session, worker_id: `live-${agent}`, lease: Date.now() + 120000, seq: 0, created: Date.now(), resume: false };

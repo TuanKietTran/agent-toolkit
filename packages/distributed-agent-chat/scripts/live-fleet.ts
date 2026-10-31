@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { agentWorker } from '../src/agent/worker';
-import type { Agent, Run } from '../src/protocol';
+import type { Mode, Run } from '../src/protocol';
 
 if (process.env.CONFIRM_LIVE_FLEET !== 'YES') throw Error('Set CONFIRM_LIVE_FLEET=YES to invoke real providers on the deployed fleet');
 const a = process.env.FLEET_URL_A || 'http://127.0.0.1:18877';
@@ -24,11 +24,11 @@ const shutdown = new AbortController();
 const jobs: Promise<void>[] = [];
 let workerFailure: unknown;
 try {
-  for (const agent of ['pi', 'claude'] as Agent[]) {
+  for (const agent of ['pi', 'claude'] as const satisfies readonly Mode[]) {
     const extraArgs = agent === 'pi' ? ['--provider', process.env.PI_PROVIDER || 'openai-codex', '--model', process.env.PI_MODEL || 'gpt-6.1-sol', '--no-tools', '--no-context-files'] : ['--tools', ''];
     jobs.push(agentWorker({ mode: agent, agent, worker: `${agent}-live`, room, url: agent === 'pi' ? a : b, token: required(agent === 'pi' ? 'PI_TOKEN' : 'CLAUDE_TOKEN'), cwd, dataDir: join(cwd, 'pi-sessions'), extraArgs, timeoutMs: 120000 }, shutdown.signal).catch(error => { workerFailure = error; shutdown.abort(); }));
   }
-  for (const agent of ['pi', 'claude'] as Agent[]) {
+  for (const agent of ['pi', 'claude'] as const satisfies readonly Mode[]) {
     const marker = `recall_${randomUUID().replaceAll('-', '')}`;
     let session = '';
     for (const resume of [false, true]) {

@@ -3,18 +3,22 @@ import { build } from 'esbuild';
 import { mkdir, writeFile, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
+import { agentTokens, validateSecrets } from '../src/auth';
 
 async function main() {
   if (process.env.CONFIRM_FLEET_DEPLOY !== 'YES') throw Error('Deployment disabled. Set CONFIRM_FLEET_DEPLOY=YES only after approving the target bucket/fleet.');
   const bucket = process.env.CELLD_BUCKET;
   if (!bucket?.startsWith('s3://')) throw Error('CELLD_BUCKET=s3://... required');
-  const names = ['CHAT_TOKEN','PI_TOKEN','CLAUDE_TOKEN'] as const;
-  const vars = Object.fromEntries(names.map(name => {
-    const value = process.env[name];
-    if (!value || value.length < 24 || value.includes('replace-with')) throw Error(`Set a strong ${name}`);
-    return [name, value];
-  }));
-  if (new Set(Object.values(vars)).size !== 3) throw Error('Use three distinct tokens');
+  const tokenEnv = process.env as unknown as import('../src/auth').TokenEnv;
+  validateSecrets(tokenEnv);
+  const vars = { CHAT_TOKEN: process.env.CHAT_TOKEN!, AGENT_TOKENS: process.env.AGENT_TOKENS ?? JSON.stringify(agentTokens(tokenEnv)) };
+  if (process.env.CELLD_TARGETS) {
+    const targets: unknown = JSON.parse(process.env.CELLD_TARGETS);
+    if (!targets || typeof targets !== 'object' || Array.isArray(targets) || Object.values(targets).some(v => typeof v !== 'string' || !v.startsWith('s3://'))) throw Error('CELLD_TARGETS must map target names to s3:// buckets');
+    const name = process.env.CELLD_TARGET;
+    if (!name || !(name in targets)) throw Error('Set CELLD_TARGET to a configured CELLD_TARGETS key');
+    process.env.CELLD_BUCKET = (targets as Record<string,string>)[name];
+  }
   const version = spawnSync('celld', ['--version'], { encoding: 'utf8' });
   if (version.status !== 0 || !/\b0\.6\.2\b/.test(version.stdout)) throw Error('celld v0.6.2 required on PATH');
   const dir = resolve('.deploy/app');
