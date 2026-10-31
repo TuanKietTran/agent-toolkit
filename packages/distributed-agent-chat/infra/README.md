@@ -1,6 +1,6 @@
-# Fleet runbooks and local verification
+# Historical fleet runbook and optional infrastructure
 
-The local OrbStack fleet was started and deployed with explicit user authorization. Two actual celld v0.6.2 nodes passed signed peer probes and shared-room/two-mock-agent HTTP checks on ports **18877 / 18878**; see `BUILD-REPORT.md` for exact evidence and limits. The stack is left running. No hard-failure takeover was tested. The exe.dev instructions below remain unexecuted by this infra task. No kube manifests are supplied.
+**Historical evidence only:** the following records an earlier, explicitly authorized local OrbStack/celld exercise. It does not assert that the fleet is running now, that `BUILD-REPORT.md` exists in this checkout, or that a fresh deployment will work unchanged. No hard-failure takeover or production qualification is established. Treat every mutating command below as an operator action requiring fresh authorization. The exe.dev instructions were not evidence of a deployment. No kube manifests are supplied.
 
 ## Upstream references and pinned commands
 
@@ -19,7 +19,7 @@ celld --bucket s3://BUCKET \
 
 `CELLD_WATCH` selects the persistent node-local work directory. Omit `--endpoint` for AWS S3; set region appropriately. Bucket credentials come from the standard AWS env/credential chain, never from URL parameters. Nodes sharing a bucket form a fleet; each node must have its **own** work directory and advertised private address. Never share SQLite directories, expose port 8081 or use `--unsafe-public-advertise`.
 
-`celld deploy PROJECT --bucket ... --endpoint ... --region ...` requires esbuild on PATH. Fleet nodes poll the committed deployment pointer (default 30 seconds). `celld deploy` **does not load `.dev.vars` or `.env`**. Our opt-in helper bundles the Worker and writes a mode-0600, ignored `.deploy/app/wrangler.json` containing the three token `vars`, deploys that directory, and removes the generated config. Tokens necessarily exist in the deployment objects in the bucket; bucket readers are fleet administrators. There is no fake runtime env-secret binding assumed here. Mount/encrypt disks and tightly restrict bucket access. `celld dev` is a separate, single-node local object-store mode; it is not evidence of a fleet.
+`celld deploy PROJECT --bucket ... --endpoint ... --region ...` requires esbuild on PATH. Fleet nodes poll the committed deployment pointer (default 30 seconds). `celld deploy` **does not load `.dev.vars` or `.env`**. Our opt-in helper bundles the Worker and writes a mode-0600, ignored `.deploy/app/wrangler.json` containing `CHAT_TOKEN` and the serialized `AGENT_TOKENS` mapping, deploys that directory, and removes the generated config. When `AGENT_TOKENS` is absent, legacy `PI_TOKEN`/`CLAUDE_TOKEN` inputs are converted to that mapping. All represented token values are stored in deployment objects in the bucket; bucket readers are fleet administrators. There is no fake runtime env-secret binding assumed here. Mount/encrypt disks and tightly restrict bucket access. `celld dev` is a separate, single-node local object-store mode; it is not evidence of a fleet.
 
 ## Local OrbStack / Docker Compose
 
@@ -27,14 +27,14 @@ Pinned versions: celld `v0.6.2`, MinIO `RELEASE.2025-04-22T22-12-26Z`, mc `RELEA
 
 MinIO is **local testing only**. Upstream says community MinIO passes the storage test but is not production-qualified, and explicitly warns against `RELEASE.2025-09-06T17-38-46Z`. This stack intentionally uses an earlier release. Do not generalize local MinIO success into production storage qualification.
 
-1. Run `node --import tsx scripts/init-local-env.ts` to exclusively create an ignored `.env` with random secrets and mode 0600 (refuses to overwrite existing credentials). Never print its contents. Use `.env` only for Compose; `npm run worker` reads exported environment, not dotenv files.
+1. This historical step used an older initializer. The current `scripts/init-local-env.ts` creates standalone configuration only; it does not bootstrap this Compose stack. Before using this historical runbook, separately provision protected Compose/admin credentials (`MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD`, `CHAT_TOKEN`, `PI_TOKEN`, `CLAUDE_TOKEN`) and keep legacy worker-token inputs consistent with the deployed mapping. `PI_TOKEN` and `CLAUDE_TOKEN` are deployment-helper inputs converted to `AGENT_TOKENS`; they are not worker environment variables. Never load the coordinator/admin `.env` into a worker: give each worker only its own mapped `AGENT_TOKEN` and provider settings, never `CHAT_TOKEN` or the `AGENT_TOKENS` map. Do not rerun setup to overwrite an existing `.env`. `npm run worker` reads exported environment, not dotenv files.
 2. After explicitly approving local stack startup, from the project root:
 
    ```sh
    docker compose --env-file .env -f infra/compose.yaml up -d --build minio bucket-init node-a node-b
    ```
 
-   This starts two real Linux celld processes with separate `bucket`, `node-a` and `node-b` volumes. MinIO is attached solely to the internal `fleet` network. Both nodes also join a separate bridge `ingress` network, because OrbStack suppresses host port publication for internal-only networks. Only Worker listeners map to host loopback: A `127.0.0.1:18877`, B `127.0.0.1:18878` (override with `CHAT_PORT_A` / `CHAT_PORT_B`; port 8787 is reserved for the Pi bridge). MinIO API/console and celld internal listeners have **no host mappings**. No LLM credential or agent runs in these celld containers.
+   This starts two real Linux celld processes with separate `bucket`, `node-a` and `node-b` volumes. MinIO is attached solely to the internal `fleet` network. Both nodes also join a separate bridge `ingress` network, because OrbStack suppresses host port publication for internal-only networks. Only Worker listeners map to host loopback: A `127.0.0.1:18877`, B `127.0.0.1:18878` (override with `CHAT_PORT_A` / `CHAT_PORT_B`; port 8787 was reserved for the Pi bridge in that historical runbook. The current standalone coordinator default is 18877). MinIO API/console and celld internal listeners have **no host mappings**. No LLM credential or agent runs in these celld containers.
 3. After separately approving deployment to this local bucket:
 
    ```sh
@@ -121,7 +121,7 @@ On one trusted admin environment with celld v0.6.2, npm dependencies and esbuild
 CONFIRM_FLEET_DEPLOY=YES npm run fleet:deploy
 ```
 
-This mutates the selected bucket. Verify `CELLD_BUCKET`/`S3_ENDPOINT` before confirming. The three secrets become Worker vars in the bucket deployment. Do not copy this admin environment into provider worker shells.
+This mutates the selected bucket. Verify `CELLD_BUCKET`/`S3_ENDPOINT` before confirming. The generated Worker vars are `CHAT_TOKEN` and the serialized `AGENT_TOKENS` mapping; all represented token values are stored in bucket deployment objects. Do not copy this admin environment into provider worker shells.
 
 After approval to start services, install `infra/exe/chat-cell.service` into each user's systemd user unit directory, ensure that celld's binary directory matches the unit PATH, then:
 

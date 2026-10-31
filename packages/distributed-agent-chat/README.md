@@ -1,104 +1,70 @@
-# Distributed session chat
+# Distributed Agent Chat
 
-A focused TypeScript application for a **celld fleet**, with one SQLite Durable Object per room and external Pi / Claude Code processes. The browser sends to one selected agent; agent output never creates another job. The authorized local **two-node OrbStack/celld fleet is running on ports 18877 / 18878** and passed shared-history, streaming, continuity and cancellation checks with two explicitly mock agents. The parent separately verified **real Pi and Claude workers across both celld ingress nodes**, including incremental output and resumed recall for both agents. See [BUILD-REPORT.md](BUILD-REPORT.md) and the parent-owned [VERIFICATION.md](VERIFICATION.md) for evidence and limits.
+A self-hostable chat coordinator for sending a user-authored turn to an explicitly selected coding-agent worker. It is not a managed multi-tenant service. The coordinator stores room history; provider authentication and execution remain on worker machines.
 
-## Current interface and live chat
+## Status and evidence
 
-The temporary UI/UX follows the visual structure of `claude.ai/code`: dark sidebar, recent sessions, a quiet conversation canvas and bottom composer. It is this project's own interface, not an official Claude application. Pi and Claude remain separate selectable targets. Enter sends; Shift+Enter adds a newline. Stop cancels the selected turn. Recent **room names only** are stored locally; tokens and transcripts are not.
+| Capability | Verified status / boundary |
+|---|---|
+| Standalone loopback Miniflare coordinator and arbitrary target IDs | Implemented; synthetic E2E launches two independent CLI worker processes with `AGENT_ID=nodeA/nodeB`, `AGENT_MODE=mock`, separate tokens, streams/history/reconnect, session continuity and cancellation. See `test/standalone.test.ts`. |
+| Pi, Claude Code, Codex and OpenCode adapters | Adapter protocol fixtures exercise each harness's implemented output handling, completion, errors, cancellation and native-session resume. Codex `exec --json` is consumed as completed `item.completed` `agent_message` text, then chunked by the adapter into API-safe display deltas; this is not token-level streaming. No app-server delta events are accepted. Fixture behavior is not live provider evidence. |
+| Native session through mock workers | Mock verifies room session continuity; it does not create a provider-native session ID. |
+| Ollama | Provider/model option for compatible agent CLIs, not itself a chat worker. Examples below configure a CLI only; no Ollama install, server start, model pull, or provider request is performed. |
+| Hosted VM isolation, browser IDE, GitHub OAuth/PR automation, file transfer, approval relay, billing/quotas, provider session migration | Not provided. |
+| Physical multi-host operation, HA/failover, cloud-feature parity, production readiness | Not verified; no production-readiness claim. Synthetic fixtures only; no live-provider verification. The local setup is one coordinator. |
 
-Open <http://127.0.0.1:18877/> (or node B on port 18878), connect to room `demo`, and enter `CHAT_TOKEN` from the ignored local `.env`. Never paste the token into a URL or commit it. Standby real workers can be started explicitly:
+Build and test evidence, including any current failures and limitations, is recorded in [docs/IMPLEMENTATION-REPORT.md](docs/IMPLEMENTATION-REPORT.md). No deployment or provider usage is implied.
 
-```sh
-CONFIRM_LIVE_WORKERS=YES node --env-file=.env --import tsx scripts/live-workers.ts
-```
+## Local standalone setup
 
-This launcher serves Pi on A and Claude on B, uses persistent `.agent-data/live`, and **disables coding tools** for chat-only operation. Provider authentication stays on this machine; messages incur normal provider usage. Stop this launcher before starting another copy with the same worker identities. The currently started launcher is a local process, not an installed login service. New UI rooms do not provision agent workers: use matching `ROOM` worker configuration, with separate persistent provider storage.
-
-Explicit live checks (not part of `npm test`):
-
-```sh
-CONFIRM_LIVE_AGENTS=YES node --import tsx scripts/live-adapters.ts
-CONFIRM_LIVE_FLEET=YES node --env-file=.env --import tsx scripts/live-fleet.ts
-CONFIRM_BROWSER_LIVE=YES node --env-file=.env test/ui.browser.mjs
-```
-
-The browser check uses installed Brave on macOS by default (`BROWSER_BINARY` overrides its executable). It authenticates, sends a real turn to each standby agent in `demo`, verifies mobile layout/token isolation, and saves ignored screenshots under `.deploy/screenshots`.
-
-## Local runtime + explicit mock agents
-
-Requirements: Node 22+, npm. Dependencies are exact-version pinned with a lockfile.
+Requirements: Node.js 22 or newer and npm. Synthetic tests need no provider CLI, account, or model. From this package directory:
 
 ```sh
 npm ci
+npm run setup
 npm run build
-npm test
+npm run doctor
+npm start
 ```
 
-Create an ignored `.dev.vars` at the project root with **three distinct, random secrets**, at least 24 characters each:
+`npm run setup` creates `.env` exclusively (it refuses to overwrite an existing file), generates distinct high-entropy `CHAT_TOKEN` and `AGENT_TOKENS` secrets, and does not print them. `npm run doctor` is a coordinator-only check: it requires Node.js 22+, validates `.env` secrets, and checks that `dist/worker.js` exists. It does not launch or validate a worker executable, Codex shim, or provider. For Windows worker startup, `AGENT_BINARY` must be an absolute path to a native `.exe` (not `.cmd`/`.ps1`; mock is exempt). `npm run worker` validates worker configuration and starts polling but does not prove reachability or health at startup. To establish worker health, run it with the complete exported environment on the worker host and verify that it stays connected and completes a synthetic MOCK turn end-to-end. Optional `AGENT_DOCTOR=1` runs the configured executable with `--version` only; it is not a provider check or health probe. See [worker configuration](docs/network-and-security.md). `npm start` builds and then explicitly loads `.env` using Node's `--env-file`; `scripts/server.ts` itself does not load dotenv. QA did not invoke `npm start`: it starts the persistent coordinator, which you should start when ready. The coordinator binds to `127.0.0.1` by default and persists local data under `.data/miniflare`. Keep `.env` private and never expose loopback development directly to the internet.
 
-```dotenv
-CHAT_TOKEN=<user-secret>
-PI_TOKEN=<pi-worker-secret>
-CLAUDE_TOKEN=<claude-worker-secret>
-```
+`AGENT_TOKENS` maps target IDs to distinct tokens. Setup generates `pi`, `claude`, `codex`, `opencode`, and `ollama`; these labels do not represent automatically running workers. Provision each worker separately with only its matching `AGENT_TOKEN` and required provider settings. Never load the coordinator `.env` into a worker or provide it `CHAT_TOKEN` or the `AGENT_TOKENS` map. Tokens must be distinct and at least 24 characters. The synthetic E2E verifies API token scope, not secret isolation between worker processes.
 
-Set mode 0600 on secret files. Do not put credentials in URLs, CLI arguments, shell tracing, screenshots or logs. `npm run dev -- --port 18879` starts Wrangler/workerd on loopback, not celld. Avoid port 8787 on this host: it is occupied by the Pi bridge. The Compose fleet instead uses ports **18877 / 18878**. Open its printed URL; enter the room and `CHAT_TOKEN` into the UI. The token stays in browser memory only, not localStorage or a query string.
-
-In two terminals, export the corresponding `AGENT_TOKEN` securely, then run:
+With each worker's settings securely provisioned/exported, launch it (no provider call in mock mode):
 
 ```sh
-CHAT_URL=http://127.0.0.1:18879 AGENT_MODE=mock AGENT_ID=pi WORKER_ID=pi-local ROOM=demo npm run worker
-CHAT_URL=http://127.0.0.1:18879 AGENT_MODE=mock AGENT_ID=claude WORKER_ID=claude-local ROOM=demo npm run worker
+npm run worker
 ```
 
-Each command needs a different `AGENT_TOKEN`: `PI_TOKEN` or `CLAUDE_TOKEN` respectively. Set `CHAT_URL` explicitly: use port 18879 for the development command above, or 18877 / 18878 for the Compose fleet. The CLI defaults to the fleet's port 18877; do not use the Pi bridge's port 8787. **MOCK mode is synthetic, never calls an LLM, and is labeled in the startup message, saved run and transcript.** The default mode is deliberately unset, so forgetting it fails instead of silently simulating an agent.
+For example, use `AGENT_ID=pi`, `WORKER_ID=pi-host`, `ROOM=demo`, `AGENT_MODE=mock`, `CHAT_URL=http://127.0.0.1:18877`, and the token mapped to `pi`. To use `nodeA`/`nodeB`, first configure those IDs and distinct tokens in the coordinator mapping. `AGENT_MODE` selects adapter/runtime behavior independently of the target ID. Supported modes include `mock`, `pi`, `claude`, `codex`, and `opencode`; real modes execute their respective local CLI and may use provider credentials. On Windows, configure `AGENT_BINARY` to an absolute path to a native `.exe` (not a `.cmd`/`.ps1` package-manager shim; mock mode is exempt). Live Codex runtime is unverified until the adapter worker validates prompt delivery on stdin and fidelity to official events; live OpenCode runtime is unverified until terminal behavior and process exit are validated. Use `mock` for no-provider smoke testing.
 
-## Actual external agents
+### Provider and model options
 
-Authenticate each installed agent independently on its worker machine, using that CLI's normal provider environment/auth storage. Tested protocol reference versions: **Pi 0.84.4**, **Claude Code 2.1.305** (`claude --help` inspected). These binaries are not installed by this project. The parent independently verified both real providers' new-session output and resumed recall using `scripts/live-adapters.ts`, then completed four real-provider turns through the actual two-node fleet using `scripts/live-fleet.ts`; see [VERIFICATION.md](VERIFICATION.md). Coding tools were disabled. This is not evidence of live tool use, live cancellation, failover or provider-session migration.
+Use a real mode only when the corresponding CLI and credentials are already configured. `AGENT_PROVIDER` and `AGENT_MODEL` are shared options; Pi-specific safety options include `AGENT_PI_NO_TOOLS=1`, `AGENT_PI_TOOLS=...`, and `AGENT_PI_TRUSTED_NATIVE=1` (native Pi features are explicit opt-in). The CLI manages protocol/session/permission arguments; do not put flags in `AGENT_ARGS`.
+
+Ollama examples below document configuration only; they do not launch a worker, install software, start Ollama, pull a model, or make a provider request. Ollama is a provider, not an `AGENT_MODE` or worker type. The adapter maps provider/model options per harness: Pi passes provider/model flags; Codex uses its Ollama local-provider arguments when selected; OpenCode uses a provider/model namespace; Claude accepts only absent provider or case-sensitive `ollama` when `ANTHROPIC_BASE_URL` is configured (with its compatible auth environment). Mock ignores provider/model. For Pi, Codex, and OpenCode, selecting `ollama` does not inject an Ollama endpoint or special credentials; any needed endpoint must be configured in the ordinary environment. These mappings are implementation behavior, not evidence of live compatibility.
 
 ```sh
-AGENT_MODE=pi AGENT_ID=pi WORKER_ID=pi-node-a ROOM=demo \
-  AGENT_CWD=/path/to/trusted/workspace AGENT_DATA_DIR=/path/to/persistent/pi-sessions npm run worker
+# Claude Code / Ollama configuration for a worker environment
+AGENT_ID=claude
+AGENT_MODE=claude
+AGENT_PROVIDER=ollama
+AGENT_MODEL=qwen2.5-coder:7b
+ANTHROPIC_BASE_URL=http://localhost:11434
+ANTHROPIC_AUTH_TOKEN=ollama
+ANTHROPIC_API_KEY=""
 
-AGENT_MODE=claude AGENT_ID=claude WORKER_ID=claude-node-b ROOM=demo \
-  AGENT_CWD=/path/to/trusted/workspace npm run worker
+# Pi provider/model configuration for a worker environment
+AGENT_ID=pi
+AGENT_MODE=pi
+AGENT_PROVIDER=ollama
+AGENT_MODEL=qwen2.5-coder:7b
+AGENT_PI_NO_TOOLS=1
 ```
 
-Export the matching `AGENT_TOKEN` and, for remote servers, `CHAT_URL=https://your-chat-origin` first. Non-loopback plain HTTP is refused by the CLI. `AGENT_BINARY` overrides the executable; `AGENT_ARGS` is a JSON array of **non-secret** optional flags (e.g. Pi provider/model). Do not override protocol/session flags. Agent cwd is intentionally explicit: tools execute there with that machine's permissions. This is a trusted-operator tool, not a multi-tenant sandbox. Pi uses its normal coding tools; Claude uses `dontAsk` (tools requiring an approval are denied, not silently auto-approved). No interactive permission relay or tool transcript UI is implemented. Pi extension dialogs are cancelled; discovered Pi extensions/skills/prompt templates are disabled.
+These are illustrative environment settings only; they were not executed and do not install/start Ollama, acquire a model, or make a provider request. `AGENT_PROVIDER=ollama` is supported by the adapter mapping as described above, but live CLI/provider behavior is unverified. Provider/model naming varies by harness; consult the [Ollama Claude Code](https://docs.ollama.com/integrations/claude-code) and [Ollama Pi](https://docs.ollama.com/integrations/pi) integration docs. Never send bearer tokens over non-loopback plain HTTP. For remote workers use HTTPS or an SSH tunnel; see [network and secure setup](docs/network-and-security.md).
 
-Pi runs `pi --mode rpc --session-id UUID --session-dir DIR`, asks `get_state`, sends a JSONL `prompt`, and waits through retries until **`agent_settled`**, not `agent_end`. Claude runs `claude --print --verbose --output-format stream-json --include-partial-messages --permission-mode dontAsk`, sends the prompt over stdin, and uses `--session-id UUID` initially / `--resume UUID` subsequently. Text deltas stream as they arrive. Completion/error/exit/deadline and cancellation are handled separately. Stderr is drained but never forwarded. Raw provider errors are replaced with generic errors to avoid leaking environment values.
+## Deployment boundary
 
-### Continuity and failure semantics
-
-- SQLite stores messages, partial output, statuses, ordered events and per-agent session UUID / mode / worker identity / initialized state.
-- **Provider session files remain on the external worker.** Keep Pi's `AGENT_DATA_DIR` and Claude's home/session directory persistent, and retain the same `WORKER_ID`, cwd and account. Server restart preserves metadata; worker restart resumes the provider session. Full provider context is not reconstructed from plain chat text and is not migrated across workers.
-- A room/agent is pinned to its first claiming worker and mode. A different identity/mode receives 409; no silent new session. To test another mode use a new room. There is no automatic reassignment/reset endpoint.
-- At most one queued/running turn per agent per room; Pi and Claude can run concurrently. A worker serves **one configured room**; run separate identities/processes/data directories for additional rooms. Do not run two copies of the same identity against the same session files.
-- A claim receives a 15-second lease, renewed every 2 seconds. Lost connectivity aborts local execution. A crashed/stalled worker becomes an error when the next room request observes the expired lease. **No automatic replay of execution**, because coding tools can have side effects. Claim-response loss may similarly leave an errored turn rather than risk duplicate execution.
-- Send IDs and sequenced updates are idempotent across HTTP retries. Cancel marks the run terminal immediately; the worker notices within its next heartbeat (plus request timeout), terminates the process group, then escalates to SIGKILL after 1.5 seconds. Already executed tool side effects cannot be undone; avoid starting another turn until cancellation has reached the worker.
-- Browser reconnect loads the last 100 runs and continues from a durable event cursor. The event API can replay the complete history in 500-record pages. The minimal UI displays text, state and errors, not tool output/thinking. Default per-turn execution deadline: 10 minutes. Prompt limit: 12K characters; output limit: 1M characters. History/events are not pruned; there is no quota/rate-limit or user management layer.
-
-## HTTP API
-
-Every API request requires `Authorization: Bearer ...`. Never use tokens in query parameters. No CORS is enabled. Room IDs and worker IDs are `[A-Za-z0-9_-]{1,64}`. JSON request bodies only.
-
-| Route under `/api/rooms/:room/` | Auth | Contract |
-| --- | --- | --- |
-| `GET history` | CHAT_TOKEN | `{runs, cursor}`; most recent 100 runs, chronological |
-| `GET events?after=N` | CHAT_TOKEN | `{events}`; ascending cursor, up to 500; repeat with last cursor |
-| `POST send` | CHAT_TOKEN | `{id, agent:"pi"\|"claude", prompt}`; 201 or idempotent 200, busy 409 |
-| `POST cancel` | CHAT_TOKEN | `{id}`; terminal run snapshot |
-| `POST agent/:agent/claim` | agent token | `{worker, mode:"pi"\|"claude"\|"mock"}` → `{task:null\|Run+resume}` |
-| `POST agent/:agent/heartbeat` | agent token | `{worker,id}` → `{cancel:boolean}` |
-| `POST agent/:agent/update` | agent token | `{worker,id,seq,update}`; sequence starts at 1 |
-
-Updates: `{kind:"session"}`, `{kind:"delta",text}`, `{kind:"done"}`, or `{kind:"error",error}`. A worker can update only its claimed agent's run; it cannot send a user message. The mock mode is allowed only when explicitly claimed. Events contain `cursor,run_id,kind,data` (JSON-encoded data); `state` events are snapshots and `delta` events append text. Snapshot + cursor are read in the same SQLite transaction. API errors do not expose internal exceptions.
-
-## Two-node infrastructure
-
-[infra/README.md](infra/README.md) documents the **locally verified** OrbStack/Docker Compose fleet with two real celld v0.6.2 Linux nodes, separate persistent volumes and one internal-only MinIO bucket. MinIO/mc are built from pinned upstream source releases because their registry pulls were denied. Only Worker ports **18877 / 18878** are published on loopback; 8787 is left to the existing Pi bridge. The separately opt-in **two-exe.dev-VM** runbook is not deployment evidence. Nothing provisions or deploys during `npm ci`, build or tests. The parent handles git/push; the infra implementation does not invoke git, cosign or any publication action.
-
-## Tests
-
-Node's test runner executes TypeScript through tsx. Miniflare runs actual workerd + SQLite Durable Objects (not in-memory class fakes). Tests cover auth/scope/isolation, concurrent claim fencing, update replay/order, restart durability, stale leases, two executable mock worker processes, incremental output, explicit targeting/no ping-pong, session metadata continuity, cancellation and subprocess protocol fixtures. Fixtures are labeled synthetic and test adapters without LLM credentials. These automated runtime tests do **not** prove celld peer routing, object-store durability or VM failover. Separately, the authorized `scripts/verify-fleet.ts` run passed against actual celld nodes on both ingress ports, and read-only celld diagnostics verified two live compatible peers. Neither check demonstrates hard-failure takeover or production storage qualification.
+The coordinator is a single authority for a room unless you deliberately configure supported Durable Object infrastructure. Historical celld/OrbStack notes in [infra/README.md](infra/README.md) are not a portable default or evidence of a currently running fleet. No hosted service, cloud-feature parity, cross-region failover, or production readiness is implied. Synthetic fixtures only; no live-provider or physical multi-host verification. The six-high-advisory dependency issue remains a public-deployment blocker; see [dependency audit](docs/DEPENDENCY-AUDIT.md).
