@@ -117,7 +117,6 @@ test("production broker relay + actual helper service worker + bridge client and
 
   let broker, native, relay, client, mcpChild;
   const openSockets = new Set();
-  let traceStage = "fixture-setup";
   const stage = (_name, promise) => promise;
   t.after(async () => {
     for (const socket of openSockets) socket.destroy();
