@@ -19,7 +19,8 @@
     "serve": "node --disable-warning=ExperimentalWarning --import tsx src/node-server.ts",
     "node:up": "node --import tsx scripts/node-up.ts",
     "build:node": "node scripts/bundle-node.mjs",
-    "gh-accounts": "node scripts/gh-accounts.mjs"
+    "gh-accounts": "node scripts/gh-accounts.mjs",
+    "e2e:codespace": "node --disable-warning=ExperimentalWarning --import tsx scripts/codespace-e2e.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "4.20251011.0",

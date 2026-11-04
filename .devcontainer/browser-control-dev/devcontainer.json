@@ -1,0 +1,15 @@
+{
+  "name": "browser-control + distributed-agent-chat (dev)",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
+  "postCreateCommand": "(cd packages/pi-agent-extensions && npm ci --no-audit --no-fund && npx playwright-core install --with-deps chromium) && (cd packages/distributed-agent-chat && npm ci --no-audit --no-fund)",
+  "containerEnv": {
+    "PI_CDP_NO_SANDBOX": "1",
+    "HOST": "127.0.0.1"
+  },
+  "forwardPorts": [18890, 18893],
+  "portsAttributes": {
+    "18890": { "label": "DAC node", "onAutoForward": "notify", "visibility": "private" },
+    "18893": { "label": "DAC e2e node", "onAutoForward": "silent", "visibility": "private" }
+  },
+  "hostRequirements": { "cpus": 2, "memory": "4gb" }
+}

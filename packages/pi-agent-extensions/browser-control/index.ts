@@ -11,6 +11,7 @@ import { PI_EVENT } from "../core/events.ts";
 import { TemporalCapture } from "./temporal-capture.ts";
 import windowsBrowserControl from "./windows.ts";
 import browserBridge from "./bridge-pi.ts";
+import cdpBrowserControl from "./cdp.ts";
 
 // --- Browser constants: local literals live together here. ---
 const PARENT = ".";
@@ -192,6 +193,7 @@ type WatchFrame = { hash: string; fingerprint: Buffer; title: string; content?: 
 
 export default function browserControl(pi: ExtensionAPI) {
   browserBridge(pi);
+  cdpBrowserControl(pi);
   if (platform() === "win32") return windowsBrowserControl(pi);
   let helperPromise: Promise<string> | undefined;
   let trail: Point[] = [];
