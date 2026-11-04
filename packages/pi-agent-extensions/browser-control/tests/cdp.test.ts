@@ -97,3 +97,53 @@ test("CDP tools drive a real Chromium with trusted, virtual input", { skip: !(aw
     for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[k] : (process.env[k] = v);
   }
 });
+
+const PAGE_READ = `<!doctype html><meta charset=utf-8><title>read fixture</title>
+<body style="margin:0"><p>hello read world</p>
+<button id=b style="position:absolute;left:100px;top:100px;width:200px;height:60px">go</button>
+<input id=i aria-label="Name field" style="position:absolute;left:100px;top:200px;width:300px">
+<button id=dlg style="position:absolute;left:100px;top:300px;width:200px;height:40px" onclick="alert('hi-dialog')">dialog</button>
+<button id=off style="position:absolute;left:100px;top:5000px;width:200px;height:40px">offscreen</button>
+<script>console.error("boom-console"); setTimeout(() => { throw new Error("boom-page"); }, 0);</script>`;
+
+test("CDP read returns text, element centers, errors and dialog dismissals", { skip: !(await chromiumAvailable()) && "no Playwright Chromium installed (npx playwright-core install chromium)" }, async () => {
+  const server = createServer((_req, res) => { res.setHeader("content-type", "text/html"); res.end(PAGE_READ); });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/`;
+  const profile = await mkdtemp(join(tmpdir(), "pi-cdp-read-test-"));
+  const env = { PI_CDP_PROFILE: process.env.PI_CDP_PROFILE, PI_CDP_NO_SANDBOX: process.env.PI_CDP_NO_SANDBOX };
+  process.env.PI_CDP_PROFILE = profile;
+  if (process.getuid?.() === 0) process.env.PI_CDP_NO_SANDBOX = "1";
+  const tools = new Map<string, { execute: Function }>();
+  const pi = { registerTool: (t: { name: string; execute: Function }) => tools.set(t.name, t), registerCommand() {}, on() {} } as unknown as ExtensionAPI;
+  const session = new CdpSession();
+  cdpBrowserControl(pi, session);
+  const run = (name: string, params: object) => tools.get(`cdp_browser_${name}`)!.execute("t", params, undefined, undefined, {});
+  const read = async () => JSON.parse((await run("read", {})).content[0].text);
+  try {
+    await run("tabs", { action: "open", url });
+    await new Promise((r) => setTimeout(r, 300));
+    const first = await read();
+    assert.match(first.text, /hello read world/);
+    assert.equal(first.text_truncated, false);
+    const go = first.elements.find((e: any) => e.name === "go");
+    assert.equal(go.role, "button");
+    assert.deepEqual(go.center, { x: 200, y: 130 });
+    const field = first.elements.find((e: any) => e.name === "Name field");
+    assert.equal(field.role, "textbox");
+    assert.ok(first.offscreen_count >= 1);
+    assert.ok(!first.elements.some((e: any) => e.name === "offscreen"));
+    assert.ok(first.errors.some((e: any) => e.kind === "console" && e.text.includes("boom-console")));
+    assert.ok(first.errors.some((e: any) => e.kind === "pageerror" && e.text.includes("boom-page")));
+    await run("observe", { delay_ms: 0 });
+    await run("act", { action: "click", x: 200, y: 320 });
+    await new Promise((r) => setTimeout(r, 200));
+    const second = await read();
+    assert.ok(second.dialogs.some((d: any) => d.type === "alert" && d.message === "hi-dialog" && d.dismissed === true));
+  } finally {
+    await session.close();
+    await new Promise((r) => server.close(r));
+    await rm(profile, { recursive: true, force: true });
+    for (const [k, v] of Object.entries(env)) v === undefined ? delete process.env[k] : (process.env[k] = v);
+  }
+});

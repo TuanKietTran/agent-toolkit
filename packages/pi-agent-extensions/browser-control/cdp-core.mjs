@@ -117,6 +117,7 @@ class CdpSession {
   context;
   page;
   trail = [];
+  readState = new Map();
   launching;
   load;
   constructor(load = () => import("playwright-core")) {
@@ -136,6 +137,7 @@ class CdpSession {
       const pages = this.context.pages();
       this.page = pages[pages.length - 1] ?? await this.context.newPage();
     }
+    this.trackPage(this.page);
     return { context: this.context, page: this.page };
   }
   async start() {
@@ -159,6 +161,8 @@ class CdpSession {
       this.context = await chromium.launchPersistentContext(profile, { headless: !headed, viewport: VIEWPORT, executablePath, args });
       this.browser = this.context.browser?.() ?? void 0;
     }
+    for (const p of this.context.pages?.() ?? []) this.trackPage(p);
+    this.context.on?.("page", (p) => this.trackPage(p));
     this.context.on?.("close", () => {
       this.context = void 0;
       this.page = void 0;
@@ -168,11 +172,25 @@ class CdpSession {
   select(page) {
     this.page = page;
     this.trail = [];
+    this.trackPage(page);
+  }
+  trackPage(page) {
+    if (!page || typeof page.on !== "function" || this.readState.has(page)) return;
+    const state = { errors: [], dialogs: [] };
+    this.readState.set(page, state);
+    const push = (entry) => { state.errors.push(entry); if (state.errors.length > 200) state.errors.shift(); };
+    page.on("console", (msg) => { try { if (msg.type() === "error") push({ kind: "console", text: msg.text() }); } catch {} });
+    page.on("pageerror", (err) => { push({ kind: "pageerror", text: String(err?.message ?? err) }); });
+    page.on("dialog", async (dialog) => { state.dialogs.push({ type: dialog.type(), message: dialog.message(), default_value: String(dialog.defaultValue?.() ?? ""), dismissed: true }); await dialog.dismiss().catch(() => {}); });
+  }
+  readData(page) {
+    return this.readState.get(page) ?? { errors: [], dialogs: [] };
   }
   async close() {
     const ctx = this.context, browser = this.browser;
     this.context = this.page = this.browser = void 0;
     this.trail = [];
+    this.readState.clear();
     if (process.env.PI_CDP_URL) {
       await browser?.close?.().catch(() => {
       });
@@ -185,6 +203,24 @@ class CdpSession {
     this.trail.push(p);
     if (this.trail.length > TRAIL_LENGTH) this.trail.shift();
   }
+}
+const READ_TEXT_MAX = 16384;
+const READ_ELEMENTS_MAX = 200;
+async function readPage(session, page) {
+  session.trackPage?.(page);
+  const data = await page.evaluate(() => {
+    const roleFor = (el) => { const explicit = el.getAttribute("role"); if (explicit) return explicit; const tag = el.tagName.toLowerCase(); if (tag === "a") return "link"; if (tag === "button") return "button"; if (tag === "select") return "combobox"; if (tag === "textarea") return "textbox"; if (tag === "input") { const t = (el.getAttribute("type") || "text").toLowerCase(); return t === "checkbox" ? "checkbox" : t === "radio" ? "radio" : ["button", "submit", "reset"].includes(t) ? "button" : t === "search" ? "searchbox" : "textbox"; } if (/^h[1-6]$/.test(tag)) return "heading"; if (tag === "img") return "img"; return tag; };
+    const nameFor = (el) => { const aria = el.getAttribute("aria-label"); if (aria?.trim()) return aria.trim(); const by = el.getAttribute("aria-labelledby"); if (by) { const joined = by.split(/\s+/).map((id) => document.getElementById(id)?.textContent || "").join(" ").trim(); if (joined) return joined; } const lab = el.labels?.[0]?.textContent || document.querySelector(`label[for="${el.id}"]`)?.textContent || ""; if (lab.trim()) return lab.trim(); return String(el.innerText || el.value || el.getAttribute("placeholder") || el.getAttribute("title") || el.getAttribute("alt") || "").trim().replace(/\s+/g, " "); };
+    const selector = 'a[href],button,input,select,textarea,[role="button"],[role="link"],[role="checkbox"],[role="radio"],[role="textbox"],[role="combobox"],[role="tab"],[role="menuitem"],[tabindex],[contenteditable=""],[contenteditable="true"],summary';
+    const items = [];
+    for (const el of document.querySelectorAll(selector)) { const rect = el.getBoundingClientRect(); if (rect.width <= 0 || rect.height <= 0) continue; const style = getComputedStyle(el); if (style.display === "none" || style.visibility === "hidden") continue; items.push({ role: roleFor(el), name: nameFor(el).slice(0, 200), center: { x: Math.round(rect.left + rect.width / 2), y: Math.round(rect.top + rect.height / 2) }, bbox: { x: Math.round(rect.left), y: Math.round(rect.top), width: Math.round(rect.width), height: Math.round(rect.height) }, in_viewport: rect.bottom > 0 && rect.right > 0 && rect.top < innerHeight && rect.left < innerWidth }); }
+    return { text: document.body?.innerText || "", viewport: { width: innerWidth, height: innerHeight }, items };
+  });
+  const inViewport = data.items.filter((item) => item.in_viewport);
+  const raw = data.text || "";
+  const truncatedText = Buffer.byteLength(raw) > READ_TEXT_MAX;
+  const state = session.readData ? session.readData(page) : { errors: [], dialogs: [] };
+  return { url: page.url(), title: await page.title().catch(() => ""), viewport: data.viewport, text: truncatedText ? Buffer.from(raw).subarray(0, READ_TEXT_MAX).toString("utf8") : raw, text_truncated: truncatedText, elements: inViewport.slice(0, READ_ELEMENTS_MAX), element_count: Math.min(inViewport.length, READ_ELEMENTS_MAX), offscreen_count: data.items.length - inViewport.length, elements_truncated: inViewport.length > READ_ELEMENTS_MAX, errors: state.errors.slice(-50), dialogs: [...state.dialogs] };
 }
 async function observePage(session, page) {
   const size = page.viewportSize() ?? await page.evaluate(() => ({ width: innerWidth, height: innerHeight }));
@@ -268,5 +304,6 @@ export {
   normalizeKey,
   observePage,
   perform,
+  readPage,
   validatedUrl
 };

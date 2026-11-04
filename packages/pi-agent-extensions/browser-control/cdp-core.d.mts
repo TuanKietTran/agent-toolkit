@@ -12,6 +12,9 @@ export const sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
 
 export class CdpSession {
   trail: Point[];
+  readState: Map<any, { errors: unknown[]; dialogs: unknown[] }>;
+  trackPage(page: any): void;
+  readData(page: any): { errors: any[]; dialogs: any[] };
   constructor(load?: () => Promise<any>);
   get connected(): boolean;
   ensure(): Promise<{ context: any; page: any }>;
@@ -21,4 +24,5 @@ export class CdpSession {
 }
 
 export function observePage(session: CdpSession, page: any): Promise<{ image: Buffer; view: { width: number; height: number; url: string; title: string } }>;
+export function readPage(session: CdpSession, page: any): Promise<Record<string, unknown>>;
 export function perform(session: CdpSession, page: any, view: { width: number; height: number }, params: any, signal?: AbortSignal): Promise<Record<string, unknown>>;
