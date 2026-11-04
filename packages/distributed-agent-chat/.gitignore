@@ -1,0 +1,12 @@
+node_modules/
+dist/
+.wrangler/
+.celld/
+.deploy/
+.agent-data/
+.env
+.env.*
+!.env.example
+.dev.vars
+*.log
+.node-data/

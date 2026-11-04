@@ -1,0 +1,51 @@
+{
+  "name": "pi-agent-extensions",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "description": "TuanKietTran's bundled extensions for the Pi coding agent",
+  "keywords": [
+    "pi-package"
+  ],
+  "license": "MIT",
+  "bin": { "pi-browser-mcp": "./browser-control/mcp-server.mjs" },
+  "scripts": {
+    "check": "tsc --noEmit",
+    "test": "npm run build:min && node --test core/dev/*.test.ts claude-cli/*.test.ts muse-proxy/*.test.ts opencode-cli/*.test.ts browser-control/tests/*.test.ts browser-control/tests/*.test.mjs browser-control/helper-extension/*.test.mjs browser-control/native-host/tests/*.test.mjs touchbar-usage/tests/*.test.mjs tests/*.test.mjs",
+    "install:tui": "node ./tui/install-layout.mjs",
+    "build:min": "node scripts/minify.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "^1.52.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./gc-assets/index.ts",
+      "./thinking-control.ts",
+      "./usage-roundrobin.ts",
+      "./remote-control.ts",
+      "./touchbar-usage/index.ts",
+      "./browser-control/index.ts",
+      "./claude-cli/index.ts",
+      "./muse-proxy/index.ts",
+      "./opencode-cli/index.ts"
+    ]
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "^0.87.1",
+    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@earendil-works/pi-tui": "^0.87.1",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typebox": "^1.3.27",
+    "typescript": "^5.7.0"
+  }
+}

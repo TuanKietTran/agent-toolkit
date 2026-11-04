@@ -1,0 +1,21 @@
+{
+  "name": "lab-gui-desktop",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Desktop client (macOS, Windows) for the lab board: the lab-gui server inside an Electron window",
+  "license": "MIT",
+  "main": "main.mjs",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test test/*.test.mjs",
+    "stage": "node scripts/stage.mjs",
+    "package": "node scripts/package.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "^20.3.0",
+    "electron": "^45.2.1"
+  }
+}

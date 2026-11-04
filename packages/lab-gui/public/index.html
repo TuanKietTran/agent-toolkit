@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark light">
+<meta name="lab-gui-token" content="__LAB_GUI_TOKEN__">
+<title>Lab Deck</title>
+<link rel="icon" href="/icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<a class="skip" href="#board">Skip to the lab graph</a>
+<header class="top">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="3" width="12" height="12" rx="3" class="m-b"/><circle cx="23" cy="9" r="6" class="m-e"/><path d="M9 29 3 19h12z" class="m-a"/><path d="M15 9h2M9 15v4" class="m-l"/></svg>
+    <div><h1>Lab Deck</h1><p class="sub">build · explore · review</p></div>
+  </div>
+  <div class="chips" id="summary" role="status" aria-live="polite" aria-label="Fleet summary"></div>
+  <div class="tools">
+    <label class="filter"><span class="sr">Filter labs</span><input id="filter" type="search" placeholder="Filter  ( / )" autocomplete="off" spellcheck="false"></label>
+    <button type="button" id="theme" class="btn icon" aria-label="Choose a theme" title="Themes (t); next theme (Shift+T)"><span aria-hidden="true">◐</span></button>
+    <button type="button" id="help" class="btn icon" aria-label="Keyboard shortcuts" title="Shortcuts (?)"><span aria-hidden="true">?</span></button>
+  </div>
+</header>
+
+<main id="main" class="layout">
+  <section id="board" class="board" aria-label="Labs" tabindex="-1">
+    <ul class="legend" aria-label="Roles">
+      <li class="kind-builder"><span class="swatch"></span>Builder <small>Sonnet</small></li>
+      <li class="kind-explorer"><span class="swatch"></span>Explorer <small>Haiku</small></li>
+      <li class="kind-advisor"><span class="swatch"></span>Advisor <small>Opus</small></li>
+      <li class="kind-manager"><span class="swatch"></span>Manager</li>
+      <li class="kind-worker"><span class="swatch"></span>Worker</li>
+    </ul>
+    <div id="graph" class="graph" aria-label="Lab graph: lead to helpers"></div>
+    <ul id="list" class="list" aria-label="Lab list"></ul>
+    <p id="empty" class="empty" hidden>No labs running. Open a team with <code>lab-team up -p demo</code> or any lab with <code>agent-cli-lab open</code>.</p>
+    <p id="problem" class="problem" role="alert" hidden></p>
+  </section>
+
+  <aside id="panel" class="panel" aria-label="Lab details" hidden>
+    <div class="panel-head">
+      <div><h2 id="p-name"></h2><p id="p-sub" class="muted"></p></div>
+      <button type="button" id="p-close" class="btn icon" aria-label="Close details" title="Close (Esc)"><span aria-hidden="true">×</span></button>
+    </div>
+    <dl id="p-meta" class="meta"></dl>
+    <div class="spark-row"><span class="muted">Activity</span><svg id="p-spark" class="spark big" viewBox="0 0 240 36" preserveAspectRatio="none" role="img" aria-label="Output activity"></svg></div>
+    <h3>Live screen</h3>
+    <pre id="p-screen" class="screen" tabindex="0" role="log" aria-label="Live screen of the selected lab"></pre>
+    <form id="p-form" class="send" autocomplete="off">
+      <label class="sr" for="p-text">Message to send</label>
+      <textarea id="p-text" rows="2" placeholder="Message this lab  (Enter sends, Shift+Enter for a new line)" spellcheck="false"></textarea>
+      <div class="row">
+        <button type="submit" class="btn primary">Send</button>
+        <button type="button" class="btn" data-key="Enter" title="Press Enter in the lab">Enter</button>
+        <button type="button" class="btn" data-key="Esc" title="Press Escape in the lab">Esc</button>
+        <button type="button" id="p-attach" class="btn" title="Open this lab in a terminal window">Attach</button>
+        <span class="grow"></span>
+        <button type="button" id="p-stop" class="btn danger">Stop…</button>
+      </div>
+      <p id="p-msg" class="note" role="status" aria-live="polite"></p>
+    </form>
+  </aside>
+</main>
+
+<dialog id="confirm" aria-labelledby="c-title">
+  <form method="dialog">
+    <h2 id="c-title">Stop this lab?</h2>
+    <p id="c-body"></p>
+    <div class="row end">
+      <button value="cancel" class="btn" autofocus>Cancel</button>
+      <button value="stop" id="c-ok" class="btn danger">Stop lab</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="themes" aria-labelledby="th-title">
+  <h2 id="th-title">Theme</h2>
+  <p class="muted">Arrow keys preview, Enter keeps one, Esc goes back.</p>
+  <ul id="theme-list" class="theme-list" role="listbox" tabindex="0" aria-label="Themes"></ul>
+  <div class="row end"><button type="button" id="th-cancel" class="btn">Cancel</button></div>
+</dialog>
+
+<dialog id="shortcuts" aria-labelledby="s-title">
+  <form method="dialog">
+    <h2 id="s-title">Keyboard</h2>
+    <dl class="keys">
+      <dt><kbd>↑</kbd> <kbd>↓</kbd> <kbd>←</kbd> <kbd>→</kbd></dt><dd>move between labs</dd>
+      <dt><kbd>Enter</kbd></dt><dd>open the selected lab</dd>
+      <dt><kbd>Esc</kbd></dt><dd>close details</dd>
+      <dt><kbd>/</kbd></dt><dd>filter labs</dd>
+      <dt><kbd>m</kbd></dt><dd>message the open lab</dd>
+      <dt><kbd>t</kbd></dt><dd>choose a theme (preview with arrows)</dd>
+      <dt><kbd>Shift</kbd> <kbd>T</kbd></dt><dd>next theme</dd>
+    </dl>
+    <div class="row end"><button class="btn primary" autofocus>Close</button></div>
+  </form>
+</dialog>
+
+<div id="announce" class="sr" aria-live="polite"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

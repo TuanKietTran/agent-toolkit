@@ -1,0 +1,51 @@
+{
+  "_doc": "Single source of truth for per-package workflows. Every package exposes the same verbs (install, check, test, build); a missing verb means 'nothing to do'. `dependsOn` lists sibling packages whose changes should also trigger this one. `os` is the CI runner.",
+  "packages": {
+    "agent-cli-lab": {
+      "os": "ubuntu-latest",
+      "toolchain": "rust",
+      "check": "cargo check --locked",
+      "test": "cargo test --locked",
+      "build": "cargo build --locked"
+    },
+    "distributed-agent-chat": {
+      "toolchain": "node",
+      "install": "npm ci",
+      "check": "npx tsc --noEmit",
+      "test": "npm test",
+      "build": "npm run build"
+    },
+    "pi-agent-extensions": {
+      "os": "macos-latest",
+      "toolchain": "node",
+      "install": "npm ci",
+      "check": "npm run check",
+      "test": "npm test",
+      "build": "npm run build:min"
+    },
+    "skills": {
+      "dir": "skills",
+      "toolchain": "python",
+      "test": "python3 -m unittest discover -s tests -p 'test_*.py' && python3 -m unittest discover -s orchestrator-options/client -p 'test_*.py' && python3 -m unittest discover -s lab-commander/tests -p 'test_*.py'"
+    },
+    "system-one": {
+      "toolchain": "python",
+      "install": "uv sync",
+      "test": "uv run pytest"
+    },
+    "lab-gui": {
+      "os": "ubuntu-latest",
+      "toolchain": "node",
+      "test": "npm test"
+    },
+    "lab-gui-desktop": {
+      "os": "macos-latest",
+      "toolchain": "node",
+      "dependsOn": [
+        "lab-gui"
+      ],
+      "install": "npm ci",
+      "test": "npm test"
+    }
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "assistant_events_without_model": 0,
+  "candidate_assistant_events": 8104,
+  "class_balance": {
+    "continuing": 0.994188,
+    "existing": 0.002597,
+    "new": 0.003215
+  },
+  "confounds": {
+    "claude_sessions": "Claude Code sessions mostly reflect manual model choices",
+    "pi_sessions": "pi source is confounded by the auto round-robin switcher; model_change_events are retained as metadata",
+    "session_split": "session-hash split prevents same-session leakage",
+    "sidechain_candidate_assistant_events": 109
+  },
+  "decision_points": 8087,
+  "decision_points_by_source": {
+    "claude": 8052,
+    "pi": 35
+  },
+  "explicit_resume_decision_points": 0,
+  "feature_coverage": {
+    "context_size_missing": 9,
+    "idle_gap_ge_30_minutes": 21,
+    "idle_gap_ge_30_minutes_in_decisions": 21,
+    "max_idle_gap_minutes": 24829.806,
+    "max_turn_index": 984,
+    "records_with_image": 248,
+    "records_with_tool_result": 21,
+    "records_with_tool_use": 6862
+  },
+  "junk_model_events": 17,
+  "model_change_events": 6,
+  "permission_drops": {
+    "permission_event_type": 1313,
+    "permission_mode_field": 2931
+  },
+  "permission_drops_total": 4244,
+  "privacy": {
+    "excluded": "message text, prompts, tool arguments/results, file contents, source paths",
+    "permission_filter": "drop any record with permission/approval/consent/allow/deny/grant/confirm structural keys or permission event type",
+    "stored_fields": "metadata only; timestamps, hashed session ids, roles, event type, model, counts, names, lengths, flags"
+  },
+  "records_per_model": {
+    "claude-haiku-5-5": 1018,
+    "claude-opus-5": 248,
+    "claude-sonnet-5": 27,
+    "claude-sonnet-5-5": 6771,
+    "gpt-5.6-luna": 23
+  },
+  "records_per_situation": {
+    "continuing": 8040,
+    "existing": 21,
+    "new": 26
+  },
+  "records_per_situation_and_model": {
+    "continuing:claude-haiku-5-5": 1011,
+    "continuing:claude-opus-5": 240,
+    "continuing:claude-sonnet-5": 26,
+    "continuing:claude-sonnet-5-5": 6740,
+    "continuing:gpt-5.6-luna": 23,
+    "existing:claude-haiku-5-5": 1,
+    "existing:claude-opus-5": 2,
+    "existing:claude-sonnet-5-5": 18,
+    "new:claude-haiku-5-5": 6,
+    "new:claude-opus-5": 6,
+    "new:claude-sonnet-5": 1,
+    "new:claude-sonnet-5-5": 13
+  },
+  "records_per_source_and_situation": {
+    "claude:continuing": 8010,
+    "claude:existing": 18,
+    "claude:new": 24,
+    "pi:continuing": 30,
+    "pi:existing": 3,
+    "pi:new": 2
+  },
+  "records_per_split": {
+    "test": 350,
+    "train": 6660,
+    "validation": 1077
+  },
+  "records_per_split_and_situation": {
+    "test:continuing": 345,
+    "test:existing": 3,
+    "test:new": 2,
+    "train:continuing": 6622,
+    "train:existing": 16,
+    "train:new": 22,
+    "validation:continuing": 1073,
+    "validation:existing": 2,
+    "validation:new": 2
+  },
+  "records_scanned": 26831,
+  "resume_gap_events": 23,
+  "sessions": 34,
+  "sidechain_candidate_assistant_events": 109,
+  "sources": {
+    "claude": {
+      "files": 31
+    },
+    "pi": {
+      "files": 3
+    }
+  },
+  "split_strategy": "session hash: train buckets 0-7, validation 8, test 9"
+}

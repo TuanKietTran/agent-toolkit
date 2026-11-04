@@ -1,0 +1,66 @@
+name: Lab Deck desktop
+
+# Builds the macOS and Windows desktop apps, runs them against two throwaway labs and checks they
+# paint (scripts/smoke.mjs), then keeps the unsigned apps as workflow artifacts.
+on:
+  push:
+    paths:
+      - "packages/lab-gui/**"
+      - "packages/lab-gui-desktop/**"
+      - "packages/agent-cli-lab/**"
+      - ".github/workflows/desktop.yml"
+  pull_request:
+    paths:
+      - "packages/lab-gui/**"
+      - "packages/lab-gui-desktop/**"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macOS, os: macos-latest, platform: darwin, arch: arm64, exe: "out/Lab Deck-darwin-arm64/Lab Deck.app/Contents/MacOS/Lab Deck", dir: "out/Lab Deck-darwin-arm64" }
+          - { name: Windows, os: windows-latest, platform: win32, arch: x64, exe: "out/Lab Deck-win32-x64/Lab Deck.exe", dir: "out/Lab Deck-win32-x64" }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Build agent-cli-lab (the apps read labs through it)
+        working-directory: packages/agent-cli-lab
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+          cargo build --locked
+      - name: Lab GUI tests
+        working-directory: packages/lab-gui
+        run: npm test
+      - name: Desktop install and tests
+        working-directory: packages/lab-gui-desktop
+        run: |
+          npm ci
+          npm test
+      - name: Package
+        working-directory: packages/lab-gui-desktop
+        run: node scripts/package.mjs ${{ matrix.platform }} ${{ matrix.arch }}
+      - name: Smoke test the packaged app against throwaway labs
+        working-directory: packages/lab-gui-desktop
+        env:
+          AGENT_CLI_LAB_BIN: ${{ github.workspace }}/packages/agent-cli-lab/target/debug/agent-cli-lab${{ matrix.platform == 'win32' && '.exe' || '' }}
+        run: node scripts/smoke.mjs "${{ matrix.exe }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lab-deck-${{ matrix.platform }}-${{ matrix.arch }}
+          path: packages/lab-gui-desktop/${{ matrix.dir }}
+          retention-days: 14

@@ -1,0 +1,56 @@
+#!/bin/sh
+# Touch Bar host entrypoint. Prints one line, always exits 0.
+#
+# BetterTouchTool and MTMR are launched by launchd with
+# PATH=/usr/bin:/bin:/usr/sbin:/sbin and no shell profile, so a node installed
+# via fnm/nvm/volta/asdf simply does not exist to them. That failure is silent
+# — the widget just stays blank forever with no error anywhere. Hence the
+# explicit candidate list rather than relying on PATH.
+
+set -u
+
+# Same reasoning as os.homedir() in the core: $HOME is unset or stale under
+# launchd and under a tmux server that outlived its spawning shell.
+HOME_DIR=$(dscl . -read "/Users/$(id -un)" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+[ -n "${HOME_DIR:-}" ] || HOME_DIR="${HOME:-}"
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+CORE="$SCRIPT_DIR/../src/usage.mjs"
+CACHE="$HOME_DIR/.pi/usage-touchbar.txt"
+
+find_node() {
+  if [ -n "${PI_USAGEBAR_NODE:-}" ] && [ -x "${PI_USAGEBAR_NODE}" ]; then
+    echo "$PI_USAGEBAR_NODE"; return
+  fi
+  for candidate in \
+    /opt/homebrew/bin/node \
+    /usr/local/bin/node \
+    "$HOME_DIR/.local/share/fnm/aliases/default/bin/node" \
+    "$HOME_DIR/.volta/bin/node" \
+    "$HOME_DIR/.asdf/shims/node" \
+    "$HOME_DIR"/.nvm/versions/node/*/bin/node \
+    /usr/bin/node
+  do
+    [ -x "$candidate" ] && { echo "$candidate"; return; }
+  done
+  command -v node 2>/dev/null
+}
+
+NODE=$(find_node)
+
+# No node, or the core is missing: fall back to the last published line rather
+# than emitting nothing. A stale number beats an empty strip.
+if [ -z "${NODE:-}" ] || [ ! -f "$CORE" ]; then
+  if [ -f "$CACHE" ]; then cat "$CACHE"; else echo "CC —  ·  CX —"; fi
+  exit 0
+fi
+
+OUT=$("$NODE" "$CORE" "$@" 2>/dev/null)
+if [ -n "$OUT" ]; then
+  printf '%s\n' "$OUT"
+elif [ -f "$CACHE" ]; then
+  cat "$CACHE"
+else
+  echo "CC —  ·  CX —"
+fi
+exit 0

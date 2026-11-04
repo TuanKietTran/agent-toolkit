@@ -1,0 +1,9 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+# data/ is local by design: decision_points.jsonl is row-level metadata about the owner's own sessions.
+# Keep the runtime model and functional inventory summary tracked.
+data/*
+!data/student_model.json
+!data/inventory_summary.json

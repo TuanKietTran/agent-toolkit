@@ -1,0 +1,121 @@
+{
+  "at": 1700000014000,
+  "labs": [
+    {
+      "name": "lead",
+      "role": "builder",
+      "kind": "builder",
+      "parent": null,
+      "children": [
+        "scout",
+        "review"
+      ],
+      "state": "working",
+      "model": "claude-cli/claude-sonnet-5-5",
+      "modelLabel": "sonnet-5-5",
+      "modelFamily": "sonnet",
+      "quietMs": 10,
+      "uptimeMs": 1000,
+      "title": "lead",
+      "cwd": "/work/app",
+      "pid": 101,
+      "samples": [
+        0,
+        500,
+        200
+      ],
+      "usage": {
+        "input": 6,
+        "output": 350,
+        "cacheRead": 31000,
+        "cacheWrite": 23000,
+        "cacheHitPct": 36.7,
+        "costUsd": 0.005,
+        "contextPct": 9,
+        "contextWindow": 200000
+      }
+    },
+    {
+      "name": "scout",
+      "role": "explorer",
+      "kind": "explorer",
+      "parent": "lead",
+      "children": [],
+      "state": "asking",
+      "model": "claude-cli/claude-haiku-5-5",
+      "modelLabel": "haiku-5-5",
+      "modelFamily": "haiku",
+      "quietMs": 10,
+      "uptimeMs": 1000,
+      "title": "scout",
+      "cwd": "/work/app",
+      "pid": 102,
+      "samples": [
+        0,
+        500,
+        200
+      ],
+      "usage": {
+        "input": 4,
+        "output": 120,
+        "cacheRead": 9000,
+        "cacheWrite": 2000,
+        "costUsd": 0.001
+      }
+    },
+    {
+      "name": "review",
+      "role": "advisor",
+      "kind": "advisor",
+      "parent": "lead",
+      "children": [],
+      "state": "stalled",
+      "model": "claude-cli/claude-opus-5-5",
+      "modelLabel": "opus-5-5",
+      "modelFamily": "opus",
+      "quietMs": 10,
+      "uptimeMs": 1000,
+      "title": "review",
+      "cwd": "/work/app",
+      "pid": 103,
+      "samples": [
+        0,
+        500,
+        200
+      ],
+      "usage": null
+    },
+    {
+      "name": "solo",
+      "role": null,
+      "kind": "lab",
+      "parent": null,
+      "children": [],
+      "state": "working",
+      "model": null,
+      "modelLabel": "unknown",
+      "modelFamily": "unknown",
+      "quietMs": 10,
+      "uptimeMs": 1000,
+      "title": "solo",
+      "cwd": "/work/other",
+      "pid": 104,
+      "samples": [
+        0,
+        500,
+        200
+      ],
+      "usage": null
+    }
+  ],
+  "totals": {
+    "total": 4,
+    "working": 2,
+    "asking": 1,
+    "stalled": 1,
+    "gone": 0,
+    "costUsd": 0.006,
+    "tokens": 65480
+  },
+  "error": null
+}

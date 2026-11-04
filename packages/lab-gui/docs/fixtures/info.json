@@ -1,0 +1,7 @@
+{
+  "name": "lab-gui",
+  "api": 1,
+  "remote": true,
+  "control": false,
+  "attach": false
+}

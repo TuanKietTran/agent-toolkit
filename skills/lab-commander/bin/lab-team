@@ -1,0 +1,99 @@
+#!/bin/sh
+# lab-team: open or close the three-role team as agent-cli-lab labs.
+#   builder  (Sonnet 5.5)  does the work
+#   explorer (Haiku 5.5)   reads and searches, read-only
+#   advisor  (Opus 5.5)    reviews plans and results, consulted sparingly
+# All three are Pi labs on the claude-cli provider. The builder hangs under --parent
+# (default: the lab this runs in, or none); explorer and advisor hang under the builder,
+# so `agent-cli-lab console` and the lab GUI draw lead -> helpers.
+#
+#   lab-team up   -p PREFIX [--parent NAME] [--cwd DIR] [--only builder,explorer,advisor]
+#   lab-team down -p PREFIX [--only ...]
+#   lab-team plan -p PREFIX [...]      print the open commands without running them
+# LAB_TEAM_OPEN_ARGS adds arguments to every `agent-cli-lab open`, for example --detached
+# to host the labs without opening terminal windows.
+set -eu
+
+usage() {
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//' >&2
+  exit "${1:-2}"
+}
+
+LAB_BIN=${AGENT_CLI_LAB_BIN:-agent-cli-lab}
+BUILDER_MODEL=${LAB_TEAM_BUILDER_MODEL:-claude-sonnet-5-5}
+EXPLORER_MODEL=${LAB_TEAM_EXPLORER_MODEL:-claude-haiku-5-5}
+ADVISOR_MODEL=${LAB_TEAM_ADVISOR_MODEL:-claude-opus-5-5}
+
+[ $# -ge 1 ] || usage
+action=$1
+shift
+case "$action" in up | down | plan) ;; -h | --help) usage 0 ;; *) usage ;; esac
+
+prefix=
+parent=${AGENT_CLI_LAB_SELF:-}
+cwd=$(pwd)
+only=builder,explorer,advisor
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -p | --prefix) prefix=${2:?missing value for $1}; shift 2 ;;
+    --parent) parent=${2:?missing value for $1}; shift 2 ;;
+    --cwd) cwd=${2:?missing value for $1}; shift 2 ;;
+    --only) only=${2:?missing value for $1}; shift 2 ;;
+    -h | --help) usage 0 ;;
+    *) echo "lab-team: unknown option $1" >&2; usage ;;
+  esac
+done
+[ -n "$prefix" ] || { echo "lab-team: --prefix is required" >&2; usage; }
+case "$prefix" in
+  "" | [!A-Za-z0-9]* | *[!A-Za-z0-9._-]*) echo "lab-team: prefix must start with a letter or digit and use only letters, digits, . _ -" >&2; exit 2 ;;
+esac
+[ ${#prefix} -le 29 ] || { echo "lab-team: prefix is limited to 29 characters (lab names are 40 at most)" >&2; exit 2; }
+
+wants() {
+  case ",$only," in *",$1,"*) return 0 ;; *) return 1 ;; esac
+}
+for role in $(printf '%s' "$only" | tr ',' ' '); do
+  case "$role" in builder | explorer | advisor) ;; *) echo "lab-team: unknown role $role" >&2; exit 2 ;; esac
+done
+
+# Claude Code sets these in its own sessions; a nested claude must not inherit them.
+UNSET="CLAUDE_CODE_ENTRYPOINT CLAUDE_CODE_MESSAGING_SOCKET CLAUDE_CODE_MESSAGING_TOKEN CLAUDE_CODE_BRIDGE_SESSION_ID CLAUDE_CODE_EXECPATH CLAUDECODE CLAUDE_CODE_SESSION_ID CLAUDE_CODE_CHILD_SESSION CLAUDE_CODE_SESSION_ATTENDED CLAUDE_PID CLAUDE_EFFORT"
+
+open_lab() { # role model parent
+  role=$1 model=$2 lab_parent=$3
+  name="$prefix-$role"
+  set -- "$LAB_BIN" open -n "$name" --role "$role" --model "claude-cli/$model" --cwd "$cwd"
+  if [ -n "${LAB_TEAM_OPEN_ARGS:-}" ]; then
+    set -f # split the extra arguments on spaces, but never expand globs
+    # shellcheck disable=SC2086
+    set -- "$@" $LAB_TEAM_OPEN_ARGS
+    set +f
+  fi
+  [ -z "$lab_parent" ] || set -- "$@" --parent "$lab_parent"
+  set -- "$@" -- env
+  for var in $UNSET; do set -- "$@" -u "$var"; done
+  set -- "$@" pi --provider claude-cli --model "$model" --no-session
+  if [ "$action" = plan ]; then
+    printf '%s\n' "$*"
+  else
+    "$@"
+  fi
+}
+
+case "$action" in
+  up | plan)
+    # Builder first: the helpers' parent link points at it.
+    helper_parent=$parent
+    if wants builder; then
+      open_lab builder "$BUILDER_MODEL" "$parent"
+      helper_parent="$prefix-builder"
+    fi
+    if wants explorer; then open_lab explorer "$EXPLORER_MODEL" "$helper_parent"; fi
+    if wants advisor; then open_lab advisor "$ADVISOR_MODEL" "$helper_parent"; fi
+    ;;
+  down)
+    for role in advisor explorer builder; do
+      if wants "$role"; then "$LAB_BIN" stop -n "$prefix-$role" || true; fi
+    done
+    ;;
+esac

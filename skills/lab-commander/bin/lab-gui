@@ -1,0 +1,10 @@
+#!/bin/sh
+# lab-gui: start the local lab board (packages/lab-gui) on 127.0.0.1. Pass --open to open the browser.
+set -eu
+self=$0
+while [ -L "$self" ]; do
+  target=$(readlink "$self")
+  case "$target" in /*) self=$target ;; *) self=$(dirname "$self")/$target ;; esac
+done
+here=$(CDPATH= cd -- "$(dirname -- "$self")" && pwd -P)
+exec node "$here/../../../packages/lab-gui/server.mjs" "$@"

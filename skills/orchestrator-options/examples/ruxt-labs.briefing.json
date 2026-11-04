@@ -1,0 +1,106 @@
+{
+  "decision": "How to run three independent engineering jobs on the ruxt repo (Cloudflare deploy target, core/API migration into the CQRS core, Lighthouse 95+) unattended on local pi workers.",
+  "situation": "ruxt is a Nuxt 4 / Nitro CV workspace with a framework-free core package (@ruxt/core, separate repo, pinned from the registry). The three jobs touch different areas but share nuxt.config.ts, package.json and the lockfile. The owner wants them running now on cheap local workers (gpt-6-luna) with no one to answer questions. The box is Windows and clean origin/main fails to build here with a Node ESM error ('Received protocol d:'), which blocks the build gate of all three jobs.",
+  "assumptions": [
+    "'Migrate core server and API service to ruxt' means finishing the move of business logic out of the Nitro server into the CQRS core and leaving the server as a thin API adapter (docs/repository-split.md, specs/cv-server-workflows.md build-order item 1). The migrate worker confirms or corrects this from the code and records it.",
+    "'Overall score 95' means all four Lighthouse categories at 95 or more, median of 3 runs, mobile and desktop, on a production build.",
+    "Workers commit locally on lab branches. Nothing is pushed, published or deployed; that stays with the owner.",
+    "The owner pinned the worker model (gpt-6-luna). System One is used only for model picks, never for permission or approval matters.",
+    "Questions raised by workers are answered by the manager. Permissions, credentials, publishing and access changes are not decided by anyone in the run: they are recorded as BLOCKED, the work routes around them, and the commander reports them once at the end."
+  ],
+  "options": [
+    {
+      "id": "A",
+      "title": "Three isolated worktrees in parallel, one manager",
+      "summary": "One git worktree and branch per job, a shared protocol, one manager agent that handles events and questions and coordinates the shared build fix.",
+      "system1_plan": [
+        "Create three worktrees from origin/main and write PROTOCOL.md plus one brief per job",
+        "Open the three workers in visible windows with their briefs",
+        "Start the manager with the handover rule: observe, then take over as the only writer to worker windows",
+        "Manager loop: block on asking/stalled/gone events, answer questions itself, continue stalled workers, verify milestones independently",
+        "Route the Windows build fix from the lighthouse worker to the other two as one cherry-pickable commit",
+        "At the end the manager writes an integration plan: merge order, expected conflicts, tests"
+      ],
+      "fallback": "If a worker keeps failing the same card, resume it from a RESUME note on the model System One picks; if the manager dies, the commander restarts it from its HANDOVER note.",
+      "cost": "medium",
+      "time_to_value": "First commits within 10 minutes; all three jobs in parallel",
+      "risk": "medium",
+      "reversibility": "high",
+      "upsides": [
+        "Parallel progress with no file collisions during work",
+        "Everything lives on local branches, so any of it can be dropped",
+        "The manager removes the commander as a bottleneck"
+      ],
+      "downsides": [
+        "Merging the three branches later will conflict in nuxt.config.ts, package.json and the lockfile"
+      ]
+    },
+    {
+      "id": "B",
+      "title": "One worker, jobs in sequence",
+      "summary": "A single lab does Cloudflare, then the migration, then Lighthouse, on one branch.",
+      "system1_plan": [
+        "Open one worker with all three briefs in priority order",
+        "Commander or manager checks in between jobs"
+      ],
+      "fallback": "If the first job stalls on the build error, skip ahead to a job that does not need a build.",
+      "cost": "low",
+      "time_to_value": "First result after the first job; the last job finishes hours later",
+      "risk": "low",
+      "reversibility": "high",
+      "upsides": [
+        "No merge conflicts",
+        "Smallest quota use"
+      ],
+      "downsides": [
+        "Three times as slow, and a stuck first job blocks the other two"
+      ]
+    },
+    {
+      "id": "C",
+      "title": "Two parallel labs, Lighthouse after the migration",
+      "summary": "Run Cloudflare and the migration together; start Lighthouse once the migration settles app and server structure.",
+      "system1_plan": [
+        "Open the compat and migrate workers",
+        "Start the lighthouse worker when the migrate worker reports its slices done",
+        "Share the build fix between the two running workers"
+      ],
+      "fallback": "If the migration drags, start Lighthouse anyway on its own branch.",
+      "cost": "medium",
+      "time_to_value": "Two jobs show progress at once; Lighthouse is delayed",
+      "risk": "low",
+      "reversibility": "high",
+      "upsides": [
+        "Fewer overlapping edits between the app-level and server-level work"
+      ],
+      "downsides": [
+        "Lighthouse starts late, and its Windows build diagnosis would have helped the other two early"
+      ]
+    },
+    {
+      "id": "D",
+      "title": "Do less: Cloudflare target only",
+      "summary": "Run only the compatibility job now; leave the migration and Lighthouse for later.",
+      "system1_plan": [
+        "Open the compat worker alone",
+        "Revisit the other two jobs when it finishes"
+      ],
+      "fallback": "None needed; nothing else is running.",
+      "cost": "low",
+      "time_to_value": "Fastest single deliverable",
+      "risk": "low",
+      "reversibility": "high",
+      "upsides": [
+        "Minimal quota and attention"
+      ],
+      "downsides": [
+        "Two of the three requested jobs do not start"
+      ]
+    }
+  ],
+  "recommendation": {
+    "option_id": "A",
+    "rationale": "The jobs live in different areas of the repo, worktrees make their branches independent, and local branches are free to discard, so parallel work costs little and finishes fastest. The merge conflicts in shared files are known in advance and are handled once, at the end, by the integration plan, which is cheaper than serialising three jobs (B, C) or dropping two (D)."
+  },
+  "selection_guidance": "Take A unless the shared build error cannot be diagnosed within about an hour; then fall back to C so fewer workers wait on it. Choose D only if the quota used is above 80 percent. Workers' questions: the manager decides them itself from the briefs and specs, preferring the smaller, more reversible reading, and logs each decision with its reason. Permissions, credentials, publishing and anything that widens access are never decided here: mark them BLOCKED, route the work around them and report them once in the final summary. Model choices go through System One; its answer is a recommendation and an owner-pinned model wins."
+}

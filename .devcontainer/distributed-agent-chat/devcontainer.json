@@ -1,0 +1,23 @@
+{
+  "name": "distributed-agent-chat (Codespace node)",
+  "image": "mcr.microsoft.com/devcontainers/typescript-node:1-22-bookworm",
+  "postCreateCommand": "cd packages/distributed-agent-chat && npm ci --no-audit --no-fund",
+  "containerEnv": {
+    "HOST": "0.0.0.0",
+    "PORT": "18890",
+    "NODE_NAME": "codespace",
+    "ROOM": "demo",
+    "AGENT_ID": "claude"
+  },
+  "forwardPorts": [18890],
+  "portsAttributes": {
+    "18890": { "label": "DAC node (Codespace)", "onAutoForward": "notify", "visibility": "private" }
+  },
+  "secrets": {
+    "CHAT_TOKEN": { "description": "Browser/user token. Same value as on the AWS node." },
+    "PI_TOKEN": { "description": "Token for the pi worker. Same value as on the AWS node." },
+    "CLAUDE_TOKEN": { "description": "Token for the claude worker. Same value as on the AWS node." },
+    "UPSTREAM_URL": { "description": "HTTPS origin of the AWS room-owner node, e.g. https://1-2-3-4.sslip.io (no path, no credentials)." }
+  },
+  "customizations": { "vscode": { "extensions": ["dbaeumer.vscode-eslint"] } }
+}

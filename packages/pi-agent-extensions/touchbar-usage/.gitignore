@@ -1,0 +1,7 @@
+.DS_Store
+.build/
+*.app/
+node_modules/
+*.log
+usage-touchbar.json
+usage-touchbar.txt

@@ -1,0 +1,8 @@
+.DS_Store
+node_modules/
+.venv/
+.env
+target/
+dist/
+.pi/
+.claude/

@@ -1,0 +1,6 @@
+{
+  "name": "system1-options",
+  "version": "0.1.0",
+  "description": "/system1 <task>: xhigh executive options briefing for System 1, with one-press send to its API",
+  "types": "./types/index.d.ts"
+}
