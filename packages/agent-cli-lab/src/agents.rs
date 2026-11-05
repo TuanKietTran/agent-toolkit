@@ -118,7 +118,7 @@ pub(crate) fn parse_ps(text: &str) -> Vec<Proc> {
                 rest = tail.trim_start();
             }
             let (tty, command) = match rest.split_once(char::is_whitespace) {
-                Some((head, tail)) if head == "??" => (None, tail.trim_start()),
+                Some(("??", tail)) => (None, tail.trim_start()),
                 Some((head, tail))
                     if head == "console" || head.starts_with("tty") || head.starts_with("pts/") =>
                 {
@@ -526,10 +526,8 @@ pub(crate) fn detect_kind_with(command: &str, rules: &[HarnessRule]) -> Option<S
                 }
             }
         }
-        if let Some(score) = score {
-            if best.as_ref().is_none_or(|(top, _)| score > *top) {
-                best = Some((score, rule.kind.clone()));
-            }
+        if let Some(score) = score && best.as_ref().is_none_or(|(top, _)| score > *top) {
+            best = Some((score, rule.kind.clone()));
         }
     }
     best.map(|(_, kind)| kind)
@@ -591,10 +589,8 @@ impl HostSpec {
     /// Where the host's control socket may be. Older hosts resolved `-s NAME` under the temp dir.
     pub fn socket_candidates(&self) -> Vec<PathBuf> {
         let mut found = Vec::new();
-        if let Some(name) = &self.name {
-            if let Ok(path) = session::socket_for(name) {
-                found.push(path);
-            }
+        if let Some(name) = &self.name && let Ok(path) = session::socket_for(name) {
+            found.push(path);
         }
         if let Some(socket) = &self.socket {
             if socket.contains('/') {
@@ -792,15 +788,13 @@ pub(crate) fn tail_of_lines(lines: &[&str]) -> Tail {
                 .filter(|m| !m.starts_with('<'))
                 .map(str::to_owned);
         }
-        if tail.tokens.is_none() {
-            if let Some(usage) = message.get("usage") {
-                let count = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
-                let total = count("input_tokens")
-                    + count("cache_read_input_tokens")
-                    + count("cache_creation_input_tokens");
-                if total > 0 {
-                    tail.tokens = Some(total);
-                }
+        if tail.tokens.is_none() && let Some(usage) = message.get("usage") {
+            let count = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
+            let total = count("input_tokens")
+                + count("cache_read_input_tokens")
+                + count("cache_creation_input_tokens");
+            if total > 0 {
+                tail.tokens = Some(total);
             }
         }
         if tail.last.is_none() {
@@ -939,7 +933,7 @@ pub(crate) fn build(
         let session = agent.and_then(|a| sessions.get(&a.pid));
         let tail = session
             .and_then(|s| s.session_id.as_deref())
-            .and_then(|id| tail_of(id));
+            .and_then(tail_of);
         let probe = probes.get(&host.pid);
         let pid = agent.map(|a| a.pid).unwrap_or(host.pid);
         let this_session = agent.is_some_and(|a| me.ancestors.contains(&a.pid));
@@ -1017,7 +1011,7 @@ pub(crate) fn build(
             let session = sessions.get(&process.pid);
             let tail = session
                 .and_then(|s| s.session_id.as_deref())
-                .and_then(|id| tail_of(id));
+                .and_then(tail_of);
             let this_session = me.ancestors.contains(&process.pid)
                 || session
                     .and_then(|s| s.session_id.as_deref())
