@@ -1895,4 +1895,181 @@ mod tests {
         assert_eq!(civil_utc(0), "1970-01-01T00:00:00Z");
         assert_eq!(civil_utc(1_793_685_967), "2026-11-03T06:06:07Z");
     }
+
+    #[test]
+    fn every_builtin_harness_is_detected_from_script_paths() {
+        let rules = builtin_rules();
+        let cases: &[(&str, &str)] = &[
+            (
+                "claude",
+                "node /usr/lib/node_modules/@anthropic-ai/claude-code/cli.js",
+            ),
+            (
+                "pi",
+                "node /usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js",
+            ),
+            ("opencode", "node /usr/lib/node_modules/opencode/bin/cli.js"),
+            ("codex", "node /usr/lib/node_modules/@openai/codex/cli.js"),
+            (
+                "gemini",
+                "node /usr/lib/node_modules/@google/gemini-cli/bundle/gemini.js",
+            ),
+            ("aider", "python3 -m aider"),
+            (
+                "cursor-agent",
+                "node /usr/lib/node_modules/cursor-agent/dist/cli.js",
+            ),
+            ("goose", "node /opt/tools/goose/dist/cli.js"),
+            ("amp", "node /usr/lib/node_modules/@sourcegraph/amp/cli.js"),
+            (
+                "crush",
+                "node /usr/lib/node_modules/@charmland/crush/cli.js",
+            ),
+            ("qwen", "bun /opt/tools/@qwen-code/qwen-code/cli.js"),
+            (
+                "kimi",
+                "node /usr/lib/node_modules/@moonshot-ai/kimi-code/cli.js",
+            ),
+            ("droid", "node /usr/lib/node_modules/droid/cli.js"),
+            ("copilot-cli", "node /usr/lib/node_modules/copilot/cli.js"),
+            ("cline", "node /usr/lib/node_modules/@cline/sdk/cli.js"),
+            (
+                "continue",
+                "node /usr/lib/node_modules/@continuedev/continue/cli.js",
+            ),
+            (
+                "cody",
+                "node /usr/lib/node_modules/@sourcegraph/cody/cli.js",
+            ),
+        ];
+        assert_eq!(rules.len(), cases.len(), "one fixture per builtin rule");
+        for (kind, command) in cases {
+            assert_eq!(
+                detect_kind_with(command, &rules).as_deref(),
+                Some(*kind),
+                "{command}"
+            );
+        }
+    }
+
+    #[test]
+    fn false_positive_commands_are_not_agents() {
+        let rules = builtin_rules();
+        for command in [
+            "/Applications/Cursor.app/Contents/MacOS/Cursor /w",
+            "node /usr/lib/vscode/extensions/codex/dist/extensionHost.js",
+            "node /opt/tools/@modelcontextprotocol/server-filesystem/index.js /tmp",
+            "node /opt/tools/claude-mcp-server/index.js",
+            "/opt/homebrew/bin/claude --chrome-native-host",
+            "codex --version",
+            "gemini --help",
+            "opencode --version",
+            "aider --help",
+            "agent-cli-lab agents --json",
+            "agent-cli-lab status",
+            "/x/target/debug/agent-cli-lab screen -n w1",
+            "node /usr/lib/node_modules/typescript/bin/tsserver",
+            "node /srv/app/server.js",
+            "bun run dev",
+            "crush run",
+            "droid chat",
+            "cline chat",
+            "cody chat",
+            "cn chat",
+        ] {
+            assert_eq!(detect_kind_with(command, &rules), None, "{command}");
+        }
+    }
+
+    #[test]
+    fn fixture_table_builds_every_harness_once_and_dedupes_children() {
+        let procs = parse_ps(
+            "9101 1 00:10 0.5 ttys001 claude\n9102 1 00:10 0.5 ttys002 pi\n9103 1 00:10 0.5 ttys003 opencode\n9104 1 00:10 0.5 ttys004 codex\n9105 1 00:10 0.5 ttys005 gemini\n9106 1 00:10 0.5 ttys006 aider\n9107 1 00:10 0.5 ttys007 cursor-agent chat\n9108 1 00:10 0.5 ttys008 /opt/homebrew/bin/goose session\n9109 1 00:10 0.5 ttys009 /opt/homebrew/bin/amp threads\n9110 1 00:10 0.5 ttys010 /opt/homebrew/bin/crush\n9111 1 00:10 0.5 ttys011 qwen\n9112 1 00:10 0.5 ttys012 kimi\n9113 1 00:10 0.5 ttys013 /opt/homebrew/bin/droid\n9114 1 00:10 0.5 ttys014 copilot\n9115 1 00:10 0.5 ttys015 /opt/homebrew/bin/cline\n9116 1 00:10 0.5 ttys016 /opt/homebrew/bin/cn\n9117 1 00:10 0.5 ttys017 /opt/homebrew/bin/cody\n9118 9102 00:09 0.0 ttys002 node /usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js\n9119 9104 00:09 0.0 ttys004 node /usr/lib/node_modules/@openai/codex/cli.js\n9120 9101 00:09 0.0 ?? /Users/me/.local/bin/claude --chrome-native-host\n9121 1 00:09 0.0 ?? node /opt/tools/@modelcontextprotocol/server-filesystem/index.js\n9122 1 00:09 0.0 ?? agent-cli-lab agents --json\n9123 1 00:09 0.0 ttys018 codex --version\n",
+        );
+        let tail = |_: &str| -> Option<Tail> { None };
+        let found = build(
+            &procs,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &tail,
+            &Me::default(),
+        );
+        let mut kinds: Vec<&str> = found.iter().filter_map(|r| r.kind.as_deref()).collect();
+        kinds.sort_unstable();
+        assert_eq!(
+            kinds,
+            vec![
+                "aider",
+                "amp",
+                "claude",
+                "cline",
+                "codex",
+                "cody",
+                "continue",
+                "copilot-cli",
+                "crush",
+                "cursor-agent",
+                "droid",
+                "gemini",
+                "goose",
+                "kimi",
+                "opencode",
+                "pi",
+                "qwen"
+            ]
+        );
+        assert_eq!(found.len(), 17, "{found:#?}");
+        assert!(
+            found
+                .iter()
+                .any(|r| r.pid == Some(9102) && r.tty.as_deref() == Some("ttys002"))
+        );
+        assert!(
+            !found
+                .iter()
+                .any(|r| r.pid == Some(9118) || r.pid == Some(9119)),
+            "same-kind children deduped"
+        );
+        assert!(
+            !found
+                .iter()
+                .any(|r| (9120..=9123).contains(&r.pid.unwrap_or_default())),
+            "false positives excluded"
+        );
+    }
+
+    #[test]
+    fn kind_filter_matches_builtin_and_custom_kinds() {
+        let mut rules = builtin_rules();
+        rules.extend(parse_harness_rules(
+            "[[harness]]\nkind = \"myagent\"\nexe_names = [\"myagent\"]\n",
+        ));
+        assert_eq!(
+            detect_kind_with("myagent chat", &rules).as_deref(),
+            Some("myagent")
+        );
+        assert_eq!(detect_kind_with("pi", &rules).as_deref(), Some("pi"));
+        let tail = |_: &str| -> Option<Tail> { None };
+        let procs = parse_ps("9201 1 00:10 0.5 ttys001 pi\n9202 1 00:10 0.5 ttys002 opencode\n");
+        let mut found = build(
+            &procs,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &tail,
+            &Me::default(),
+        );
+        found.retain(|agent| agent.kind.as_deref() == Some("opencode"));
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].pid, Some(9202));
+        let mut custom = vec![AgentRec {
+            kind: Some("myagent".into()),
+            ..AgentRec::default()
+        }];
+        custom.retain(|agent| agent.kind.as_deref() == Some("myagent"));
+        assert_eq!(custom.len(), 1);
+        custom.retain(|agent| agent.kind.as_deref() == Some("nosuchagent"));
+        assert!(custom.is_empty());
+    }
 }
