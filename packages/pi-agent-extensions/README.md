@@ -10,7 +10,7 @@ Pi's managed `~/.pi/agent/git` cache, which package updates may reset.
 
 | Extension | What it does |
 |---|---|
-| `core/guards/context-optimize.ts` | Routes built-in `/compact`, auto-compaction, `/optimize-context`, and the Touch Bar **Optimize** action through a round-robin cheap-model pool (Claude Haiku 4.5, Codex GPT-5.6 Luna with Sol/API fallback, local llama.cpp/MLX) with failover on any provider or transport error. Also adds `Ctrl-Shift-O` and a persistent context-percentage status. |
+| `core/guards/context-optimize.ts` | Routes built-in `/compact`, auto-compaction, `/optimize-context`, `/core-compact`, and the Touch Bar **Optimize** action through the cheapest model available at run time — every model in the host registry ranked by price, unpriced last, ties toward the larger context window, no hardcoded provider or model id — with failover on any provider or transport error. Also adds `Ctrl-Shift-O` and a persistent context-percentage status. |
 | `core/guards/context-guard.ts` | Caps a single tool result to a share of the *active* model's context window and elides the middle, keeping head and tail. Points the model at pi's complete saved output instead of the truncated copy. |
 | `core/guards/file-tool-discipline.ts` | Makes GPT models use Pi's auditable `write` tool for new/full files and `edit` for targeted changes. Strengthens the per-turn prompt and blocks obvious shell/heredoc/script-based source-file authoring while allowing normal commands, generated artifacts, logs, and temporary files. |
 | `core/guards/answer-floor.ts` | Stops pi's own reply budget from silently collapsing to a handful of tokens. When a reply is cut off anyway, compacts if the budget was short and resumes it — no `/compact` by hand. |
@@ -33,11 +33,16 @@ wrong in a way that fails *silently* against a local llama.cpp server.
 
 `core/guards/context-optimize.ts` intercepts `session_before_compact`, so it covers the real
 built-in `/compact` command and automatic/overflow compaction rather than merely
-adding an alias. Each run starts at the next available tier—Claude Haiku 4.5,
-Codex GPT-5.6 Luna (GPT-6.1 Sol if Luna is unavailable, or API GPT-5.5 if neither is available), then a local provider whose id starts with `llamacpp`, `mlx`, `ollama`,
-`lmstudio`, or `local`. Missing tiers are skipped. Empty, truncated, usage-limit,
-API, network, and broken-stream failures rotate immediately to the next tier;
-if every cheap tier fails, compaction is cancelled instead of silently billing
+adding an alias. Each run ranks every model the host registry reports as
+available by price — unpriced models last, ties toward the larger context
+window — and tries the cheapest candidate that has configured auth, has not
+failed a compaction recently, and can fit the transcript with headroom to
+spare. No provider or model id is hardcoded; `/core-compact status` lists
+every candidate with its accept/reject reason, and selection can be pinned or
+cost-capped via `compaction.model` / `compaction.maxCostRank` in
+`~/.pi/agent/settings.json`. Unusable candidates are skipped. Empty, truncated, usage-limit,
+API, network, and broken-stream failures fall through immediately to the next candidate;
+if every candidate fails, compaction is cancelled instead of silently billing
 the active high-cost conversation model. The active conversation model is never
 changed. Compaction uses an eight-word system prompt and computes request
 headroom per candidate before calling it:
@@ -49,8 +54,8 @@ summary output = min(8192, model.maxTokens,
 
 Input is conservatively estimated at three characters per token plus 512 tokens
 of provider-wrapper overhead. Candidates with less than 1024 output tokens left
-are rotated out instead of truncating the transcript and creating a lossy
-checkpoint. This lets a small Apple Silicon local model participate whenever the
+are skipped instead of truncating the transcript and creating a lossy
+checkpoint. This lets a small local model participate whenever the
 whole compaction request actually fits its window.
 
 ### The arithmetic they defend
