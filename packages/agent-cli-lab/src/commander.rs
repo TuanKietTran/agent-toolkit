@@ -85,7 +85,7 @@ pub(crate) fn spawn(a: SpawnArgs) -> Result<i32> {
     let path = record_path(&a.name);
     if path.exists() && load(&a.name).is_ok_and(|r| is_alive(r.pid)) { return Err(anyhow!("{} already running", a.name)); }
     let mut cmd = match a.agent.as_str() { "sh" => vec!["sh".to_owned()], "pi" => vec!["pi".to_owned()], "claude" => vec!["claude".to_owned()], "codex" => vec!["codex".to_owned()], _ => unreachable!() };
-    if let Some(model) = &a.model { if a.agent == "claude" || a.agent == "codex" { cmd.extend(["--model".into(), model.clone()]); } }
+    if let Some(model) = &a.model && (a.agent == "claude" || a.agent == "codex") { cmd.extend(["--model".into(), model.clone()]); }
     cmd.extend(a.extra);
     let exe = env::var_os("AGENT_CLI_LAB").unwrap_or_else(|| "agent-cli-lab".into());
     let socket = env::temp_dir().join(format!("{}.sock", a.name));
@@ -145,7 +145,8 @@ pub(crate) fn ask(name: &str, text: &str) -> Result<i32> {
 }
 pub(crate) fn send(name: &str, text: &str, enter: bool) -> Result<i32> {
     let lab = load(name)?; let mut cmd = Command::new(binary()); cmd.args(["send", "-s"]).arg(&lab.socket);
-    if enter { cmd.arg("-e"); } if !text.is_empty() { cmd.arg(text); }
+    if enter { cmd.arg("-e"); }
+    if !text.is_empty() { cmd.arg(text); }
     let out = cmd.output()?; print!("{}", String::from_utf8_lossy(&out.stdout)); Ok(out.status.code().unwrap_or(1))
 }
 pub(crate) fn screen(name: &str) -> Result<i32> {
