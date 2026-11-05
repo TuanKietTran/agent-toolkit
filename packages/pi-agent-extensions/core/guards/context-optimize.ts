@@ -1,5 +1,6 @@
 import type { Model } from "@earendil-works/pi-ai";
 import { createServer, type Server } from "node:net";
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile, chmod } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -21,7 +22,10 @@ const LIMITS_NAME = "context-optimize";
 const INSTRUCTIONS_HEADING = "compact-instructions";
 const SYSTEM_PROMPT_HEADING = "summary-system-prompt";
 const STATUS_KEY = "context-optimize";
-const ROTATION_NAME = "pi.context-optimize.rotation.v2";
+const SETTINGS_FILE = "settings.json";
+const AGENT_DIR_ENV = "PI_CODING_AGENT_DIR";
+const AGENT_SUBDIR = "agent";
+const OVERRIDE_SEPARATOR = "/";
 const CONTROL_SUBDIR = ".pi";
 const TARGET_FILE = "optimize-target.json";
 const ENCODING = "utf8";
@@ -42,11 +46,19 @@ const NOTE_ERROR = "error";
 const THEME_WARNING = "warning";
 const THEME_DIM = "dim";
 const COMMAND_NAME = "optimize-context";
-const COMMAND_DESCRIPTION = "Compact with a rotating cheap model and automatic failover";
+const COMMAND_DESCRIPTION = "Compact with the cheapest available model and automatic failover";
+const COMPACT_COMMAND_NAME = "core-compact";
+const COMPACT_COMMAND_DESCRIPTION = "Compact now, or inspect runtime compaction-model selection: [auto|status|dry-run]";
+const ARG_AUTO = "auto";
+const ARG_STATUS = "status";
+const ARG_DRY_RUN = "dry-run";
 const SHORTCUT_KEY = "ctrl+shift+o";
 const SHORTCUT_DESCRIPTION = "Optimize context with cheap-model failover";
 const LABEL_UNKNOWN = "CTX —";
-const NOTE_NO_MODEL = "No compaction model is available (Haiku 4.5, GPT-5.6 Luna/Sol fallback, API GPT-5.5, or local)";
+const NOTE_NO_MODEL = "No compaction model is available (no available model passed the auth, recent-failure, cost-rank, and context-fit checks)";
+const NOTE_USAGE = "Usage: /core-compact [auto|status|dry-run]";
+const NOTE_STATUS_HEADER = "Compaction candidates, cheapest first (fit checked against current context size):";
+const NOTE_NO_PICK = "Dry run: no candidate is currently acceptable";
 const NOTE_BUSY = "Wait for the current turn to finish before optimizing context";
 const NOTE_OPTIMIZING = "Optimizing context…";
 const NOTE_OPTIMIZED = "Context optimized";
@@ -59,8 +71,11 @@ const insufficientHeadroom = (input: number, safety: number, window: number) =>
   `insufficient headroom: ~${input} input + ${safety} safety in ${window} context`;
 const noteCompacting = (id: string, provider: string, input: number, output: number) =>
   `Compacting with ${id} (${provider}); ~${input} in / ${output} out…`;
-const noteRotating = (failed: string, next: string) => `${failed} failed; rotating to ${next}`;
-const noteAllFailed = (failures: string[]) => `Compaction failed on every cheap model: ${failures.join(" | ")}`;
+const noteFallingThrough = (failed: string, next: string) => `${failed} failed; trying next candidate ${next}`;
+const noteAllFailed = (failures: string[]) => `Compaction failed on every candidate model: ${failures.join(" | ")}`;
+const noteAuto = (percent: number, threshold: number) => `Context at ${Math.round(percent)}% (auto-compact threshold ${threshold}%); optimizing…`;
+const noteDryRunPick = (id: string, provider: string) => `Dry run: would compact with ${id} (${provider})`;
+const candidateLine = (rank: number, provider: string, id: string, accepted: boolean, reason: string) => `${rank}. ${provider}/${id} — ${accepted ? "accepted" : "rejected"}: ${reason}`;
 const noteOptimizeFailed = (message: string) => `Context optimization failed: ${message}`;
 const noteIpcUnavailable = (error: unknown) => `Touch Bar Optimize IPC unavailable: ${String(error)}`;
 const extraFocus = (instructions: string) => `\n\nAdditional focus from /compact:\n${instructions}`;
@@ -74,6 +89,8 @@ const cfg = limits<{
   provider_safety_tokens: number;
   chars_per_token: number;
   request_overhead_tokens: number;
+  auto_threshold_percent: number;
+  failure_cooldown_ms: number;
 }>(CONTEXTS_FILE, LIMITS_NAME);
 const INSTRUCTIONS = prompt(RULES_FILE, INSTRUCTIONS_HEADING);
 const SYSTEM_PROMPT = prompt(RULES_FILE, SYSTEM_PROMPT_HEADING);
@@ -84,19 +101,63 @@ const PROVIDER_SAFETY_TOKENS = cfg.provider_safety_tokens;
 /** Conservative for code/paths plus provider wrappers not visible in our prompt. */
 const CHARS_PER_TOKEN = cfg.chars_per_token;
 const REQUEST_OVERHEAD_TOKENS = cfg.request_overhead_tokens;
-const ROTATION_KEY = Symbol.for(ROTATION_NAME);
+const AUTO_THRESHOLD_PERCENT = cfg.auto_threshold_percent;
+const FAILURE_COOLDOWN_MS = cfg.failure_cooldown_ms;
 const CONTROL_DIR = join(homedir(), CONTROL_SUBDIR);
 const TARGET_PATH = join(CONTROL_DIR, TARGET_FILE);
 const SOCKET_PATH = join(CONTROL_DIR, `optimize-${process.pid}.sock`);
 
-interface RotationState {
-  next: number;
+interface FailureRecord {
+  at: number;
+  message: string;
 }
 
-const rotation = (() => {
-  const root = globalThis as typeof globalThis & { [ROTATION_KEY]?: RotationState };
-  return (root[ROTATION_KEY] ??= { next: 0 });
-})();
+/** Last compaction failure per model, in memory only; entries expire after FAILURE_COOLDOWN_MS. */
+const failuresByModel = new Map<string, FailureRecord>();
+
+const modelKey = (model: Pick<Model<any>, "provider" | "id">) => `${model.provider}/${model.id}`;
+
+export function recordCompactionFailure(model: Pick<Model<any>, "provider" | "id">, message: string, now: number = Date.now()): void {
+  failuresByModel.set(modelKey(model), { at: now, message });
+}
+
+export function clearCompactionFailure(model: Pick<Model<any>, "provider" | "id">): void {
+  failuresByModel.delete(modelKey(model));
+}
+
+export function resetCompactionFailures(): void {
+  failuresByModel.clear();
+}
+
+export interface CompactionSettings {
+  model?: string;
+  maxCostRank?: number;
+  thresholdPercent?: number;
+}
+
+function settingsPath(): string {
+  const dir = process.env[AGENT_DIR_ENV];
+  return dir ? join(dir, SETTINGS_FILE) : join(CONTROL_DIR, AGENT_SUBDIR, SETTINGS_FILE);
+}
+
+/** compaction.* overrides from ~/.pi/agent/settings.json, read on every call so edits apply without a reload. */
+export function compactionSettings(): CompactionSettings {
+  try {
+    const parsed = JSON.parse(readFileSync(settingsPath(), ENCODING)) as { compaction?: CompactionSettings };
+    const raw = parsed?.compaction ?? {};
+    const out: CompactionSettings = {};
+    if (typeof raw.model === "string" && raw.model.trim()) out.model = raw.model.trim();
+    if (typeof raw.maxCostRank === "number" && Number.isFinite(raw.maxCostRank) && raw.maxCostRank >= 1) out.maxCostRank = Math.floor(raw.maxCostRank);
+    if (typeof raw.thresholdPercent === "number" && Number.isFinite(raw.thresholdPercent)) out.thresholdPercent = Math.min(99, Math.max(1, raw.thresholdPercent));
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+export function autoThresholdPercent(settings: CompactionSettings = compactionSettings()): number {
+  return settings.thresholdPercent ?? AUTO_THRESHOLD_PERCENT;
+}
 
 function updateStatus(ctx: ExtensionContext): void {
   if (!ctx.hasUI) return;
@@ -110,47 +171,102 @@ function updateStatus(ctx: ExtensionContext): void {
   ctx.ui.setStatus(STATUS_KEY, styled);
 }
 
-/** One representative from each cheap-model tier; the starting tier rotates. */
-export function compactionModels(ctx: ExtensionContext): Model<any>[] {
-  const available = ctx.modelRegistry.getAvailable();
-  const pick = (predicate: (model: Model<any>) => boolean, preferredProviders: string[]) =>
-    available
-      .filter(predicate)
-      .sort((a, b) => {
-        const rank = (provider: string) => {
-          const index = preferredProviders.indexOf(provider);
-          return index < 0 ? preferredProviders.length : index;
-        };
-        return rank(a.provider) - rank(b.provider) || a.id.localeCompare(b.id);
-      })[0];
+export interface CompactionCandidate {
+  model: Model<any>;
+  accepted: boolean;
+  reason: string;
+}
 
-  const models = [
-    pick(
-      (model) => /^claude-haiku-4-5(?:-|$)/.test(model.id),
-      ["claude-cli", "anthropic"],
-    ),
-    // Prefer the inexpensive Luna model, verified with this Codex account.
-    // Catalog availability alone does not imply ChatGPT subscription support:
-    // GPT-5.5 is API-only here. Sol remains a fallback when Luna is unavailable.
-    pick(
-      (model) => model.provider === "openai-codex" && model.id === "gpt-5.6-luna",
-      ["openai-codex"],
-    ) ?? pick(
-      (model) => model.provider === "openai-codex" && model.id === "gpt-6.1-sol",
-      ["openai-codex"],
-    ) ?? pick(
-      (model) => model.id === "gpt-5.5" && model.provider !== "openai-codex",
-      ["openai"],
-    ),
-    pick(
-      (model) => /^(?:llamacpp(?:-|$)|mlx(?:-|$)|ollama(?:-|$)|lmstudio(?:-|$)|local(?:-|$))/i.test(model.provider),
-      ["llamacpp", "llamacpp-0", "mlx", "ollama", "lmstudio", "local"],
-    ),
-  ].filter((model): model is Model<any> => model !== undefined);
+export interface CompactionSelectionOptions {
+  inputTokens?: number;
+  settings?: CompactionSettings;
+  now?: number;
+}
 
-  return models.filter(
-    (model, index) => models.findIndex((other) => other.provider === model.provider && other.id === model.id) === index,
-  );
+const costOf = (model: Model<any>): { input: number; output: number } | undefined => {
+  const cost = (model as { cost?: { input?: unknown; output?: unknown } }).cost;
+  if (!cost || typeof cost.input !== "number" || !Number.isFinite(cost.input)) return undefined;
+  return {
+    input: cost.input,
+    output: typeof cost.output === "number" && Number.isFinite(cost.output) ? cost.output : Number.POSITIVE_INFINITY,
+  };
+};
+
+function compareCandidates(a: Model<any>, b: Model<any>): number {
+  const costA = costOf(a);
+  const costB = costOf(b);
+  if (costA && costB) {
+    if (costA.input !== costB.input) return costA.input - costB.input;
+    if (costA.output !== costB.output) return costA.output - costB.output;
+  } else if (costA) return -1;
+  else if (costB) return 1;
+  const windowDiff = (b.contextWindow ?? 0) - (a.contextWindow ?? 0);
+  if (windowDiff !== 0) return windowDiff;
+  return a.provider.localeCompare(b.provider) || a.id.localeCompare(b.id);
+}
+
+/** Every available model, cheapest first, with the reason it is or is not usable for compaction right now. */
+export function compactionCandidates(ctx: ExtensionContext, options: CompactionSelectionOptions = {}): CompactionCandidate[] {
+  const settings = options.settings ?? compactionSettings();
+  const now = options.now ?? Date.now();
+  const inputTokens = options.inputTokens ?? 0;
+  const seen = new Set<string>();
+  const ranked: CompactionCandidate[] = [];
+  const sorted = [...ctx.modelRegistry.getAvailable()].sort(compareCandidates);
+  for (const model of sorted) {
+    const key = modelKey(model);
+    if (seen.has(key)) {
+      ranked.push({ model, accepted: false, reason: "duplicate registry entry" });
+      continue;
+    }
+    seen.add(key);
+    const registry = ctx.modelRegistry as { hasConfiguredAuth?: (model: Model<any>) => boolean };
+    if (typeof registry.hasConfiguredAuth === "function" && !registry.hasConfiguredAuth(model)) {
+      ranked.push({ model, accepted: false, reason: "no configured auth for this provider" });
+      continue;
+    }
+    const failure = failuresByModel.get(key);
+    if (failure && now - failure.at < FAILURE_COOLDOWN_MS) {
+      ranked.push({ model, accepted: false, reason: `recent failure: ${failure.message}` });
+      continue;
+    }
+    if (inputTokens > 0 && (model.contextWindow ?? 0) - inputTokens - PROVIDER_SAFETY_TOKENS < MIN_SUMMARY_TOKENS) {
+      ranked.push({ model, accepted: false, reason: insufficientHeadroom(inputTokens, PROVIDER_SAFETY_TOKENS, model.contextWindow ?? 0) });
+      continue;
+    }
+    const cost = costOf(model);
+    ranked.push({
+      model,
+      accepted: true,
+      reason: cost ? `priced: input ${cost.input}, output ${cost.output === Number.POSITIVE_INFINITY ? "unknown" : cost.output}` : "unpriced (ranked after priced models)",
+    });
+  }
+  const accepted = ranked.filter((candidate) => candidate.accepted);
+  if (settings.model) {
+    for (const candidate of accepted) {
+      const matches = settings.model.includes(OVERRIDE_SEPARATOR)
+        ? modelKey(candidate.model) === settings.model
+        : candidate.model.id === settings.model;
+      if (!matches) {
+        candidate.accepted = false;
+        candidate.reason = `settings compaction.model pins ${settings.model}`;
+      }
+    }
+  }
+  if (settings.maxCostRank !== undefined) {
+    accepted.filter((candidate) => candidate.accepted).forEach((candidate, index) => {
+      if (index >= settings.maxCostRank!) {
+        candidate.accepted = false;
+        candidate.reason = `beyond settings compaction.maxCostRank=${settings.maxCostRank}`;
+      }
+    });
+  }
+  return ranked;
+}
+
+/** Accepted compaction candidates, cheapest first; no provider or model id is hardcoded. */
+export function compactionModels(ctx: ExtensionContext, options: CompactionSelectionOptions = {}): Model<any>[] {
+  return compactionCandidates(ctx, options).filter((candidate) => candidate.accepted).map((candidate) => candidate.model);
 }
 
 function fileDetails(fileOps: {
@@ -201,7 +317,7 @@ export default function contextOptimize(pi: ExtensionAPI) {
 
   // This intercepts built-in /compact, automatic compaction, and the Touch Bar
   // shortcut. It never changes the conversation model: only this one-off summary
-  // request is sent to the cheap-model rotation.
+  // request is sent to the cheapest available candidate.
   pi.on(PI_EVENT.SESSION_BEFORE_COMPACT, async (event, ctx) => {
     const models = compactionModels(ctx);
     if (models.length === 0) {
@@ -209,7 +325,6 @@ export default function contextOptimize(pi: ExtensionAPI) {
       return { cancel: true };
     }
 
-    const start = rotation.next % models.length;
     const messages = [
       ...event.preparation.messagesToSummarize,
       ...event.preparation.turnPrefixMessages,
@@ -224,9 +339,8 @@ export default function contextOptimize(pi: ExtensionAPI) {
     const prompt = `${INSTRUCTIONS}${extra}${previous}${PROMPT_TAIL}\n\n<conversation>\n${conversation}\n</conversation>`;
     const failures: string[] = [];
 
-    for (let offset = 0; offset < models.length; offset += 1) {
+    for (let index = 0; index < models.length; index += 1) {
       if (event.signal.aborted) return { cancel: true };
-      const index = (start + offset) % models.length;
       const model = models[index];
       try {
         const budget = outputBudget(model, prompt);
@@ -262,7 +376,7 @@ export default function contextOptimize(pi: ExtensionAPI) {
           "</modified-files>",
         ].join("\n");
         const summary = `${generated}\n\n${fileIndex}`;
-        rotation.next = (index + 1) % models.length;
+        clearCompactionFailure(model);
         return {
           compaction: {
             summary,
@@ -275,40 +389,83 @@ export default function contextOptimize(pi: ExtensionAPI) {
       } catch (error) {
         if (event.signal.aborted) return { cancel: true };
         const message = error instanceof Error ? error.message : String(error);
+        recordCompactionFailure(model, message);
         failures.push(`${model.provider}/${model.id}: ${message}`);
-        if (ctx.hasUI && offset + 1 < models.length) {
-          const next = models[(index + 1) % models.length];
-          ctx.ui.notify(noteRotating(model.id, next.id), NOTE_WARNING);
+        if (ctx.hasUI && index + 1 < models.length) {
+          const next = models[index + 1];
+          ctx.ui.notify(noteFallingThrough(modelKey(model), modelKey(next)), NOTE_WARNING);
         }
       }
     }
 
-    rotation.next = (start + 1) % models.length;
     if (ctx.hasUI) ctx.ui.notify(noteAllFailed(failures), NOTE_ERROR);
     return { cancel: true };
   });
 
-  const optimize = (ctx: ExtensionContext): void => {
+  let autoInFlight = false;
+  const optimize = (ctx: ExtensionContext, onSettled?: () => void): void => {
     if (!ctx.isIdle()) {
       if (ctx.hasUI) ctx.ui.notify(NOTE_BUSY, NOTE_WARNING);
+      onSettled?.();
       return;
     }
     if (ctx.hasUI) ctx.ui.notify(NOTE_OPTIMIZING, NOTE_INFO);
     ctx.compact({
       customInstructions: INSTRUCTIONS,
       onComplete: () => {
+        onSettled?.();
         updateStatus(ctx);
         if (ctx.hasUI) ctx.ui.notify(NOTE_OPTIMIZED, NOTE_INFO);
       },
       onError: (error) => {
+        onSettled?.();
         if (ctx.hasUI) ctx.ui.notify(noteOptimizeFailed(error.message), NOTE_ERROR);
       },
     });
   };
 
+  const maybeAutoCompact = (ctx: ExtensionContext): void => {
+    if (autoInFlight) return;
+    const percent = ctx.getContextUsage()?.percent;
+    const threshold = autoThresholdPercent();
+    if (percent == null || percent < threshold || !ctx.isIdle()) return;
+    autoInFlight = true;
+    if (ctx.hasUI) ctx.ui.notify(noteAuto(percent, threshold), NOTE_INFO);
+    optimize(ctx, () => { autoInFlight = false; });
+  };
+
+  const showCandidates = (ctx: ExtensionContext, dryRun: boolean): void => {
+    if (!ctx.hasUI) return;
+    const inputTokens = ctx.getContextUsage()?.tokens ?? 0;
+    const ranked = compactionCandidates(ctx, { inputTokens });
+    const lines = [
+      NOTE_STATUS_HEADER,
+      ...ranked.map((candidate, index) => candidateLine(index + 1, candidate.model.provider, candidate.model.id, candidate.accepted, candidate.reason)),
+    ];
+    if (dryRun) {
+      const pick = ranked.find((candidate) => candidate.accepted);
+      lines.push(pick ? noteDryRunPick(pick.model.id, pick.model.provider) : NOTE_NO_PICK);
+    }
+    ctx.ui.notify(lines.join("\n"), NOTE_INFO);
+  };
+
+  pi.on(PI_EVENT.TURN_END, (_event, ctx) => maybeAutoCompact(ctx));
+  pi.on(PI_EVENT.AGENT_SETTLED, (_event, ctx) => maybeAutoCompact(ctx));
+
   pi.registerCommand(COMMAND_NAME, {
     description: COMMAND_DESCRIPTION,
     handler: async (_args, ctx) => optimize(ctx),
+  });
+
+  pi.registerCommand(COMPACT_COMMAND_NAME, {
+    description: COMPACT_COMMAND_DESCRIPTION,
+    handler: async (args, ctx) => {
+      const arg = (args ?? "").trim().toLowerCase();
+      if (arg === "" || arg === ARG_AUTO) { optimize(ctx); return; }
+      if (arg === ARG_STATUS) { showCandidates(ctx, false); return; }
+      if (arg === ARG_DRY_RUN) { showCandidates(ctx, true); return; }
+      if (ctx.hasUI) ctx.ui.notify(NOTE_USAGE, NOTE_WARNING);
+    },
   });
 
   pi.registerShortcut(SHORTCUT_KEY, {
