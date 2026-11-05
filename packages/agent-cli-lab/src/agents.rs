@@ -54,6 +54,8 @@ pub(crate) struct AgentRec {
     #[serde(default)]
     pub last: Option<String>,
     #[serde(default)]
+    pub tty: Option<String>,
+    #[serde(default)]
     pub session_id: Option<String>,
     /// Where the record came from: `lab`, `claude-session`, `process`.
     #[serde(default)]
@@ -83,6 +85,7 @@ pub(crate) struct Proc {
     pub ppid: u32,
     pub age_secs: u64,
     pub cpu: f32,
+    pub tty: Option<String>,
     pub command: String,
 }
 
@@ -107,17 +110,29 @@ pub(crate) fn parse_ps(text: &str) -> Vec<Proc> {
         .filter_map(|line| {
             let mut rest = line.trim_start();
             let mut fields = [""; 4];
+            // A fifth field is the tty when the ps output carries one (`ttys001`, `??`, `pts/0`);
+            // older callers and test fixtures without it leave the command untouched.
             for field in fields.iter_mut() {
                 let (head, tail) = rest.split_once(char::is_whitespace)?;
                 *field = head;
                 rest = tail.trim_start();
             }
+            let (tty, command) = match rest.split_once(char::is_whitespace) {
+                Some((head, tail)) if head == "??" => (None, tail.trim_start()),
+                Some((head, tail))
+                    if head == "console" || head.starts_with("tty") || head.starts_with("pts/") =>
+                {
+                    (Some(head.to_owned()), tail.trim_start())
+                }
+                _ => (None, rest),
+            };
             Some(Proc {
                 pid: fields[0].parse().ok()?,
                 ppid: fields[1].parse().ok()?,
                 age_secs: parse_etime(fields[2])?,
                 cpu: fields[3].parse().ok()?,
-                command: rest.trim_end().to_owned(),
+                tty,
+                command: command.trim_end().to_owned(),
             })
         })
         .collect()
@@ -131,6 +146,17 @@ pub(crate) enum Program {
     Codex,
     Gemini,
     Aider,
+    CursorAgent,
+    Goose,
+    Amp,
+    Crush,
+    Qwen,
+    Kimi,
+    Droid,
+    Copilot,
+    Cline,
+    Continue,
+    Cody,
     LabHost,
 }
 
@@ -143,6 +169,17 @@ impl Program {
             Program::Codex => "codex",
             Program::Gemini => "gemini",
             Program::Aider => "aider",
+            Program::CursorAgent => "cursor-agent",
+            Program::Goose => "goose",
+            Program::Amp => "amp",
+            Program::Crush => "crush",
+            Program::Qwen => "qwen",
+            Program::Kimi => "kimi",
+            Program::Droid => "droid",
+            Program::Copilot => "copilot-cli",
+            Program::Cline => "cline",
+            Program::Continue => "continue",
+            Program::Cody => "cody",
             Program::LabHost => "lab",
         }
     }
@@ -152,34 +189,355 @@ fn basename(word: &str) -> &str {
     word.rsplit('/').next().unwrap_or(word)
 }
 
-/// Which agent program a process command line is, if any. Helper processes that merely belong to an
-/// agent (Claude's browser native host, `claude mcp`, version probes) are not agents.
-pub(crate) fn program_of(command: &str) -> Option<Program> {
-    let mut words = command.split_whitespace();
-    let mut first = basename(words.next()?);
-    let mut second = words.next().unwrap_or("");
-    if first == "node" && !second.is_empty() {
-        first = basename(second);
-        second = words.next().unwrap_or("");
+impl Program {
+    fn from_kind(kind: &str) -> Option<Program> {
+        Some(match kind {
+            "claude" => Program::Claude,
+            "pi" => Program::Pi,
+            "opencode" => Program::Opencode,
+            "codex" => Program::Codex,
+            "gemini" => Program::Gemini,
+            "aider" => Program::Aider,
+            "cursor-agent" => Program::CursorAgent,
+            "goose" => Program::Goose,
+            "amp" => Program::Amp,
+            "crush" => Program::Crush,
+            "qwen" => Program::Qwen,
+            "kimi" => Program::Kimi,
+            "droid" => Program::Droid,
+            "copilot-cli" => Program::Copilot,
+            "cline" => Program::Cline,
+            "continue" => Program::Continue,
+            "cody" => Program::Cody,
+            "lab" => Program::LabHost,
+            _ => return None,
+        })
     }
-    match first {
-        "agent-cli-lab" if second == "host" => Some(Program::LabHost),
-        "claude" => {
-            let helper = command.contains("--chrome-native-host")
-                || second == "mcp"
-                || second == "agents"
-                || second == "--version"
-                || second == "-v"
-                || second == "update";
-            (!helper).then_some(Program::Claude)
+}
+
+// ------------------------------------------------------------------ harness rules
+//
+// Detection is data-driven. Each rule names one harness `kind` (also its `--kind` filter value):
+// `exe_names` are exact argv[0] basenames, `script_keywords` are substrings matched against the
+// script argument when argv[0] is an interpreter, `exclude_argv` substrings disqualify a process
+// (helpers, MCP servers, version probes), and `weak_exe` kinds are short namesakes (goose, amp,
+// crush, droid, cline, cody, cn) whose bare basename only counts from a known install path or
+// with a script-keyword hit. `env_keys` document the marker variables that relocate a harness's
+// home directory; process environments are not readable for other users' processes on macOS, so
+// they are never used as a required signal and their values never appear in output.
+//
+// Users may add or override rules in `~/.agent-cli-lab/harnesses.toml`, a hand-parsed subset:
+// one `[[harness]]` table per rule with `kind = "name"`, string arrays `exe_names`,
+// `script_keywords`, `argv_keywords`, `interpreters`, `env_keys`, `exclude_argv`, and
+// `weak_exe = true|false`. A user rule with an existing kind replaces that rule's non-empty
+// fields; a new kind is appended, so `--kind <name>` accepts it. A missing or malformed file
+// is ignored and never breaks scanning.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct HarnessRule {
+    pub kind: String,
+    pub exe_names: Vec<String>,
+    pub script_keywords: Vec<String>,
+    #[allow(dead_code)]
+    pub argv_keywords: Vec<String>,
+    pub interpreters: Vec<String>,
+    #[allow(dead_code)]
+    pub env_keys: Vec<String>,
+    pub exclude_argv: Vec<String>,
+    pub weak_exe: bool,
+}
+
+fn harness_rule(
+    kind: &str,
+    exe_names: &[&str],
+    script_keywords: &[&str],
+    env_keys: &[&str],
+    weak_exe: bool,
+) -> HarnessRule {
+    HarnessRule {
+        kind: kind.into(),
+        exe_names: exe_names.iter().map(|s| s.to_string()).collect(),
+        script_keywords: script_keywords.iter().map(|s| s.to_string()).collect(),
+        argv_keywords: Vec::new(),
+        interpreters: ["node", "bun", "deno", "python3", "python", "uv"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        env_keys: env_keys.iter().map(|s| s.to_string()).collect(),
+        exclude_argv: ["--version", "--help", "extensionHost", "Code Helper"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+        weak_exe,
+    }
+}
+
+pub(crate) fn builtin_rules() -> Vec<HarnessRule> {
+    let mut claude = harness_rule(
+        "claude",
+        &["claude"],
+        &[
+            "@anthropic-ai/claude-code",
+            "claude-code/cli.js",
+            "claude-code",
+        ],
+        &["CLAUDE_CONFIG_DIR", "CLAUDECODE"],
+        false,
+    );
+    claude.exclude_argv.extend([
+        "--chrome-native-host".to_string(),
+        " mcp ".to_string(),
+        "mcp-server".to_string(),
+    ]);
+    vec![
+        claude,
+        harness_rule(
+            "pi",
+            &["pi"],
+            &["pi-coding-agent", "@earendil-works/pi"],
+            &["PI_CODING_AGENT_DIR"],
+            false,
+        ),
+        harness_rule(
+            "opencode",
+            &["opencode"],
+            &["opencode"],
+            &["OPENCODE_CONFIG"],
+            false,
+        ),
+        harness_rule(
+            "codex",
+            &["codex"],
+            &["@openai/codex", "codex"],
+            &["CODEX_HOME"],
+            false,
+        ),
+        harness_rule(
+            "gemini",
+            &["gemini"],
+            &["gemini-cli", "@google/gemini-cli", "bundle/gemini.js"],
+            &["GEMINI_API_KEY"],
+            false,
+        ),
+        harness_rule("aider", &["aider"], &["aider/main.py", "aider"], &[], false),
+        harness_rule(
+            "cursor-agent",
+            &["cursor-agent"],
+            &["cursor-agent"],
+            &["CURSOR_API_KEY"],
+            false,
+        ),
+        harness_rule("goose", &["goose"], &["goose"], &["GOOSE_MODE"], true),
+        harness_rule(
+            "amp",
+            &["amp"],
+            &["@sourcegraph/amp"],
+            &["AMP_API_KEY"],
+            true,
+        ),
+        harness_rule(
+            "crush",
+            &["crush"],
+            &["@charmland/crush", "crush"],
+            &[],
+            true,
+        ),
+        harness_rule(
+            "qwen",
+            &["qwen"],
+            &["@qwen-code/qwen-code", "qwen-code"],
+            &["QWEN_CODE_HOME"],
+            false,
+        ),
+        harness_rule(
+            "kimi",
+            &["kimi", "kimi-code"],
+            &["kimi-code", "@moonshot-ai/kimi-code", "kimi-cli"],
+            &["MOONSHOT_API_KEY"],
+            false,
+        ),
+        harness_rule("droid", &["droid"], &["droid"], &["FACTORY_API_KEY"], true),
+        harness_rule(
+            "copilot-cli",
+            &["copilot"],
+            &["copilot"],
+            &["COPILOT_GITHUB_TOKEN"],
+            false,
+        ),
+        harness_rule("cline", &["cline"], &["@cline/sdk", "cline"], &[], true),
+        harness_rule(
+            "continue",
+            &["cn"],
+            &["@continuedev/continue", "continue"],
+            &[],
+            true,
+        ),
+        harness_rule(
+            "cody",
+            &["cody"],
+            &["@sourcegraph/cody", "cody"],
+            &["SRC_ENDPOINT"],
+            true,
+        ),
+    ]
+}
+
+fn parse_string_list(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = value;
+    while let Some(start) = rest.find('"') {
+        let after = &rest[start + 1..];
+        let Some(end) = after.find('"') else { break };
+        out.push(after[..end].to_string());
+        rest = &after[end + 1..];
+    }
+    out
+}
+
+/// Parse the documented `harnesses.toml` subset. Unknown keys and malformed lines are skipped;
+/// a rule without a `kind` is dropped.
+pub(crate) fn parse_harness_rules(text: &str) -> Vec<HarnessRule> {
+    let mut rules: Vec<HarnessRule> = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line == "[[harness]]" {
+            rules.push(harness_rule("", &[], &[], &[], false));
+            continue;
         }
-        "pi" => Some(Program::Pi),
-        "opencode" => Some(Program::Opencode),
-        "codex" => Some(Program::Codex),
-        "gemini" => Some(Program::Gemini),
-        "aider" => Some(Program::Aider),
-        _ => None,
+        let Some(current) = rules.last_mut() else {
+            continue;
+        };
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let (key, value) = (key.trim(), value.trim());
+        match key {
+            "kind" => {
+                current.kind = parse_string_list(value)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_default()
+            }
+            "exe_names" => current.exe_names = parse_string_list(value),
+            "script_keywords" => current.script_keywords = parse_string_list(value),
+            "argv_keywords" => current.argv_keywords = parse_string_list(value),
+            "interpreters" => current.interpreters = parse_string_list(value),
+            "env_keys" => current.env_keys = parse_string_list(value),
+            "exclude_argv" => current.exclude_argv = parse_string_list(value),
+            "weak_exe" => current.weak_exe = value.starts_with("true"),
+            _ => {}
+        }
     }
+    rules.retain(|rule| !rule.kind.is_empty());
+    rules
+}
+
+/// Built-in rules merged with the user's `~/.agent-cli-lab/harnesses.toml`, loaded once.
+pub(crate) fn merged_rules() -> &'static [HarnessRule] {
+    static RULES: OnceLock<Vec<HarnessRule>> = OnceLock::new();
+    RULES.get_or_init(|| {
+        let mut rules = builtin_rules();
+        if let Some(home) = env::var_os("HOME") {
+            let path = PathBuf::from(home)
+                .join(".agent-cli-lab")
+                .join("harnesses.toml");
+            if let Ok(text) = fs::read_to_string(&path) {
+                for user in parse_harness_rules(&text) {
+                    match rules.iter_mut().find(|rule| rule.kind == user.kind) {
+                        Some(slot) => {
+                            if !user.exe_names.is_empty() {
+                                slot.exe_names = user.exe_names;
+                            }
+                            if !user.script_keywords.is_empty() {
+                                slot.script_keywords = user.script_keywords;
+                            }
+                            if !user.interpreters.is_empty() {
+                                slot.interpreters = user.interpreters;
+                            }
+                            if !user.exclude_argv.is_empty() {
+                                slot.exclude_argv = user.exclude_argv;
+                            }
+                            slot.weak_exe = slot.weak_exe || user.weak_exe;
+                        }
+                        None => rules.push(user),
+                    }
+                }
+            }
+        }
+        rules
+    })
+}
+
+fn known_install_path(word: &str) -> bool {
+    word.contains("/opt/homebrew/")
+        || word.contains("/usr/local/bin/")
+        || word.contains("/.local/bin/")
+}
+
+/// Which harness kind a process command line is, if any, under `rules`. Helper processes that
+/// merely belong to an agent (Claude's browser native host, `claude mcp`, version probes, editor
+/// extension hosts) are not agents, and neither is this tool's own non-host invocation.
+pub(crate) fn detect_kind_with(command: &str, rules: &[HarnessRule]) -> Option<String> {
+    let words: Vec<&str> = command.split_whitespace().collect();
+    let first_word = words.first()?;
+    let first = basename(first_word);
+    if first == "agent-cli-lab" {
+        return (words.get(1) == Some(&"host")).then(|| "lab".to_string());
+    }
+    if command.contains("extensionHost") || command.contains("Code Helper") {
+        return None;
+    }
+    if first == "claude"
+        && matches!(
+            words.get(1).copied(),
+            Some("mcp" | "agents" | "update" | "-v")
+        )
+    {
+        return None;
+    }
+    let mut best: Option<(usize, String)> = None;
+    for rule in rules {
+        if rule
+            .exclude_argv
+            .iter()
+            .any(|needle| !needle.is_empty() && command.contains(needle.as_str()))
+        {
+            continue;
+        }
+        let mut score: Option<usize> = None;
+        if rule.exe_names.iter().any(|exe| exe == first) {
+            let script_hit = rule.script_keywords.iter().any(|kw| {
+                !kw.is_empty() && words.iter().skip(1).any(|word| word.contains(kw.as_str()))
+            });
+            if !rule.weak_exe || known_install_path(first_word) || script_hit {
+                score = Some(50 + first.len());
+            }
+        }
+        if rule.interpreters.iter().any(|interp| interp == first) {
+            for word in words.iter().skip(1).take(3) {
+                if let Some(kw) = rule
+                    .script_keywords
+                    .iter()
+                    .find(|kw| !kw.is_empty() && word.contains(kw.as_str()))
+                {
+                    score = Some(score.unwrap_or(0).max(100 + kw.len()));
+                }
+                if rule.exe_names.iter().any(|exe| exe == basename(word)) {
+                    score = Some(score.unwrap_or(0).max(80 + basename(word).len()));
+                }
+            }
+        }
+        if let Some(score) = score {
+            if best.as_ref().is_none_or(|(top, _)| score > *top) {
+                best = Some((score, rule.kind.clone()));
+            }
+        }
+    }
+    best.map(|(_, kind)| kind)
+}
+
+/// Which agent program a process command line is, if any, under the built-in rules.
+pub(crate) fn program_of(command: &str) -> Option<Program> {
+    detect_kind_with(command, &builtin_rules()).and_then(|kind| Program::from_kind(&kind))
 }
 
 // ------------------------------------------------------------------ lab hosts
@@ -198,7 +556,10 @@ pub(crate) struct HostSpec {
 /// options; after it comes the program being hosted, whose `--model` must not be mistaken for ours.
 pub(crate) fn parse_host(command: &str) -> HostSpec {
     let (head, hosted) = command.split_once(" -- ").unwrap_or((command, ""));
-    let mut spec = HostSpec { hosted: hosted.trim().to_owned(), ..HostSpec::default() };
+    let mut spec = HostSpec {
+        hosted: hosted.trim().to_owned(),
+        ..HostSpec::default()
+    };
     let mut words = head.split_whitespace();
     while let Some(word) = words.next() {
         let slot = match word {
@@ -250,7 +611,13 @@ impl HostSpec {
     /// `--provider P --model M` / `--model P/M` of the hosted program.
     pub fn hosted_model(&self) -> Option<String> {
         let words: Vec<&str> = self.hosted.split_whitespace().collect();
-        let after = |flag: &str| words.iter().position(|w| *w == flag).and_then(|at| words.get(at + 1)).map(|w| (*w).to_owned());
+        let after = |flag: &str| {
+            words
+                .iter()
+                .position(|w| *w == flag)
+                .and_then(|at| words.get(at + 1))
+                .map(|w| (*w).to_owned())
+        };
         let model = after("--model").or_else(|| after("-m"))?;
         match after("--provider") {
             Some(provider) if !model.contains('/') => Some(format!("{provider}/{model}")),
@@ -274,7 +641,10 @@ fn footer_regex() -> &'static Regex {
 
 /// The context figure Pi prints in its footer, for example `12.3%/400k`.
 pub(crate) fn footer_context(screen: &str) -> Option<String> {
-    footer_regex().captures_iter(screen).last().map(|c| format!("{}%/{}", &c[1], &c[2]))
+    footer_regex()
+        .captures_iter(screen)
+        .last()
+        .map(|c| format!("{}%/{}", &c[1], &c[2]))
 }
 
 // ------------------------------------------------------------------ redaction and snippets
@@ -341,8 +711,18 @@ pub(crate) struct ClaudeSession {
 pub(crate) fn parse_session_file(text: &str) -> Option<ClaudeSession> {
     let value: Value = serde_json::from_str(text).ok()?;
     let word = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_owned);
-    let pid = value.get("pid").and_then(|p| p.as_u64().or_else(|| p.as_str().and_then(|s| s.parse().ok())))? as u32;
-    Some(ClaudeSession { pid, session_id: word("sessionId"), cwd: word("cwd"), name: word("name"), kind: word("kind"), status: word("status") })
+    let pid = value.get("pid").and_then(|p| {
+        p.as_u64()
+            .or_else(|| p.as_str().and_then(|s| s.parse().ok()))
+    })? as u32;
+    Some(ClaudeSession {
+        pid,
+        session_id: word("sessionId"),
+        cwd: word("cwd"),
+        name: word("name"),
+        kind: word("kind"),
+        status: word("status"),
+    })
 }
 
 fn claude_dir() -> PathBuf {
@@ -361,7 +741,10 @@ fn read_sessions() -> HashMap<u32, ClaudeSession> {
         if path.extension().is_none_or(|ext| ext != "json") {
             continue; // the `.key` files beside them are not read
         }
-        if let Some(session) = fs::read_to_string(&path).ok().and_then(|text| parse_session_file(&text)) {
+        if let Some(session) = fs::read_to_string(&path)
+            .ok()
+            .and_then(|text| parse_session_file(&text))
+        {
             found.insert(session.pid, session);
         }
     }
@@ -391,19 +774,30 @@ pub(crate) struct Tail {
 pub(crate) fn tail_of_lines(lines: &[&str]) -> Tail {
     let mut tail = Tail::default();
     for line in lines.iter().rev() {
-        let Ok(value) = serde_json::from_str::<Value>(line) else { continue };
+        let Ok(value) = serde_json::from_str::<Value>(line) else {
+            continue;
+        };
         let message = value.get("message").unwrap_or(&Value::Null);
-        let role = message.get("role").and_then(Value::as_str).or_else(|| value.get("type").and_then(Value::as_str));
+        let role = message
+            .get("role")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("type").and_then(Value::as_str));
         if role != Some("assistant") {
             continue;
         }
         if tail.model.is_none() {
-            tail.model = message.get("model").and_then(Value::as_str).filter(|m| !m.starts_with('<')).map(str::to_owned);
+            tail.model = message
+                .get("model")
+                .and_then(Value::as_str)
+                .filter(|m| !m.starts_with('<'))
+                .map(str::to_owned);
         }
         if tail.tokens.is_none() {
             if let Some(usage) = message.get("usage") {
                 let count = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
-                let total = count("input_tokens") + count("cache_read_input_tokens") + count("cache_creation_input_tokens");
+                let total = count("input_tokens")
+                    + count("cache_read_input_tokens")
+                    + count("cache_creation_input_tokens");
                 if total > 0 {
                     tail.tokens = Some(total);
                 }
@@ -413,8 +807,20 @@ pub(crate) fn tail_of_lines(lines: &[&str]) -> Tail {
             let text = message
                 .get("content")
                 .and_then(Value::as_array)
-                .map(|items| items.iter().filter(|i| i.get("type").and_then(Value::as_str) == Some("text")).filter_map(|i| i.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join(" "))
-                .or_else(|| message.get("content").and_then(Value::as_str).map(str::to_owned))
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter(|i| i.get("type").and_then(Value::as_str) == Some("text"))
+                        .filter_map(|i| i.get("text").and_then(Value::as_str))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                })
+                .or_else(|| {
+                    message
+                        .get("content")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                })
                 .unwrap_or_default();
             if !text.trim().is_empty() {
                 tail.last = Some(snippet(&text, 140));
@@ -430,11 +836,17 @@ pub(crate) fn tail_of_lines(lines: &[&str]) -> Tail {
 fn read_tail(session_id: &str) -> Option<Tail> {
     let projects = claude_dir().join("projects");
     let file = format!("{session_id}.jsonl");
-    let path = fs::read_dir(&projects).ok()?.flatten().map(|dir| dir.path().join(&file)).find(|path| path.is_file())?;
+    let path = fs::read_dir(&projects)
+        .ok()?
+        .flatten()
+        .map(|dir| dir.path().join(&file))
+        .find(|path| path.is_file())?;
     let mut handle = fs::File::open(path).ok()?;
     let length = handle.metadata().ok()?.len();
     let window: u64 = 384 * 1024;
-    handle.seek(SeekFrom::Start(length.saturating_sub(window))).ok()?;
+    handle
+        .seek(SeekFrom::Start(length.saturating_sub(window)))
+        .ok()?;
     let mut bytes = Vec::new();
     handle.read_to_end(&mut bytes).ok()?;
     let text = String::from_utf8_lossy(&bytes);
@@ -446,7 +858,11 @@ fn read_tail(session_id: &str) -> Option<Tail> {
 }
 
 fn tokens_label(tokens: u64) -> String {
-    if tokens >= 1000 { format!("{}k tok", tokens / 1000) } else { format!("{tokens} tok") }
+    if tokens >= 1000 {
+        format!("{}k tok", tokens / 1000)
+    } else {
+        format!("{tokens} tok")
+    }
 }
 
 // ------------------------------------------------------------------ building the records
@@ -494,22 +910,36 @@ pub(crate) fn build(
     let mut records: Vec<AgentRec> = Vec::new();
 
     // labs: one record per host, describing the agent it hosts
-    for host in procs.iter().filter(|p| program_of(&p.command) == Some(Program::LabHost)) {
+    for host in procs
+        .iter()
+        .filter(|p| program_of(&p.command) == Some(Program::LabHost))
+    {
         claimed.insert(host.pid);
         let spec = parse_host(&host.command);
         let mut kids = children.get(&host.pid).cloned().unwrap_or_default();
         kids.sort_by_key(|p| p.pid);
-        let agent = kids.iter().find(|p| program_of(&p.command).is_some_and(|program| program != Program::LabHost)).or_else(|| kids.first()).copied();
+        let agent = kids
+            .iter()
+            .find(|p| program_of(&p.command).is_some_and(|program| program != Program::LabHost))
+            .or_else(|| kids.first())
+            .copied();
         if let Some(agent) = agent {
             claimed.insert(agent.pid);
         }
         let program = agent.and_then(|a| program_of(&a.command));
         let kind = program
             .map(|p| p.kind().to_owned())
-            .or_else(|| spec.hosted.split_whitespace().next().map(|word| basename(word).to_owned()))
+            .or_else(|| {
+                spec.hosted
+                    .split_whitespace()
+                    .next()
+                    .map(|word| basename(word).to_owned())
+            })
             .unwrap_or_else(|| "program".into());
         let session = agent.and_then(|a| sessions.get(&a.pid));
-        let tail = session.and_then(|s| s.session_id.as_deref()).and_then(|id| tail_of(id));
+        let tail = session
+            .and_then(|s| s.session_id.as_deref())
+            .and_then(|id| tail_of(id));
         let probe = probes.get(&host.pid);
         let pid = agent.map(|a| a.pid).unwrap_or(host.pid);
         let this_session = agent.is_some_and(|a| me.ancestors.contains(&a.pid));
@@ -521,11 +951,29 @@ pub(crate) fn build(
             pid: Some(pid as u64),
             host_pid: Some(host.pid as u64),
             cwd: cwds.get(&pid).or_else(|| cwds.get(&host.pid)).cloned(),
-            model: spec.model.clone().or_else(|| spec.hosted_model()).or_else(|| tail.as_ref().and_then(|t| t.model.clone())),
-            status: Some(probe.map(|p| p.state.clone()).unwrap_or_else(|| if agent.is_some() { "up".into() } else { "gone".into() })),
-            context: probe.and_then(|p| p.context.clone()).or_else(|| tail_tokens_label(&tail)),
+            model: spec
+                .model
+                .clone()
+                .or_else(|| spec.hosted_model())
+                .or_else(|| tail.as_ref().and_then(|t| t.model.clone())),
+            status: Some(probe.map(|p| p.state.clone()).unwrap_or_else(|| {
+                if agent.is_some() {
+                    "up".into()
+                } else {
+                    "gone".into()
+                }
+            })),
+            context: probe
+                .and_then(|p| p.context.clone())
+                .or_else(|| tail_tokens_label(&tail)),
             uptime: Some(human_duration(host.age_secs * 1000)),
-            last: tail.as_ref().and_then(|t| t.last.clone()).or_else(|| probe.and_then(|p| p.last.clone())),
+            last: tail
+                .as_ref()
+                .and_then(|t| t.last.clone())
+                .or_else(|| probe.and_then(|p| p.last.clone())),
+            tty: agent
+                .and_then(|a| a.tty.clone())
+                .or_else(|| host.tty.clone()),
             session_id: session.and_then(|s| s.session_id.clone()),
             source: Some("lab".into()),
             managed: true,
@@ -538,32 +986,78 @@ pub(crate) fn build(
         if claimed.contains(&process.pid) {
             continue;
         }
-        let Some(program) = program_of(&process.command) else { continue };
-        if program == Program::LabHost {
+        let Some(kind) = detect_kind_with(&process.command, merged_rules()) else {
+            continue;
+        };
+        if kind == "lab" {
             continue;
         }
-        let parent_command = by_pid.get(&process.ppid).map(|p| p.command.as_str()).unwrap_or("");
+        // One record per session: a same-kind child of another detected agent is a helper or a
+        // wrapper/interpreter chain for that session, not a second instance.
+        if procs.iter().any(|parent| {
+            parent.pid == process.ppid
+                && parent.pid != process.pid
+                && detect_kind_with(&parent.command, merged_rules()).as_deref()
+                    == Some(kind.as_str())
+        }) {
+            continue;
+        }
+        let parent_command = by_pid
+            .get(&process.ppid)
+            .map(|p| p.command.as_str())
+            .unwrap_or("");
         let uptime = Some(human_duration(process.age_secs * 1000));
         let cwd = cwds.get(&process.pid).cloned();
-        let by_cpu = if process.cpu >= 2.0 { "working" } else { "idle" };
-        if program == Program::Claude {
+        let by_cpu = if process.cpu >= 2.0 {
+            "working"
+        } else {
+            "idle"
+        };
+        if kind == "claude" {
             let session = sessions.get(&process.pid);
-            let tail = session.and_then(|s| s.session_id.as_deref()).and_then(|id| tail_of(id));
-            let this_session = me.ancestors.contains(&process.pid) || session.and_then(|s| s.session_id.as_deref()).is_some_and(|id| me.session_id.as_deref() == Some(id));
-            let name = session.and_then(|s| s.name.clone()).or_else(|| session.and_then(|s| s.session_id.as_ref().map(|id| id.chars().take(8).collect()))).unwrap_or_else(|| format!("claude-{}", process.pid));
+            let tail = session
+                .and_then(|s| s.session_id.as_deref())
+                .and_then(|id| tail_of(id));
+            let this_session = me.ancestors.contains(&process.pid)
+                || session
+                    .and_then(|s| s.session_id.as_deref())
+                    .is_some_and(|id| me.session_id.as_deref() == Some(id));
+            let name = session
+                .and_then(|s| s.name.clone())
+                .or_else(|| {
+                    session
+                        .and_then(|s| s.session_id.as_ref().map(|id| id.chars().take(8).collect()))
+                })
+                .unwrap_or_else(|| format!("claude-{}", process.pid));
             records.push(AgentRec {
                 kind: Some("claude".into()),
                 name: Some(name),
-                role: Some(if this_session { "this session (commander)".into() } else { "interactive session".into() }),
+                role: Some(if this_session {
+                    "this session (commander)".into()
+                } else {
+                    "interactive session".into()
+                }),
                 pid: Some(process.pid as u64),
                 cwd: session.and_then(|s| s.cwd.clone()).or(cwd),
                 model: tail.as_ref().and_then(|t| t.model.clone()),
-                status: Some(session.map(|s| claude_status(s.status.as_deref())).unwrap_or_else(|| by_cpu.into())),
+                status: Some(
+                    session
+                        .map(|s| claude_status(s.status.as_deref()))
+                        .unwrap_or_else(|| by_cpu.into()),
+                ),
                 context: tail_tokens_label(&tail),
                 uptime,
                 last: tail.as_ref().and_then(|t| t.last.clone()),
+                tty: process.tty.clone(),
                 session_id: session.and_then(|s| s.session_id.clone()),
-                source: Some(if session.is_some() { "claude-session" } else { "process" }.into()),
+                source: Some(
+                    if session.is_some() {
+                        "claude-session"
+                    } else {
+                        "process"
+                    }
+                    .into(),
+                ),
                 managed: false,
                 this_session,
                 ..AgentRec::default()
@@ -572,11 +1066,20 @@ pub(crate) fn build(
         }
         let editor = parent_command.contains("external_agents") || parent_command.contains("Zed");
         records.push(AgentRec {
-            kind: Some(program.kind().into()),
-            name: Some(if editor { format!("{} (editor)", program.kind()) } else { format!("{}-{}", program.kind(), process.pid) }),
-            role: Some(if editor { "editor agent".into() } else { "standalone".into() }),
+            kind: Some(kind.clone()),
+            name: Some(if editor {
+                format!("{} (editor)", kind)
+            } else {
+                format!("{}-{}", kind, process.pid)
+            }),
+            role: Some(if editor {
+                "editor agent".into()
+            } else {
+                "standalone".into()
+            }),
             pid: Some(process.pid as u64),
             cwd,
+            tty: process.tty.clone(),
             model: parse_model_from_command(&process.command),
             status: Some(by_cpu.into()),
             uptime,
@@ -586,14 +1089,22 @@ pub(crate) fn build(
     }
 
     records.sort_by(|a, b| {
-        (!a.this_session, a.managed, a.kind.clone(), a.name.clone()).cmp(&(!b.this_session, b.managed, b.kind.clone(), b.name.clone()))
+        (!a.this_session, a.managed, a.kind.clone(), a.name.clone()).cmp(&(
+            !b.this_session,
+            b.managed,
+            b.kind.clone(),
+            b.name.clone(),
+        ))
     });
     records
 }
 
 fn parse_model_from_command(command: &str) -> Option<String> {
     let words: Vec<&str> = command.split_whitespace().collect();
-    let model = words.iter().position(|w| *w == "--model" || *w == "-m").and_then(|at| words.get(at + 1))?;
+    let model = words
+        .iter()
+        .position(|w| *w == "--model" || *w == "-m")
+        .and_then(|at| words.get(at + 1))?;
     Some((*model).to_owned())
 }
 
@@ -607,7 +1118,7 @@ pub(crate) struct ScanOptions {
 
 fn run_ps() -> Vec<Proc> {
     Command::new("ps")
-        .args(["-axww", "-o", "pid=,ppid=,etime=,pcpu=,command="])
+        .args(["-axww", "-o", "pid=,ppid=,etime=,pcpu=,tty=,command="])
         .output()
         .map(|out| parse_ps(&String::from_utf8_lossy(&out.stdout)))
         .unwrap_or_default()
@@ -626,8 +1137,17 @@ fn read_cwds(pids: &[u32]) -> HashMap<u32, String> {
         }
         return found;
     }
-    let list = pids.iter().map(u32::to_string).collect::<Vec<_>>().join(",");
-    let Ok(out) = Command::new("lsof").args(["-a", "-d", "cwd", "-Fpn", "-p", &list]).output() else { return found };
+    let list = pids
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
+    let Ok(out) = Command::new("lsof")
+        .args(["-a", "-d", "cwd", "-Fpn", "-p", &list])
+        .output()
+    else {
+        return found;
+    };
     let mut current: Option<u32> = None;
     for line in String::from_utf8_lossy(&out.stdout).lines() {
         match line.split_at_checked(1) {
@@ -646,11 +1166,24 @@ fn read_cwds(pids: &[u32]) -> HashMap<u32, String> {
 fn probe_lab(spec: &HostSpec, stalled_ms: u64) -> Option<LabProbe> {
     let timeout = Duration::from_millis(1500);
     for socket in spec.socket_candidates() {
-        let Ok(answer) = request_with_timeout(&socket, json!({ "op": "screen" }), timeout) else { continue };
-        let screen = answer.get("screen").and_then(Value::as_str).unwrap_or_default().to_owned();
+        let Ok(answer) = request_with_timeout(&socket, json!({ "op": "screen" }), timeout) else {
+            continue;
+        };
+        let screen = answer
+            .get("screen")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_owned();
         let status = request_with_timeout(&socket, json!({ "op": "status" }), timeout).ok();
-        let quiet = status.as_ref().and_then(|s| s.get("quiet_ms")).and_then(Value::as_u64);
-        let running = status.as_ref().and_then(|s| s.get("running")).and_then(Value::as_bool).unwrap_or(true);
+        let quiet = status
+            .as_ref()
+            .and_then(|s| s.get("quiet_ms"))
+            .and_then(Value::as_u64);
+        let running = status
+            .as_ref()
+            .and_then(|s| s.get("running"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
         let state = if !running {
             "exited"
         } else {
@@ -660,7 +1193,11 @@ fn probe_lab(spec: &HostSpec, stalled_ms: u64) -> Option<LabProbe> {
                 None => "up",
             }
         };
-        return Some(LabProbe { state: state.into(), context: footer_context(&screen), last: last_screen_line(&screen) });
+        return Some(LabProbe {
+            state: state.into(),
+            context: footer_context(&screen),
+            last: last_screen_line(&screen),
+        });
     }
     None
 }
@@ -668,23 +1205,46 @@ fn probe_lab(spec: &HostSpec, stalled_ms: u64) -> Option<LabProbe> {
 /// Every agent instance on this machine.
 pub(crate) fn scan(options: &ScanOptions) -> Vec<AgentRec> {
     let procs = run_ps();
-    let mut wanted: Vec<u32> = procs.iter().filter(|p| program_of(&p.command).is_some()).map(|p| p.pid).collect();
+    let mut wanted: Vec<u32> = procs
+        .iter()
+        .filter(|p| detect_kind_with(&p.command, merged_rules()).is_some())
+        .map(|p| p.pid)
+        .collect();
     wanted.sort_unstable();
     let cwds = read_cwds(&wanted);
     let sessions = read_sessions();
 
     let mut probes: HashMap<u32, LabProbe> = HashMap::new();
     if options.probe {
-        let hosts: Vec<(u32, HostSpec)> = procs.iter().filter(|p| program_of(&p.command) == Some(Program::LabHost)).map(|p| (p.pid, parse_host(&p.command))).collect();
+        let hosts: Vec<(u32, HostSpec)> = procs
+            .iter()
+            .filter(|p| program_of(&p.command) == Some(Program::LabHost))
+            .map(|p| (p.pid, parse_host(&p.command)))
+            .collect();
         let stalled_ms = options.stalled_ms;
         let found: Vec<(u32, Option<LabProbe>)> = thread::scope(|scope| {
-            let handles: Vec<_> = hosts.iter().map(|(pid, spec)| scope.spawn(move || (*pid, probe_lab(spec, stalled_ms)))).collect();
-            handles.into_iter().filter_map(|handle| handle.join().ok()).collect()
+            let handles: Vec<_> = hosts
+                .iter()
+                .map(|(pid, spec)| scope.spawn(move || (*pid, probe_lab(spec, stalled_ms))))
+                .collect();
+            handles
+                .into_iter()
+                .filter_map(|handle| handle.join().ok())
+                .collect()
         });
-        probes.extend(found.into_iter().filter_map(|(pid, probe)| probe.map(|p| (pid, p))));
+        probes.extend(
+            found
+                .into_iter()
+                .filter_map(|(pid, probe)| probe.map(|p| (pid, p))),
+        );
     }
 
-    let me = Me { ancestors: ancestors_of(std::process::id(), &procs), session_id: env::var("CLAUDE_CODE_SESSION_ID").ok().filter(|v| !v.is_empty()) };
+    let me = Me {
+        ancestors: ancestors_of(std::process::id(), &procs),
+        session_id: env::var("CLAUDE_CODE_SESSION_ID")
+            .ok()
+            .filter(|v| !v.is_empty()),
+    };
     build(&procs, &cwds, &sessions, &probes, &read_tail, &me)
 }
 
@@ -695,7 +1255,7 @@ pub(crate) struct AgentsArgs {
     /// Print JSON (`{generatedAt, agents: [...]}`) instead of a table.
     #[arg(long)]
     json: bool,
-    /// Only agents of this kind: claude, pi, lab-hosted kinds, opencode, codex, gemini, aider.
+    /// Only agents of this kind: any built-in kind, or a custom kind from ~/.agent-cli-lab/harnesses.toml.
     #[arg(long, value_name = "KIND")]
     kind: Option<String>,
     /// Skip asking each lab's host for its screen: faster, but no working/asking/stalled for labs.
@@ -716,7 +1276,13 @@ pub(crate) fn default_publish_path() -> PathBuf {
     env::var_os("AGENT_CLI_LAB_AGENTS")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| env::var_os("HOME").map(PathBuf::from).unwrap_or_default().join(".agent-cli-lab").join("agents.json"))
+        .unwrap_or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_default()
+                .join(".agent-cli-lab")
+                .join("agents.json")
+        })
 }
 
 fn civil_utc(secs: u64) -> String {
@@ -733,17 +1299,29 @@ fn civil_utc(secs: u64) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = if month <= 2 { year + 1 } else { year };
-    format!("{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z", rem / 3600, rem % 3600 / 60, rem % 60)
+    format!(
+        "{year:04}-{month:02}-{day:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
 }
 
 pub(crate) fn registry_now(agents: Vec<AgentRec>) -> Registry {
-    let secs = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
-    Registry { generated_at: Some(civil_utc(secs)), agents }
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Registry {
+        generated_at: Some(civil_utc(secs)),
+        agents,
+    }
 }
 
 fn publish(registry: &Registry, path: &Path) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -751,7 +1329,8 @@ fn publish(registry: &Registry, path: &Path) -> Result<()> {
         }
     }
     let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, serde_json::to_vec_pretty(registry)?).with_context(|| format!("failed to write {}", temporary.display()))?;
+    fs::write(&temporary, serde_json::to_vec_pretty(registry)?)
+        .with_context(|| format!("failed to write {}", temporary.display()))?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -780,18 +1359,33 @@ pub(crate) fn render_table(registry: &Registry) -> String {
         }
     }
     by_kind.sort();
-    let working = registry.agents.iter().filter(|a| a.status.as_deref() == Some("working")).count();
+    let working = registry
+        .agents
+        .iter()
+        .filter(|a| a.status.as_deref() == Some("working"))
+        .count();
     let mut out = format!(
         "{} agent instance{} ({} working) · {}\n",
         registry.agents.len(),
         if registry.agents.len() == 1 { "" } else { "s" },
         working,
-        by_kind.iter().map(|(k, n)| format!("{k} {n}")).collect::<Vec<_>>().join(", ")
+        by_kind
+            .iter()
+            .map(|(k, n)| format!("{k} {n}"))
+            .collect::<Vec<_>>()
+            .join(", ")
     );
-    out.push_str(&format!("{:<9} {:<26} {:<24} {:<9} {:<28} {:<11} {:<8} {:>6}  {}\n", "KIND", "NAME", "ROLE", "STATUS", "MODEL", "CTX", "UP", "PID", "CWD"));
+    out.push_str(&format!(
+        "{:<9} {:<26} {:<24} {:<9} {:<28} {:<11} {:<8} {:>6}  {}\n",
+        "KIND", "NAME", "ROLE", "STATUS", "MODEL", "CTX", "UP", "PID", "CWD"
+    ));
     for agent in &registry.agents {
         let name = agent.name.clone().unwrap_or_else(|| "-".into());
-        let name = if agent.this_session { format!("◆ {name}") } else { name };
+        let name = if agent.this_session {
+            format!("◆ {name}")
+        } else {
+            name
+        };
         out.push_str(&format!(
             "{:<9} {:<26} {:<24} {:<9} {:<28} {:<11} {:<8} {:>6}  {}\n",
             agent.kind.clone().unwrap_or_else(|| "-".into()),
@@ -801,7 +1395,10 @@ pub(crate) fn render_table(registry: &Registry) -> String {
             tail_path(&agent.model.clone().unwrap_or_else(|| "-".into()), 28),
             agent.context.clone().unwrap_or_else(|| "-".into()),
             agent.uptime.clone().unwrap_or_else(|| "-".into()),
-            agent.pid.map(|p| p.to_string()).unwrap_or_else(|| "-".into()),
+            agent
+                .pid
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "-".into()),
             tail_path(&agent.cwd.clone().unwrap_or_default(), 34),
         ));
     }
@@ -809,8 +1406,17 @@ pub(crate) fn render_table(registry: &Registry) -> String {
 }
 
 pub(crate) fn run(args: AgentsArgs) -> Result<i32> {
-    let options = ScanOptions { probe: !args.no_probe, stalled_ms: args.stalled_ms };
-    let publish_to = args.publish.as_ref().map(|path| if path.is_empty() { default_publish_path() } else { PathBuf::from(path) });
+    let options = ScanOptions {
+        probe: !args.no_probe,
+        stalled_ms: args.stalled_ms,
+    };
+    let publish_to = args.publish.as_ref().map(|path| {
+        if path.is_empty() {
+            default_publish_path()
+        } else {
+            PathBuf::from(path)
+        }
+    });
     loop {
         let mut agents = scan(&options);
         if let Some(kind) = &args.kind {
@@ -854,22 +1460,68 @@ mod tests {
 
     fn sessions() -> HashMap<u32, ClaudeSession> {
         let mut map = HashMap::new();
-        map.insert(76581, ClaudeSession { pid: 76581, session_id: Some("f0cedc99-aaaa".into()), cwd: Some("/Users/me/Downloads".into()), name: Some("ghostty commander".into()), kind: Some("interactive".into()), status: Some("busy".into()) });
-        map.insert(85026, ClaudeSession { pid: 85026, session_id: Some("e41979bd-bbbb".into()), cwd: Some("/Users/me/Downloads".into()), name: Some("downloads-9b".into()), kind: Some("interactive".into()), status: Some("idle".into()) });
-        map.insert(65060, ClaudeSession { pid: 65060, session_id: Some("74dc4afc-cccc".into()), cwd: Some("/Users/me/Downloads".into()), name: Some("aws".into()), kind: Some("interactive".into()), status: Some("busy".into()) });
+        map.insert(
+            76581,
+            ClaudeSession {
+                pid: 76581,
+                session_id: Some("f0cedc99-aaaa".into()),
+                cwd: Some("/Users/me/Downloads".into()),
+                name: Some("ghostty commander".into()),
+                kind: Some("interactive".into()),
+                status: Some("busy".into()),
+            },
+        );
+        map.insert(
+            85026,
+            ClaudeSession {
+                pid: 85026,
+                session_id: Some("e41979bd-bbbb".into()),
+                cwd: Some("/Users/me/Downloads".into()),
+                name: Some("downloads-9b".into()),
+                kind: Some("interactive".into()),
+                status: Some("idle".into()),
+            },
+        );
+        map.insert(
+            65060,
+            ClaudeSession {
+                pid: 65060,
+                session_id: Some("74dc4afc-cccc".into()),
+                cwd: Some("/Users/me/Downloads".into()),
+                name: Some("aws".into()),
+                kind: Some("interactive".into()),
+                status: Some("busy".into()),
+            },
+        );
         map
     }
 
     fn records(me: Me) -> Vec<AgentRec> {
         let procs = parse_ps(PS);
         let mut probes = HashMap::new();
-        probes.insert(12412, LabProbe { state: "working".into(), context: Some("12.3%/400k".into()), last: Some("editing redline.ts".into()) });
-        let tail = |id: &str| (id == "f0cedc99-aaaa").then(|| Tail { model: Some("claude-sonnet-5-5".into()), tokens: Some(210_345), last: Some("running the sweep".into()) });
+        probes.insert(
+            12412,
+            LabProbe {
+                state: "working".into(),
+                context: Some("12.3%/400k".into()),
+                last: Some("editing redline.ts".into()),
+            },
+        );
+        let tail = |id: &str| {
+            (id == "f0cedc99-aaaa").then(|| Tail {
+                model: Some("claude-sonnet-5-5".into()),
+                tokens: Some(210_345),
+                last: Some("running the sweep".into()),
+            })
+        };
         build(&procs, &HashMap::new(), &sessions(), &probes, &tail, &me)
     }
 
     fn find<'a>(records: &'a [AgentRec], name: &str) -> &'a AgentRec {
-        records.iter().find(|r| r.name.as_deref() == Some(name)).unwrap_or_else(|| panic!("no {name} in {records:#?}"))
+        records
+            .iter()
+            .find(|r| r.name.as_deref() == Some(name))
+            .unwrap_or_else(|| panic!("no {name} in {records:#?}"))
     }
 
     #[test]
@@ -886,33 +1538,146 @@ mod tests {
         assert_eq!(procs.len(), 13);
         let host = procs.iter().find(|p| p.pid == 12412).unwrap();
         assert_eq!((host.ppid, host.age_secs), (1, 10_143));
-        assert!(host.command.ends_with("--no-session") && host.command.contains("--title cmdr-expense (muse)"));
+        assert!(
+            host.command.ends_with("--no-session")
+                && host.command.contains("--title cmdr-expense (muse)")
+        );
     }
 
     #[test]
     fn programs_are_recognised_and_helpers_are_not_agents() {
         assert_eq!(program_of("claude"), Some(Program::Claude));
-        assert_eq!(program_of("/Users/me/.local/bin/claude --chrome-native-host"), None);
+        assert_eq!(
+            program_of("/Users/me/.local/bin/claude --chrome-native-host"),
+            None
+        );
         assert_eq!(program_of("claude mcp serve"), None);
         assert_eq!(program_of("pi"), Some(Program::Pi));
-        assert_eq!(program_of("node /usr/lib/node_modules/opencode run"), Some(Program::Opencode));
-        assert_eq!(program_of("/opt/homebrew/bin/opencode run -m x"), Some(Program::Opencode));
-        assert_eq!(program_of("agent-cli-lab host --name x -- pi"), Some(Program::LabHost));
+        assert_eq!(
+            program_of("node /usr/lib/node_modules/opencode run"),
+            Some(Program::Opencode)
+        );
+        assert_eq!(
+            program_of("/opt/homebrew/bin/opencode run -m x"),
+            Some(Program::Opencode)
+        );
+        assert_eq!(
+            program_of("agent-cli-lab host --name x -- pi"),
+            Some(Program::LabHost)
+        );
         assert_eq!(program_of("agent-cli-lab list"), None);
         assert_eq!(program_of("python3 pi.py"), None);
         assert_eq!(program_of("/Applications/Zed.app/Contents/MacOS/zed"), None);
     }
 
     #[test]
+    fn script_paths_and_weak_namesakes_follow_the_rules() {
+        let rules = builtin_rules();
+        assert_eq!(
+            detect_kind_with("python3 /home/me/.venv/lib/aider/main.py --model x", &rules)
+                .as_deref(),
+            Some("aider")
+        );
+        assert_eq!(
+            detect_kind_with(
+                "node /usr/local/lib/node_modules/@qwen-code/qwen-code/cli.js",
+                &rules
+            )
+            .as_deref(),
+            Some("qwen")
+        );
+        assert_eq!(detect_kind_with("amp chat", &rules), None);
+        assert_eq!(
+            detect_kind_with("/opt/homebrew/bin/amp chat", &rules).as_deref(),
+            Some("amp")
+        );
+        assert_eq!(detect_kind_with("goose run", &rules), None);
+    }
+
+    #[test]
+    fn user_rules_parse_and_detect_custom_kinds() {
+        let rules = parse_harness_rules(
+            "[[harness]]\nkind = \"myagent\"\nexe_names = [\"myagent\"]\nscript_keywords = [\"myagent/run.js\"]\nexclude_argv = [\"--daemon\"]\n",
+        );
+        assert_eq!(rules.len(), 1);
+        assert_eq!(
+            detect_kind_with("myagent chat", &rules).as_deref(),
+            Some("myagent")
+        );
+        assert_eq!(
+            detect_kind_with("node /opt/tools/myagent/run.js", &rules).as_deref(),
+            Some("myagent")
+        );
+        assert_eq!(detect_kind_with("myagent --daemon", &rules), None);
+        assert!(
+            parse_harness_rules("kind = \"orphan\"\n[[harness]]\nexe_names = [\"x\"]\n").is_empty()
+        );
+    }
+
+    #[test]
+    fn same_kind_children_are_one_record() {
+        let procs = vec![
+            Proc {
+                pid: 500,
+                ppid: 1,
+                age_secs: 60,
+                cpu: 0.0,
+                command: "pi".into(),
+                tty: Some("ttys001".into()),
+            },
+            Proc {
+                pid: 501,
+                ppid: 500,
+                age_secs: 60,
+                cpu: 0.0,
+                command: "node /usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js"
+                    .into(),
+                tty: None,
+            },
+        ];
+        let tail = |_: &str| -> Option<Tail> { None };
+        let records = build(
+            &procs,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+            &tail,
+            &Me::default(),
+        );
+        let pis: Vec<&AgentRec> = records
+            .iter()
+            .filter(|r| r.kind.as_deref() == Some("pi"))
+            .collect();
+        assert_eq!(pis.len(), 1);
+        assert_eq!(pis[0].pid, Some(500));
+        assert_eq!(pis[0].tty.as_deref(), Some("ttys001"));
+    }
+
+    #[test]
     fn host_options_are_read_from_before_the_separator_only() {
-        let spec = parse_host("/x/agent-cli-lab host --name w1 --role worker --parent mgr --model muse/muse -C 150 --title a b -- pi --provider other --model hosted");
-        assert_eq!((spec.name.as_deref(), spec.role.as_deref(), spec.parent.as_deref(), spec.model.as_deref()), (Some("w1"), Some("worker"), Some("mgr"), Some("muse/muse")));
+        let spec = parse_host(
+            "/x/agent-cli-lab host --name w1 --role worker --parent mgr --model muse/muse -C 150 --title a b -- pi --provider other --model hosted",
+        );
+        assert_eq!(
+            (
+                spec.name.as_deref(),
+                spec.role.as_deref(),
+                spec.parent.as_deref(),
+                spec.model.as_deref()
+            ),
+            (Some("w1"), Some("worker"), Some("mgr"), Some("muse/muse"))
+        );
         assert_eq!(spec.hosted_model().as_deref(), Some("other/hosted"));
         let legacy = parse_host("agent-cli-lab host -s /var/T/aws-deploy.sock -r log.jsonl -- pi");
         assert_eq!(legacy.lab_name().as_deref(), Some("aws-deploy"));
         let short = parse_host("agent-cli-lab host -s abac-mgr -C 150 -- pi");
         assert_eq!(short.lab_name().as_deref(), Some("abac-mgr"));
-        assert!(short.socket_candidates().iter().any(|p| p.to_string_lossy().ends_with("abac-mgr.sock")));
+        assert!(
+            short
+                .socket_candidates()
+                .iter()
+                .any(|p| p.to_string_lossy().ends_with("abac-mgr.sock"))
+        );
     }
 
     #[test]
@@ -920,38 +1685,85 @@ mod tests {
         let found = records(Me::default());
         let expense = find(&found, "cmdr-expense");
         assert_eq!(expense.kind.as_deref(), Some("pi"));
-        assert_eq!((expense.role.as_deref(), expense.parent.as_deref()), (Some("commander"), Some("boss")));
+        assert_eq!(
+            (expense.role.as_deref(), expense.parent.as_deref()),
+            (Some("commander"), Some("boss"))
+        );
         assert_eq!(expense.model.as_deref(), Some("muse/muse"));
-        assert_eq!((expense.status.as_deref(), expense.context.as_deref()), (Some("working"), Some("12.3%/400k")));
+        assert_eq!(
+            (expense.status.as_deref(), expense.context.as_deref()),
+            (Some("working"), Some("12.3%/400k"))
+        );
         assert_eq!((expense.pid, expense.host_pid), (Some(12413), Some(12412)));
         assert!(expense.managed);
         let aws = find(&found, "aws");
         assert_eq!(aws.kind.as_deref(), Some("claude"));
-        assert_eq!(aws.session_id.as_deref(), Some("74dc4afc-cccc"), "the lab's Claude session is joined by pid");
+        assert_eq!(
+            aws.session_id.as_deref(),
+            Some("74dc4afc-cccc"),
+            "the lab's Claude session is joined by pid"
+        );
         // the hosted agents are not listed a second time
-        assert_eq!(found.iter().filter(|r| r.pid == Some(12413) || r.pid == Some(65060) || r.pid == Some(25040)).count(), 3);
+        assert_eq!(
+            found
+                .iter()
+                .filter(|r| r.pid == Some(12413) || r.pid == Some(65060) || r.pid == Some(25040))
+                .count(),
+            3
+        );
         assert_eq!(found.iter().filter(|r| r.managed).count(), 4);
-        assert_eq!(find(&found, "abac-mgr").status.as_deref(), Some("up"), "a lab nobody could probe is still listed");
+        assert_eq!(
+            find(&found, "abac-mgr").status.as_deref(),
+            Some("up"),
+            "a lab nobody could probe is still listed"
+        );
     }
 
     #[test]
     fn standalone_agents_include_the_users_own_claude_session() {
-        let found = records(Me { ancestors: HashSet::from([76581]), session_id: None });
+        let found = records(Me {
+            ancestors: HashSet::from([76581]),
+            session_id: None,
+        });
         let mine = find(&found, "ghostty commander");
         assert!(mine.this_session && !mine.managed);
         assert_eq!(mine.role.as_deref(), Some("this session (commander)"));
-        assert_eq!((mine.model.as_deref(), mine.context.as_deref(), mine.last.as_deref()), (Some("claude-sonnet-5-5"), Some("210k tok"), Some("running the sweep")));
+        assert_eq!(
+            (
+                mine.model.as_deref(),
+                mine.context.as_deref(),
+                mine.last.as_deref()
+            ),
+            (
+                Some("claude-sonnet-5-5"),
+                Some("210k tok"),
+                Some("running the sweep")
+            )
+        );
         assert_eq!(mine.status.as_deref(), Some("working"));
-        assert_eq!(found[0].name.as_deref(), Some("ghostty commander"), "listed first");
+        assert_eq!(
+            found[0].name.as_deref(),
+            Some("ghostty commander"),
+            "listed first"
+        );
         let other = find(&found, "downloads-9b");
         assert!(!other.this_session);
-        assert_eq!((other.role.as_deref(), other.status.as_deref()), (Some("interactive session"), Some("idle")));
-        assert!(found.iter().all(|r| r.pid != Some(80511)), "the browser native host is not an agent");
+        assert_eq!(
+            (other.role.as_deref(), other.status.as_deref()),
+            (Some("interactive session"), Some("idle"))
+        );
+        assert!(
+            found.iter().all(|r| r.pid != Some(80511)),
+            "the browser native host is not an agent"
+        );
     }
 
     #[test]
     fn the_session_in_the_environment_marks_this_session_too() {
-        let found = records(Me { ancestors: HashSet::new(), session_id: Some("e41979bd-bbbb".into()) });
+        let found = records(Me {
+            ancestors: HashSet::new(),
+            session_id: Some("e41979bd-bbbb".into()),
+        });
         assert!(find(&found, "downloads-9b").this_session);
         assert!(!find(&found, "ghostty commander").this_session);
     }
@@ -960,23 +1772,47 @@ mod tests {
     fn other_agent_programs_and_editor_agents_are_found() {
         let found = records(Me::default());
         let editor = found.iter().find(|r| r.pid == Some(8284)).unwrap();
-        assert_eq!((editor.kind.as_deref(), editor.name.as_deref(), editor.role.as_deref()), (Some("pi"), Some("pi (editor)"), Some("editor agent")));
+        assert_eq!(
+            (
+                editor.kind.as_deref(),
+                editor.name.as_deref(),
+                editor.role.as_deref()
+            ),
+            (Some("pi"), Some("pi (editor)"), Some("editor agent"))
+        );
         assert_eq!(editor.status.as_deref(), Some("working"), "busy by CPU");
         let open = found.iter().find(|r| r.pid == Some(4001)).unwrap();
-        assert_eq!((open.kind.as_deref(), open.model.as_deref(), open.status.as_deref()), (Some("opencode"), Some("opencode/big-pickle"), Some("idle")));
+        assert_eq!(
+            (
+                open.kind.as_deref(),
+                open.model.as_deref(),
+                open.status.as_deref()
+            ),
+            (Some("opencode"), Some("opencode/big-pickle"), Some("idle"))
+        );
     }
 
     #[test]
     fn ancestors_walk_up_to_the_session() {
-        let procs = parse_ps("76581 1 01:00:00 1.0 claude\n300 76581 00:10 0.0 zsh\n301 300 00:05 0.0 agent-cli-lab agents\n");
+        let procs = parse_ps(
+            "76581 1 01:00:00 1.0 claude\n300 76581 00:10 0.0 zsh\n301 300 00:05 0.0 agent-cli-lab agents\n",
+        );
         assert_eq!(ancestors_of(301, &procs), HashSet::from([300, 76581]));
     }
 
     #[test]
     fn session_files_parse_with_numeric_or_string_pids() {
         let a = parse_session_file(r#"{"pid":76581,"sessionId":"s1","cwd":"/w","name":"n","kind":"interactive","status":"busy"}"#).unwrap();
-        assert_eq!((a.pid, a.session_id.as_deref(), a.status.as_deref()), (76581, Some("s1"), Some("busy")));
-        assert_eq!(parse_session_file(r#"{"pid":"23317","sessionId":"s2"}"#).unwrap().pid, 23317);
+        assert_eq!(
+            (a.pid, a.session_id.as_deref(), a.status.as_deref()),
+            (76581, Some("s1"), Some("busy"))
+        );
+        assert_eq!(
+            parse_session_file(r#"{"pid":"23317","sessionId":"s2"}"#)
+                .unwrap()
+                .pid,
+            23317
+        );
         assert!(parse_session_file("{ broken").is_none());
         assert_eq!(claude_status(Some("busy")), "working");
         assert_eq!(claude_status(Some("shell")), "working");
@@ -1001,16 +1837,25 @@ mod tests {
         assert_eq!(tail.model.as_deref(), Some("claude-sonnet-5-5"));
         assert_eq!(tail.tokens, Some(200_403));
         let last = tail.last.unwrap();
-        assert!(last.contains("[redacted]") && !last.contains("ghp_") && last.contains("and spaces"), "{last}");
+        assert!(
+            last.contains("[redacted]") && !last.contains("ghp_") && last.contains("and spaces"),
+            "{last}"
+        );
         assert_eq!(tokens_label(200_403), "200k tok");
         assert_eq!(tokens_label(850), "850 tok");
     }
 
     #[test]
     fn snippets_redact_and_truncate() {
-        assert_eq!(snippet("use Bearer abcdefghijklmnop1234 now", 80), "use [redacted] now");
+        assert_eq!(
+            snippet("use Bearer abcdefghijklmnop1234 now", 80),
+            "use [redacted] now"
+        );
         let aws_key = ["AKIA", "ABCDEFGHIJKLMNOP"].concat();
-        assert_eq!(snippet(&format!("key {aws_key} end"), 80), "key [redacted] end");
+        assert_eq!(
+            snippet(&format!("key {aws_key} end"), 80),
+            "key [redacted] end"
+        );
         let long = "word ".repeat(60);
         assert!(snippet(&long, 30).ends_with('…') && snippet(&long, 30).chars().count() <= 30);
     }
@@ -1019,16 +1864,28 @@ mod tests {
     fn lab_screens_give_a_context_footer_and_a_last_line() {
         let screen = " editing src/redline.ts now\n────────────\n                                  12.3%/400k (auto)   (muse) muse\n  esc to interrupt\n";
         assert_eq!(footer_context(screen).as_deref(), Some("12.3%/400k"));
-        assert_eq!(last_screen_line(screen).as_deref(), Some("editing src/redline.ts now"));
+        assert_eq!(
+            last_screen_line(screen).as_deref(),
+            Some("editing src/redline.ts now")
+        );
         assert_eq!(footer_context("nothing here"), None);
     }
 
     #[test]
     fn table_and_json_cover_every_kind() {
-        let registry = registry_now(records(Me { ancestors: HashSet::from([76581]), session_id: None }));
+        let registry = registry_now(records(Me {
+            ancestors: HashSet::from([76581]),
+            session_id: None,
+        }));
         let table = render_table(&registry);
         assert!(table.starts_with("8 agent instances"), "{table}");
-        for needle in ["◆ ghostty commander", "cmdr-expense", "claude", "opencode", "pi (editor)"] {
+        for needle in [
+            "◆ ghostty commander",
+            "cmdr-expense",
+            "claude",
+            "opencode",
+            "pi (editor)",
+        ] {
             assert!(table.contains(needle), "{needle} missing in\n{table}");
         }
         let json = serde_json::to_value(&registry).unwrap();
