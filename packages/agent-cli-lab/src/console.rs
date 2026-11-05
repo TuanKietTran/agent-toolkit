@@ -270,6 +270,7 @@ fn arrange(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>) -> Vec<La
     }
     let mut ordered: Vec<Lab> = Vec::new();
     let mut seen: HashSet<usize> = HashSet::new();
+    #[allow(clippy::too_many_arguments)]
     fn walk(
         index: usize,
         depth: usize,
@@ -1336,7 +1337,7 @@ impl App {
                         .any(|field| field.as_deref().unwrap_or("").to_lowercase().contains(&needle))
             })
             .collect();
-        rows.sort_by(|a, b| (!a.this_session, a.managed, a.kind.clone(), a.name.clone()).cmp(&(!b.this_session, b.managed, b.kind.clone(), b.name.clone())));
+        rows.sort_by_key(|a| (!a.this_session, a.managed, a.kind.clone(), a.name.clone()));
         rows
     }
 
@@ -1357,10 +1358,8 @@ fn draw_agents(frame: &mut Frame, area: Rect, app: &mut App) {
     if app.agents_table.selected().is_none() && !rows_data.is_empty() {
         app.agents_table.select(Some(0));
     }
-    if let Some(selected) = app.agents_table.selected() {
-        if selected >= rows_data.len() {
-            app.agents_table.select(rows_data.len().checked_sub(1));
-        }
+    if let Some(selected) = app.agents_table.selected() && selected >= rows_data.len() {
+        app.agents_table.select(rows_data.len().checked_sub(1));
     }
     let [table_area, note_area] = Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).areas(area);
     let block = titled_block("agents", rows_data.len(), total, &app.filter);
@@ -1499,13 +1498,11 @@ fn draw_crumbs(frame: &mut Frame, area: Rect, app: &App) {
     }
     let left = Line::from(spans);
     frame.render_widget(Paragraph::new(left), area);
-    if let Some((text, at, error)) = &app.flash {
-        if at.elapsed() < Duration::from_secs(6) {
-            let color = if *error { RED } else { GREEN };
-            let width = text.chars().count().min(area.width as usize / 2);
-            let rect = Rect { x: area.x + area.width.saturating_sub(width as u16 + 1), width: width as u16, ..area };
-            frame.render_widget(Paragraph::new(Span::styled(fit(text, width), Style::default().fg(color))), rect);
-        }
+    if let Some((text, at, error)) = &app.flash && at.elapsed() < Duration::from_secs(6) {
+        let color = if *error { RED } else { GREEN };
+        let width = text.chars().count().min(area.width as usize / 2);
+        let rect = Rect { x: area.x + area.width.saturating_sub(width as u16 + 1), width: width as u16, ..area };
+        frame.render_widget(Paragraph::new(Span::styled(fit(text, width), Style::default().fg(color))), rect);
     }
 }
 
@@ -1642,7 +1639,7 @@ fn tui(args: &ConsoleArgs, view: View) -> Result<()> {
                 let started = Instant::now();
                 let probes = probe_all(stalled_ms);
                 // the all-agents scan costs a process listing and a few reads: every third refresh
-                let registry = (cycle % 3 == 0).then(|| scan_registry(&agents_file, stalled_ms));
+                let registry = cycle.is_multiple_of(3).then(|| scan_registry(&agents_file, stalled_ms));
                 cycle += 1;
                 if sender.send((probes, registry)).is_err() {
                     break;
