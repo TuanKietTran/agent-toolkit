@@ -12,6 +12,7 @@
 - `/jobs` — list jobs and states
 - `/core-replay [all|pass|hang|lost|cancel|resume] [live]` — dev: scripted scenarios on an isolated supervisor. Prints the event timeline and PASS/FAIL. `live` also steers events into the session as `[replay] {job_event}`.
 - `/todo [add <text>|move <id> <position>|done <id>|remove <id>|clear-done|auto on|off]` — todo queue; no argument opens the manager (also Ctrl-Shift-T).
+- `/core-compact [auto|status|dry-run]` — compaction whose model is chosen at run time from the host's available models, cheapest first (no hardcoded provider or model id). `auto` (default, also `/optimize-context` and Ctrl-Shift-O) compacts now with automatic fallthrough to the next candidate on failure; `status` lists every candidate with its accept/reject reason (auth, recent failure, context fit, cost rank); `dry-run` also prints the would-be pick without compacting. Automatic compaction fires when context use reaches the `context-optimize` `auto_threshold_percent` limit (default 80). Selection can be pinned or capped in `~/.pi/agent/settings.json` via `compaction.model` (a model id or `provider/id`) and `compaction.maxCostRank`; `compaction.thresholdPercent` overrides the auto threshold.
 
 ## Job kinds
 
