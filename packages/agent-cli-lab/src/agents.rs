@@ -2,7 +2,7 @@
 //! labs this tool hosts.
 //!
 //! Sources, all read-only:
-//! - the process table (`ps`): every agent program (Claude Code, Pi, opencode, codex, gemini, aider)
+//! - the process table (`ps`): every agent program (Claude Code, Pi, opencode, and the other harnesses in the rule table below)
 //!   and every lab host. A lab host's command line carries the lab's name, role, parent and model,
 //!   for both the current and the older `host -s NAME` form; the agent it hosts is its child process.
 //! - `~/.claude/sessions/<pid>.json`: Claude Code's own record of each running session (session id,
