@@ -22,6 +22,7 @@ pub fn load_file(path: &Path, overrides: &BTreeMap<String, String>) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spec::{ApiType, ModelRef};
 
     fn no_overrides() -> BTreeMap<String, String> {
         BTreeMap::new()
@@ -42,10 +43,104 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "gl-schema: schema::build is not implemented yet"]
     fn load_str_canonical_succeeds_once_schema_lands() {
         let src = include_str!("../tests/fixtures/canonical.yah");
-        assert!(load_str("canonical.yah", src, &no_overrides()).is_ok());
+        let spec = load_str("canonical.yah", src, &no_overrides()).expect("canonical must load");
+        assert_eq!(spec.version, 1);
+        assert_eq!(spec.file, "canonical.yah");
+        assert_eq!(spec.variables.len(), 1);
+        assert_eq!(spec.variables[0].name, "work_dir");
+        assert_eq!(spec.variables[0].var_type, "string");
+        assert_eq!(spec.variables[0].value, serde_json::json!("./work"));
+        assert_eq!(spec.defaults.model_policy.as_deref(), Some("system-one"));
+        assert_eq!(spec.defaults.sandbox.as_deref(), Some("local"));
+        assert_eq!(spec.providers.len(), 1);
+        assert_eq!(spec.providers[0].name, "anthropic");
+        assert_eq!(spec.providers[0].provider_type, "anthropic");
+        assert_eq!(spec.providers[0].api_key_env.as_deref(), Some("ANTHROPIC_API_KEY"));
+        assert_eq!(spec.providers[0].base_url, None);
+        assert_eq!(spec.models.len(), 1);
+        assert_eq!(spec.models[0].name, "sonnet");
+        assert_eq!(spec.models[0].provider, "anthropic");
+        assert_eq!(spec.models[0].id, "sonnet");
+        assert_eq!(spec.models[0].capabilities, vec!["chat", "tools", "vision"]);
+        let s1 = spec.system_one.as_ref().expect("system_one present");
+        assert_eq!(s1.fallback, "sonnet");
+        assert_eq!(s1.student.as_deref(), Some("data/student_model.json"));
+        assert!(spec.image.is_none());
+        assert_eq!(spec.apis.len(), 1);
+        assert_eq!(spec.apis[0].name, "fs");
+        assert_eq!(spec.apis[0].api_type, ApiType::Mcp);
+        assert_eq!(spec.apis[0].command.iter().map(|t| t.display()).collect::<Vec<_>>(), vec!["npx", "-y", "@modelcontextprotocol/server-filesystem", "./work"]);
+        assert_eq!(spec.harnesses.len(), 2);
+        let commander = spec.harness("commander").expect("commander harness");
+        assert_eq!(commander.kind, "agent-cli-lab");
+        assert_eq!(commander.role, "commander");
+        assert_eq!(commander.parent, None);
+        assert_eq!(commander.model, ModelRef::SystemOne);
+        assert_eq!(commander.tools, vec!["fs"]);
+        assert_eq!(commander.open.command.iter().map(|t| t.display()).collect::<Vec<_>>(), vec!["pi", "--no-session"]);
+        assert_eq!(commander.open.cols, Some(140));
+        assert_eq!(commander.open.rows, Some(40));
+        let builder = spec.harness("builder").expect("builder harness");
+        assert_eq!(builder.role, "builder");
+        assert_eq!(builder.parent.as_deref(), Some("commander"));
+        assert_eq!(builder.model, ModelRef::SystemOne);
+        assert_eq!(builder.tools, vec!["fs"]);
+        assert_eq!(builder.open.cwd.as_ref().map(|t| t.display()).as_deref(), Some("./work"));
+        assert_eq!(spec.teams.len(), 1);
+        assert_eq!(spec.teams[0].name, "default");
+        assert_eq!(spec.teams[0].root, "commander");
+        assert_eq!(spec.teams[0].members, vec!["builder"]);
+        assert!(spec.teams[0].graph);
+        assert!(spec.workflows.is_empty());
+        assert!(spec.outputs.is_empty());
+    }
+
+    fn err_diags(src: &str) -> crate::diag::Diagnostics {
+        load_str("x.yah", src, &no_overrides()).unwrap_err()
+    }
+
+    #[test]
+    fn negative_unknown_block_kind() {
+        let d = err_diags("yah 1\nbogus \"x\" {\n}\n");
+        assert!(d.0.iter().any(|x| x.summary == "Unknown block kind"), "{d:?}");
+    }
+
+    #[test]
+    fn negative_unknown_key_with_did_you_mean() {
+        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"agent-cli-lab\"\n role = \"builder\"\n modl = \"sonnet\"\n open { command = [\"pi\"] }\n}\n");
+        assert!(d.0.iter().any(|x| x.summary == "Unsupported argument" && x.hint.as_deref() == Some("Did you mean \"model\"?")), "{d:?}");
+    }
+
+    #[test]
+    fn negative_missing_required_argument() {
+        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"agent-cli-lab\"\n open { command = [\"pi\"] }\n}\n");
+        assert!(d.0.iter().any(|x| x.summary == "Missing required argument" && x.detail.contains("\"role\"")), "{d:?}");
+    }
+
+    #[test]
+    fn negative_wrong_type() {
+        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"agent-cli-lab\"\n role = \"builder\"\n open { command = [\"pi\"] cols = \"wide\" }\n}\n");
+        assert!(d.0.iter().any(|x| x.summary == "Incorrect attribute value type" && x.detail.contains("\"cols\"")), "{d:?}");
+    }
+
+    #[test]
+    fn negative_literal_api_key() {
+        let d = err_diags("yah 1\nprovider \"anthropic\" {\n type = \"anthropic\"\n api_key = \"sk-literal\"\n}\n");
+        assert!(d.0.iter().any(|x| x.summary == "Secrets are never stored"), "{d:?}");
+    }
+
+    #[test]
+    fn negative_bad_cross_reference() {
+        let d = err_diags("yah 1\nmodel \"m\" {\n provider = \"nope\"\n}\n");
+        assert!(d.0.iter().any(|x| x.summary == "Unknown reference" && x.detail.contains("\"nope\"")), "{d:?}");
+    }
+
+    #[test]
+    fn negative_parent_cycle() {
+        let d = err_diags("yah 1\nharness \"a\" {\n kind = \"agent-cli-lab\"\n role = \"builder\"\n parent = \"b\"\n open { command = [\"pi\"] }\n}\nharness \"b\" {\n kind = \"agent-cli-lab\"\n role = \"builder\"\n parent = \"a\"\n open { command = [\"pi\"] }\n}\n");
+        assert!(d.0.iter().any(|x| x.summary == "Cycle detected"), "{d:?}");
     }
 
     #[test]
