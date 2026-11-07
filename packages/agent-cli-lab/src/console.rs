@@ -273,6 +273,29 @@ fn resolved_text(info: &crate::graphspec::NodeInfo) -> String {
     }
 }
 
+/// Model id without its `provider/` prefix, e.g. `claude-sonnet-5-5`.
+fn short_model(model: &str) -> &str {
+    match model.split_once('/') {
+        Some((_, id)) if !id.is_empty() => id,
+        _ => model,
+    }
+}
+
+/// The resolved model for a manifest node, with the provider prefix dropped.
+fn manifest_model(info: &crate::graphspec::NodeInfo) -> String {
+    let model = if info.node.model.is_empty() { &info.node.model_label } else { &info.node.model };
+    short_model(model).to_owned()
+}
+
+/// Graph line 2 for a manifest node: `role · model` when the full model fits that
+/// way, otherwise the full model alone — the model itself is never truncated to
+/// make room for the role.
+fn manifest_line(role: &str, info: &crate::graphspec::NodeInfo, inner: usize) -> String {
+    let model = manifest_model(info);
+    let full = format!("{role} · {model}");
+    if full.chars().count() <= inner { full } else { model }
+}
+
 /// A synthetic probe for a manifest node whose session is not up yet (state `planned`).
 fn planned_probe(info: &crate::graphspec::NodeInfo) -> Probe {
     Probe {
@@ -390,6 +413,8 @@ fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, over
 
 const NODE_W: usize = 30;
 const NODE_H: usize = 4;
+/// Height of a node that carries manifest info: one extra line for the provenance tag.
+const NODE_H_TALL: usize = 5;
 const GAP_X: usize = 8;
 const GAP_Y: usize = 1;
 
@@ -510,7 +535,7 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
     let columns = nodes.iter().map(|n| n.depth).max().unwrap_or(0) + 1;
     let rows = nodes.iter().map(|n| n.row).max().unwrap_or(0) / 2 + 1;
     let stride_x = NODE_W + GAP_X;
-    let stride_y = NODE_H + GAP_Y;
+    let stride_y = NODE_H_TALL + GAP_Y;
     let width = columns * stride_x - GAP_X;
     let height = rows * stride_y - GAP_Y;
     let mut canvas = Canvas::new(width, height);
@@ -570,24 +595,29 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
     for (id, node) in nodes.iter().enumerate() {
         let (x, y) = origin[id];
         let focus = selected == Some(id);
-        let (border, title, subtitle, color) = match node.lab {
+        let (border, title, subtitle, tag, color, height) = match node.lab {
             None => (
                 AQUA,
                 "◆ commander".to_owned(),
                 format!("you · {} lab{}", labs.len(), if labs.len() == 1 { "" } else { "s" }),
+                None,
                 AQUA,
+                NODE_H,
             ),
             Some(l) => {
                 let lab = &labs[l];
-                let subtitle = match overlay_info(overlay, lab.name()) {
-                    Some(info) => format!("{} · {}", lab.role, resolved_text(info)),
-                    None => format!("{} · {}", lab.role, lab.model()),
+                let info = overlay_info(overlay, lab.name());
+                let (subtitle, tag) = match info {
+                    Some(info) => (manifest_line(&lab.role, info, NODE_W - 4), Some(info.node.pick_tag())),
+                    None => (format!("{} · {}", lab.role, lab.model()), None),
                 };
                 (
                     state_color(lab.state()),
                     format!("{} {}", state_glyph(lab.state()), lab.name()),
                     subtitle,
+                    tag,
                     state_color(lab.state()),
+                    if info.is_some() { NODE_H_TALL } else { NODE_H },
                 )
             }
         };
@@ -601,9 +631,9 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
                 _ => (h, h),
             };
             canvas.put(x + i, y, top_ch, border_style);
-            canvas.put(x + i, y + NODE_H - 1, bottom_ch, border_style);
+            canvas.put(x + i, y + height - 1, bottom_ch, border_style);
         }
-        for row in 1..NODE_H - 1 {
+        for row in 1..height - 1 {
             canvas.put(x, y + row, v, border_style);
             canvas.put(x + NODE_W - 1, y + row, v, border_style);
             for i in 1..NODE_W - 1 {
@@ -627,6 +657,10 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
         }
         let sub_style = if focus { Style::default().fg(Color::Black).bg(AQUA) } else { Style::default().fg(GRAY) };
         canvas.text(x + 2, y + 2, &fit(&subtitle, inner), sub_style);
+        if let Some(tag) = &tag {
+            let tag_style = if focus { Style::default().fg(Color::Black).bg(AQUA) } else { Style::default().fg(DIM) };
+            canvas.text(x + 2, y + 3, &fit(tag, inner), tag_style);
+        }
     }
     (canvas, origin)
 }
@@ -1330,7 +1364,7 @@ fn draw_graph_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let view_w = body.width as usize;
     let view_h = body.height as usize;
     let ox = (fx + NODE_W).saturating_sub(view_w);
-    let oy = (fy + NODE_H).saturating_sub(view_h);
+    let oy = (fy + NODE_H_TALL).saturating_sub(view_h);
     let lines = canvas.lines();
     let shown: Vec<Line> = lines.into_iter().skip(oy).map(|line| clip_line(line, ox, view_w)).collect();
     frame.render_widget(Paragraph::new(shown), body);
@@ -1977,6 +2011,41 @@ mod tests {
         let text = render_text(&mut app, 150, 40).unwrap();
         for needle in ["◆ commander", "● mgr1", "◆ w2", "◌ mgr2", "─▶", "graph(all)[6]"] {
             assert!(text.contains(needle), "missing {needle:?} in\n{text}");
+        }
+    }
+
+    #[test]
+    fn graph_view_shows_full_model_and_tag_inside_manifest_node_boxes() {
+        let manifest: crate::graphspec::Manifest = serde_json::from_str(
+            r#"{ "version": 1, "run": "run-1", "team": "alpha", "source": "team.yah", "root": "dry-a", "created_ms": 1,
+              "nodes": [
+                { "name": "dry-a", "harness": "h", "role": "commander", "parent": null, "requested_model": "system-one", "model": "anthropic/claude-sonnet-5-5", "model_label": "sonnet", "pick": { "via": "system-one", "rule": "R3", "reason": "", "degraded_level": 0 }, "tools": [] },
+                { "name": "dry-b", "harness": "h", "role": "worker", "parent": "dry-a", "requested_model": "system-one", "model": "anthropic/claude-haiku-5-5", "model_label": "haiku", "pick": { "via": "fallback", "rule": null, "reason": "", "degraded_level": 1 }, "tools": [] },
+                { "name": "dry-c", "harness": "h", "role": "worker", "parent": "dry-a", "requested_model": "opus", "model": "anthropic/claude-opus-5-5", "model_label": "opus", "pick": { "via": "pinned", "rule": null, "reason": "", "degraded_level": 0 }, "tools": [] }
+              ],
+              "edges": [ { "from": "dry-a", "to": "dry-b", "kind": "parent" }, { "from": "dry-a", "to": "dry-c", "kind": "parent" } ] }"#,
+        )
+        .unwrap();
+        let overlay = crate::graphspec::overlay(&["dry-a"], &[manifest]);
+        assert_eq!(overlay.planned.len(), 2);
+        let mut probes = vec![probe("dry-a", None, Some("commander"), "working", &["cat"], 1)];
+        for info in &overlay.planned {
+            probes.push(planned_probe(info));
+        }
+        let labs = arrange_with(&probes, &HashMap::new(), &overlay);
+        for width in [120u16, 150] {
+            let mut app = App::new(View::Graph, 1000);
+            app.labs = labs.clone();
+            app.overlay = overlay.clone();
+            let text = render_text(&mut app, width, 36).unwrap();
+            for needle in ["claude-sonnet-5-5", "s1 R3", "claude-haiku-5-5", "fallback", "claude-opus-5-5", "pinned", "○ dry-b", "○ dry-c"] {
+                assert!(text.contains(needle), "width {width}: missing {needle:?} in\n{text}");
+            }
+            assert!(!text.contains("anthropic/cla"), "width {width}: model still truncated in\n{text}");
+            for needle in ["claude-sonnet-5-5", "s1 R3", "fallback", "pinned"] {
+                let line = text.lines().find(|l| l.contains(needle)).unwrap();
+                assert!(line.matches('│').count() >= 2, "width {width}: {needle:?} not inside a node box: {line:?}");
+            }
         }
     }
 
