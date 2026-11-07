@@ -17,6 +17,7 @@ Desktop apps for macOS and Windows that wrap this server live in [`../lab-gui-de
 - **Live state** per lab: working, asking, stalled, gone (a lab that vanished stays on the board for a minute), with a pulse on working labs and flowing edges to working children.
 - **Activity sparkline** per lab, from the growth of the lab's output.
 - **Model** per lab and **tokens / cost** where the lab prints them: Pi's footer (`↑in ↓out R… W… $cost ctx%`) is read from the screen. Labs that show no such footer say "not reported".
+- **Graphspec overlay**: when graphloop run manifests are present in the session dir's `graphs/` folder, each live lab gains its resolved model and pick provenance (team, run, harness, requested vs resolved model, pick rule/reason, tools), manifest nodes that are not running yet appear as dashed **planned** nodes, `member` edges and a per-team header (up / total per run) are shown, and stale manifests with no live node are ignored.
 - **Side panel** (bottom sheet on a phone): live screen, a message box (Enter sends, Shift+Enter adds a line), buttons for Enter and Esc, **Attach** (opens the lab in a terminal window) and **Stop…** (asks first).
 - Themes, switched the way Omarchy does it (below), layout down to phone width (the graph becomes a list), keyboard use throughout (`?` lists the keys).
 

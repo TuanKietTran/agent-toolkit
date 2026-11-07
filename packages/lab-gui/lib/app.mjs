@@ -18,6 +18,7 @@ import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ALLOWED_KEYS, CliError, isValidName } from "./cli.mjs";
 import { loadThemes } from "./themes.mjs";
+import { loadGraphs, mergeGraphs } from "./graphs.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(here, "..", "public");
@@ -59,7 +60,7 @@ async function readJson(req) {
  * @param {{cli: ReturnType<import('./cli.mjs').createCli>, monitor: ReturnType<import('./monitor.mjs').createMonitor>,
  *          key: string, token: string, port: () => number, pollMs?: number, idleMs?: number}} options
  */
-export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleMs = 20000, themesDir = THEMES_DIR, remote = null, now = Date.now }) {
+export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleMs = 20000, themesDir = THEMES_DIR, graphsDir = undefined, remote = null, now = Date.now }) {
   const failures = new Map(); // address -> {count, since, until}
   const throttled = (addr) => (failures.get(addr)?.until ?? 0) > now();
   const failed = (addr) => {
@@ -76,6 +77,19 @@ export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleM
   let loop;
   const streams = new Set();
 
+  // Additive Graphspec overlay: merge run manifests into a snapshot (per-lab
+  // `graphspec`, planned nodes in `labs`/`planned`, `memberEdges`, `teams`).
+  // Tolerant: a snapshot without labs, or any load/merge failure, passes through.
+  async function enrich(snap) {
+    if (!snap || !Array.isArray(snap.labs)) return snap;
+    try {
+      const merged = mergeGraphs(snap.labs, await loadGraphs({ dir: graphsDir }));
+      return { ...snap, labs: merged.labs, planned: merged.planned, edges: merged.edges, memberEdges: merged.memberEdges, teams: merged.teams };
+    } catch {
+      return snap;
+    }
+  }
+
   // Poll the CLI only while somebody is looking: idle means zero background work.
   function demand() {
     lastDemand = Date.now();
@@ -85,7 +99,7 @@ export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleM
         loop = undefined;
         return;
       }
-      const snap = await monitor.tick();
+      const snap = await enrich(await monitor.tick());
       const payload = `event: snapshot\ndata: ${JSON.stringify(snap)}\n\n`;
       for (const res of streams) res.write(payload);
       loop = setTimeout(run, pollMs);
@@ -146,7 +160,7 @@ export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleM
     if (req.method === "GET" && path === "/api/labs") {
       demand();
       const snap = monitor.snapshot();
-      return sendJson(res, 200, snap.at ? snap : await monitor.tick());
+      return sendJson(res, 200, await enrich(snap.at ? snap : await monitor.tick()));
     }
 
     // Read from disk on every request, like Omarchy's theme list: a theme folder dropped in shows up at once.
@@ -155,7 +169,7 @@ export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleM
     if (req.method === "GET" && path === "/api/stream") {
       demand();
       res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive", "x-content-type-options": "nosniff" });
-      res.write(`retry: 3000\nevent: snapshot\ndata: ${JSON.stringify(monitor.snapshot())}\n\n`);
+      res.write(`retry: 3000\nevent: snapshot\ndata: ${JSON.stringify(await enrich(monitor.snapshot()))}\n\n`);
       streams.add(res);
       req.on("close", () => streams.delete(res));
       return;

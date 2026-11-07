@@ -6,7 +6,7 @@ const $ = (id) => document.getElementById(id);
 
 const NODE_W = 196, NODE_H = 64, GAP_X = 52, ROW_H = 84, PAD = 14;
 const GLYPH = { builder: "B", explorer: "E", advisor: "A", commander: "C", manager: "M", worker: "W", lab: "L" };
-const STATE_GLYPH = { working: "●", up: "●", asking: "◆", stalled: "◌", gone: "✕" };
+const STATE_GLYPH = { working: "●", up: "●", asking: "◆", stalled: "◌", gone: "✕", planned: "○" };
 
 const state = { snap: null, selected: null, filter: "", screenTimer: 0, lastStates: new Map(), draftFor: null, connected: false };
 
@@ -39,6 +39,21 @@ const fmtTokens = (n) => (n == null ? "–" : n >= 1e6 ? `${(n / 1e6).toFixed(1)
 const fmtCost = (n) => (n == null ? "–" : n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
 const shorten = (text, max) => (text && text.length > max ? `${text.slice(0, max - 1)}…` : text ?? "");
 const stateLabel = (st) => (st === "up" ? "working" : st);
+const graphspecOfLab = (lab) => (lab && typeof lab.graphspec === "object" && lab.graphspec ? lab.graphspec : null);
+function resolvedModelLabel(lab) {
+  const gs = graphspecOfLab(lab);
+  return (gs && (gs.model_label || gs.modelLabel)) || lab.modelLabel || (gs && gs.model) || lab.model || "–";
+}
+function pickTag(lab) {
+  const gs = graphspecOfLab(lab);
+  const pick = gs && typeof gs.pick === "object" && gs.pick ? gs.pick : null;
+  if (!pick || !pick.via) return "";
+  const via = String(pick.via).toLowerCase().replace(/_/g, "-");
+  if (via === "pinned") return "pinned";
+  if (via === "fallback") return "fallback";
+  if (via === "system-one" || via === "systemone" || via === "s1") return pick.rule ? `s1 ${pick.rule}` : "s1";
+  return pick.rule ? `${pick.via} ${pick.rule}` : String(pick.via);
+}
 
 function sparkPoints(samples, w, hgt) {
   const n = samples.length;
@@ -213,7 +228,8 @@ function shapeFor(kind) {
 
 function nodeLabel(lab) {
   const usage = lab.usage ? `, cost ${fmtCost(lab.usage.costUsd)}` : "";
-  return `${lab.name}, ${lab.kind}, ${stateLabel(lab.state)}, model ${lab.modelLabel}${usage}`;
+  const tag = pickTag(lab);
+  return `${lab.name}, ${lab.kind}, ${stateLabel(lab.state)}, model ${resolvedModelLabel(lab)}${tag ? `, pick ${tag}` : ""}${usage}`;
 }
 
 function buildNode(lab, p) {
@@ -223,7 +239,8 @@ function buildNode(lab, p) {
     s("circle", { class: "badge", cx: 26, cy: 22, r: 12 }),
     s("text", { class: "badge-t", x: 26, y: 26 }, GLYPH[lab.kind] ?? "L"),
     s("text", { class: "t-name", x: 46, y: 25 }, shorten(lab.name, 17)),
-    s("text", { class: "t-sub t-model", x: 46, y: 41 }, `${lab.kind} · ${shorten(lab.modelLabel, 16)}`),
+    s("text", { class: "t-sub t-model", x: 46, y: 41 }, `${lab.kind} · ${shorten(resolvedModelLabel(lab), 16)}`),
+    s("text", { class: "t-tag", x: NODE_W - 8, y: 25, "text-anchor": "end" }, pickTag(lab)),
     s("circle", { class: "dot", cx: 20, cy: 50, r: 4 }),
     s("text", { class: "t-sub t-state", x: 30, y: 54 }, `${STATE_GLYPH[lab.state] ?? "●"} ${stateLabel(lab.state)}`),
     s("polyline", { class: "spark-line", points: sparkPoints(lab.samples, 52, 12), transform: `translate(${NODE_W - 64},${NODE_H - 18})` }),
@@ -237,7 +254,7 @@ let lastTopology = "";
 function renderGraph(snap) {
   const labs = snap.labs;
   const { pos, width, height } = layoutForest(labs);
-  const topology = JSON.stringify(labs.map((l) => [l.name, l.parent, l.kind]));
+  const topology = JSON.stringify({ labs: labs.map((l) => [l.name, l.parent, l.kind, l.state, graphspecOfLab(l) ? [graphspecOfLab(l).model, graphspecOfLab(l).model_label, pickTag(l)] : null]), memberEdges: snap.memberEdges ?? snap.edges ?? [], teams: snap.teams ?? [] });
   const host = $("graph");
   if (topology !== lastTopology) {
     lastTopology = topology;
@@ -250,6 +267,14 @@ function renderGraph(snap) {
       const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2, mx = (x1 + x2) / 2;
       edges.append(s("path", { class: "edge", "data-child": lab.name, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` }));
     }
+    for (const e of snap.memberEdges ?? snap.edges ?? []) {
+      const from = e.from ?? e.source, to = e.to ?? e.target;
+      if (!from || !to || !pos.has(from) || !pos.has(to)) continue;
+      if (labs.find((l) => l.name === to)?.parent === from) continue;
+      const a = pos.get(from), b = pos.get(to);
+      const x1 = a.x + NODE_W, y1 = a.y + NODE_H / 2, x2 = b.x, y2 = b.y + NODE_H / 2, mx = (x1 + x2) / 2;
+      edges.append(s("path", { class: "edge member", "data-from": from, "data-to": to, d: `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}` }));
+    }
     for (const lab of labs) svg.append(buildNode(lab, pos.get(lab.name)));
     host.replaceChildren(svg);
   }
@@ -261,7 +286,9 @@ function renderGraph(snap) {
     g.setAttribute("aria-label", nodeLabel(lab));
     g.setAttribute("aria-pressed", String(state.selected === lab.name));
     g.querySelector(".t-state").textContent = `${STATE_GLYPH[lab.state] ?? "●"} ${stateLabel(lab.state)}`;
-    g.querySelector(".t-model").textContent = `${lab.kind} · ${shorten(lab.modelLabel, 16)}`;
+    g.querySelector(".t-model").textContent = `${lab.kind} · ${shorten(resolvedModelLabel(lab), 16)}`;
+    const tagEl = g.querySelector(".t-tag");
+    if (tagEl) tagEl.textContent = pickTag(lab);
     g.querySelector(".spark-line").setAttribute("points", sparkPoints(lab.samples, 52, 12));
     const edge = host.querySelector(`.edge[data-child="${CSS.escape(lab.name)}"]`);
     if (edge) edge.setAttribute("class", `edge${lab.state === "working" ? " live" : ""}`);
@@ -277,7 +304,7 @@ function renderList(snap) {
         h("button", { type: "button", class: `card kind-${lab.kind} state-${lab.state}${state.selected === lab.name ? " selected" : ""}${matches(lab) ? "" : " dim"}`, "data-name": lab.name, "aria-label": nodeLabel(lab), "aria-pressed": String(state.selected === lab.name), onclick: () => select(lab.name, true) },
           h("span", { class: "c-name" }, lab.name),
           h("span", { class: "c-state" }, `${STATE_GLYPH[lab.state] ?? "●"} ${stateLabel(lab.state)}`),
-          h("span", { class: "c-sub" }, `${lab.kind} · ${lab.modelLabel}${lab.usage?.costUsd != null ? ` · ${fmtCost(lab.usage.costUsd)}` : ""}`))), depth)),
+          h("span", { class: "c-sub" }, `${lab.kind} · ${resolvedModelLabel(lab)}${pickTag(lab) ? ` · ${pickTag(lab)}` : ""}${lab.usage?.costUsd != null ? ` · ${fmtCost(lab.usage.costUsd)}` : ""}`))), depth)),
   );
 }
 
@@ -290,7 +317,7 @@ function indent(el, depth) {
 function matches(lab) {
   const q = state.filter.trim().toLowerCase();
   if (!q) return true;
-  return [lab.name, lab.kind, lab.state, lab.model ?? "", lab.parent ?? ""].some((t) => t.toLowerCase().includes(q));
+  return [lab.name, lab.kind, lab.state, lab.model ?? "", resolvedModelLabel(lab), lab.parent ?? "", graphspecOfLab(lab)?.team ?? "", graphspecOfLab(lab)?.harness ?? ""].some((t) => t.toLowerCase().includes(q));
 }
 
 function renderSummary(snap) {
@@ -302,6 +329,9 @@ function renderSummary(snap) {
   if (t.stalled) parts.push(count("stalled", "◌", t.stalled, "stalled"));
   if (t.gone) parts.push(count("gone", "✕", t.gone, "gone", "bad"));
   if (t.tokens > 0) parts.push(chip("", "tokens ", h("b", {}, fmtTokens(t.tokens)), " · ", h("b", {}, fmtCost(t.costUsd))));
+  const plannedCount = snap.planned?.length ?? snap.labs.filter((l) => l.state === "planned").length;
+  if (plannedCount) parts.push(count("planned", "○", plannedCount, "planned"));
+  for (const team of snap.teams ?? []) parts.push(chip("team", `${team.team}${team.run ? ` · ${team.run}` : ""} `, h("b", {}, `${team.up}/${team.total}`), " up"));
   if (!state.connected) parts.push(chip("bad", "reconnecting…"));
   $("summary").replaceChildren(...parts.flatMap((p) => [p, " "]));
 }
@@ -317,8 +347,10 @@ function renderPanel() {
   const sub = $("p-sub");
   sub.replaceChildren(h("span", { class: `pill kind-${lab.kind}` }, lab.kind), " ", h("span", { class: `pill pill-state state-${lab.state}` }, `${STATE_GLYPH[lab.state] ?? "●"} ${stateLabel(lab.state)}`));
   const u = lab.usage;
+  const gs = graphspecOfLab(lab);
   const rows = [
-    ["Model", lab.model ?? "unknown"],
+    ["Model", resolvedModelLabel(lab)],
+    ...(gs ? [["Pick", pickTag(lab) || "–"], ["Team", `${gs.team ?? "–"}${gs.run ? ` · ${gs.run}` : ""}`], ["Harness", gs.harness ?? "–"], ...(gs.requested_model && gs.requested_model !== gs.model ? [["Requested", gs.requested_model]] : []), ...(gs.tools?.length ? [["Tools", gs.tools.join(", ")]] : [])] : []),
     ["Parent", lab.parent ?? "–"],
     ["Helpers", lab.children.length ? lab.children.join(", ") : "–"],
     ["Directory", lab.cwd ? (lab.cwd.length > 42 ? `…${lab.cwd.slice(-41)}` : lab.cwd) : "–"],
@@ -331,9 +363,10 @@ function renderPanel() {
   $("p-meta").replaceChildren(...rows.flatMap(([k, v]) => [h("dt", {}, k), h("dd", {}, v)]));
   const spark = $("p-spark");
   spark.replaceChildren(s("polyline", { class: `spark-line state-${lab.state === "gone" ? "gone" : "working"}`, points: sparkPoints(lab.samples, 240, 36) }));
-  const ended = lab.state === "gone";
+  const ended = lab.state === "gone" || lab.state === "planned";
   $("p-form").querySelectorAll("button, textarea").forEach((el) => { el.disabled = ended; });
-  if (ended) $("p-screen").textContent = "(this lab has ended; its screen is no longer available)";
+  if (lab.state === "planned") $("p-screen").textContent = "(planned in the graphspec manifest; not started yet)";
+  else if (ended) $("p-screen").textContent = "(this lab has ended; its screen is no longer available)";
 }
 
 async function pollScreen() {

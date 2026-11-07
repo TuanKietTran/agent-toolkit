@@ -4,6 +4,7 @@ mod commander;
 mod console;
 mod conpty;
 mod control;
+mod graphspec;
 mod ipc;
 mod keys;
 mod session;

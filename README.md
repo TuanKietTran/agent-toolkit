@@ -13,3 +13,5 @@ A collection of tools for working with coding agents (Pi, Claude Code, Codex). S
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the package-family workflow (`node tools/pkg.mjs ci <package>`).
 
 Licensed under the MIT License — see [LICENSE](LICENSE).
+
+Graphspec overlay: the console overlays each lab with its graphspec resolution — the planned manifest nodes and edges, the resolved model and pick tag (via, rule, and reason from system-one), team, run, harness, and requested model — in the graph, table, and describe views, so what was planned and why that model was picked is visible alongside the live lab state without opening the manifest or trace files separately.

@@ -1,0 +1,63 @@
+yah 1
+
+// demo.yah - harmless: try graphloop up with no agent installed.
+// The hosted program is plain cat, every lab is detached, and no
+// command ever runs a model; system_one still needs a fallback
+// label, so a single small model block is declared.
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+}
+
+model "haiku" {
+  provider = "anthropic"
+  id = "claude-haiku-5-5"
+  capabilities = ["chat"]
+}
+
+system_one {
+  fallback = "haiku"
+}
+
+harness "alpha" {
+  kind = "agent-cli-lab"
+  role = "demo"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    detached = true
+  }
+}
+
+harness "beta" {
+  kind = "agent-cli-lab"
+  role = "demo"
+  parent = "alpha"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    detached = true
+  }
+}
+
+harness "gamma" {
+  kind = "agent-cli-lab"
+  role = "demo"
+  parent = "alpha"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    detached = true
+  }
+}
+
+team "demo" {
+  root = "alpha"
+  members = ["beta", "gamma"]
+  graph = true
+}

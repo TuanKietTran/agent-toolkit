@@ -232,6 +232,7 @@ impl Lab {
 
 fn state_color(state: &str) -> Color {
     match state {
+        "planned" => DIM,
         "working" | "up" => GREEN,
         "asking" => YELLOW,
         "stalled" => ORANGE,
@@ -242,6 +243,7 @@ fn state_color(state: &str) -> Color {
 
 fn state_glyph(state: &str) -> &'static str {
     match state {
+        "planned" => "○",
         "working" | "up" => "●",
         "asking" => "◆",
         "stalled" => "◌",
@@ -251,7 +253,94 @@ fn state_glyph(state: &str) -> &'static str {
 
 /// Orders labs as a forest (parents first, children under them, oldest first) and fills in role,
 /// depth and connectors. A parent that is not running, or a cycle, makes a lab a root.
+#[allow(dead_code)]
 fn arrange(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>) -> Vec<Lab> {
+    arrange_with(probes, history, &crate::graphspec::Overlay::default())
+}
+
+/// Manifest info for a session name, whether the session is live or only planned.
+fn overlay_info<'a>(overlay: &'a crate::graphspec::Overlay, name: &str) -> Option<&'a crate::graphspec::NodeInfo> {
+    overlay.get(name).or_else(|| overlay.planned.iter().find(|info| info.node.name == name))
+}
+
+/// `provider/id tag` for a manifest node, e.g. `anthropic/claude-sonnet-5-5 s1 R3`.
+fn resolved_text(info: &crate::graphspec::NodeInfo) -> String {
+    let model = if info.node.model.is_empty() { &info.node.model_label } else { &info.node.model };
+    if model.is_empty() {
+        info.node.pick_tag()
+    } else {
+        format!("{} {}", model, info.node.pick_tag())
+    }
+}
+
+/// Model id without its `provider/` prefix, e.g. `claude-sonnet-5-5`.
+fn short_model(model: &str) -> &str {
+    match model.split_once('/') {
+        Some((_, id)) if !id.is_empty() => id,
+        _ => model,
+    }
+}
+
+/// The resolved model for a manifest node, with the provider prefix dropped.
+fn manifest_model(info: &crate::graphspec::NodeInfo) -> String {
+    let model = if info.node.model.is_empty() { &info.node.model_label } else { &info.node.model };
+    short_model(model).to_owned()
+}
+
+/// Graph line 2 for a manifest node: `role · model` when the full model fits that
+/// way, otherwise the full model alone — the model itself is never truncated to
+/// make room for the role.
+fn manifest_line(role: &str, info: &crate::graphspec::NodeInfo, inner: usize) -> String {
+    let model = manifest_model(info);
+    let full = format!("{role} · {model}");
+    if full.chars().count() <= inner { full } else { model }
+}
+
+/// A synthetic probe for a manifest node whose session is not up yet (state `planned`).
+fn planned_probe(info: &crate::graphspec::NodeInfo) -> Probe {
+    Probe {
+        entry: session::Entry {
+            name: info.node.name.clone(),
+            pid: 0,
+            socket: String::new(),
+            command: Vec::new(),
+            cwd: None,
+            title: None,
+            cols: 0,
+            rows: 0,
+            started_ms: u64::MAX,
+            role: if info.node.role.is_empty() { None } else { Some(info.node.role.clone()) },
+            parent: info.node.parent.clone(),
+            model: if info.node.model.is_empty() { None } else { Some(info.node.model.clone()) },
+        },
+        state: "planned".into(),
+        screen: String::new(),
+        quiet_ms: 0,
+        uptime_ms: 0,
+        bytes_out: 0,
+        window_title: String::new(),
+    }
+}
+
+fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, overlay: &crate::graphspec::Overlay) -> Vec<Lab> {
+    // Effective parent: the registry parent, else the manifest node's parent, else the
+    // `from` of a manifest `member` edge into this node. Rewriting the entry parent lets
+    // the forest walk and the graph layout below share the one answer.
+    let all_names: HashSet<&str> = probes.iter().map(|p| p.entry.name.as_str()).collect();
+    let mut owned: Vec<Probe> = probes.to_vec();
+    for probe in owned.iter_mut() {
+        let live_parent = probe.entry.parent.as_deref().filter(|parent| all_names.contains(parent) && *parent != probe.entry.name).map(str::to_owned);
+        if live_parent.is_some() {
+            continue;
+        }
+        let fallback = overlay_info(overlay, &probe.entry.name)
+            .and_then(|info| info.node.parent.clone())
+            .or_else(|| overlay.edges.iter().find(|edge| edge.to == probe.entry.name && edge.kind == crate::graphspec::EdgeKind::Member).map(|edge| edge.from.clone()));
+        if let Some(parent) = fallback.filter(|parent| all_names.contains(parent.as_str()) && *parent != probe.entry.name) {
+            probe.entry.parent = Some(parent);
+        }
+    }
+    let probes: &[Probe] = &owned;
     let names: HashSet<&str> = probes.iter().map(|p| p.entry.name.as_str()).collect();
     let parent_of = |p: &Probe| {
         p.entry
@@ -324,6 +413,8 @@ fn arrange(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>) -> Vec<La
 
 const NODE_W: usize = 30;
 const NODE_H: usize = 4;
+/// Height of a node that carries manifest info: one extra line for the provenance tag.
+const NODE_H_TALL: usize = 5;
 const GAP_X: usize = 8;
 const GAP_Y: usize = 1;
 
@@ -440,11 +531,11 @@ fn fit(text: &str, width: usize) -> String {
 }
 
 /// Draws the graph. Returns the canvas and the (x, y) of every node, indexed like `nodes`.
-fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>) -> (Canvas, Vec<(usize, usize)>) {
+fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overlay: &crate::graphspec::Overlay) -> (Canvas, Vec<(usize, usize)>) {
     let columns = nodes.iter().map(|n| n.depth).max().unwrap_or(0) + 1;
     let rows = nodes.iter().map(|n| n.row).max().unwrap_or(0) / 2 + 1;
     let stride_x = NODE_W + GAP_X;
-    let stride_y = NODE_H + GAP_Y;
+    let stride_y = NODE_H_TALL + GAP_Y;
     let width = columns * stride_x - GAP_X;
     let height = rows * stride_y - GAP_Y;
     let mut canvas = Canvas::new(width, height);
@@ -504,20 +595,29 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>) -> (Ca
     for (id, node) in nodes.iter().enumerate() {
         let (x, y) = origin[id];
         let focus = selected == Some(id);
-        let (border, title, subtitle, color) = match node.lab {
+        let (border, title, subtitle, tag, color, height) = match node.lab {
             None => (
                 AQUA,
                 "◆ commander".to_owned(),
                 format!("you · {} lab{}", labs.len(), if labs.len() == 1 { "" } else { "s" }),
+                None,
                 AQUA,
+                NODE_H,
             ),
             Some(l) => {
                 let lab = &labs[l];
+                let info = overlay_info(overlay, lab.name());
+                let (subtitle, tag) = match info {
+                    Some(info) => (manifest_line(&lab.role, info, NODE_W - 4), Some(info.node.pick_tag())),
+                    None => (format!("{} · {}", lab.role, lab.model()), None),
+                };
                 (
                     state_color(lab.state()),
                     format!("{} {}", state_glyph(lab.state()), lab.name()),
-                    format!("{} · {}", lab.role, lab.model()),
+                    subtitle,
+                    tag,
                     state_color(lab.state()),
+                    if info.is_some() { NODE_H_TALL } else { NODE_H },
                 )
             }
         };
@@ -531,9 +631,9 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>) -> (Ca
                 _ => (h, h),
             };
             canvas.put(x + i, y, top_ch, border_style);
-            canvas.put(x + i, y + NODE_H - 1, bottom_ch, border_style);
+            canvas.put(x + i, y + height - 1, bottom_ch, border_style);
         }
-        for row in 1..NODE_H - 1 {
+        for row in 1..height - 1 {
             canvas.put(x, y + row, v, border_style);
             canvas.put(x + NODE_W - 1, y + row, v, border_style);
             for i in 1..NODE_W - 1 {
@@ -557,6 +657,10 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>) -> (Ca
         }
         let sub_style = if focus { Style::default().fg(Color::Black).bg(AQUA) } else { Style::default().fg(GRAY) };
         canvas.text(x + 2, y + 2, &fit(&subtitle, inner), sub_style);
+        if let Some(tag) = &tag {
+            let tag_style = if focus { Style::default().fg(Color::Black).bg(AQUA) } else { Style::default().fg(DIM) };
+            canvas.text(x + 2, y + 3, &fit(tag, inner), tag_style);
+        }
     }
     (canvas, origin)
 }
@@ -619,6 +723,7 @@ struct App {
     quit: bool,
     agents: AgentsFeed,
     agents_table: TableState,
+    overlay: crate::graphspec::Overlay,
 }
 
 impl App {
@@ -640,6 +745,16 @@ impl App {
             quit: false,
             agents: AgentsFeed::default(),
             agents_table: TableState::default(),
+            overlay: crate::graphspec::Overlay::default(),
+        }
+    }
+
+    /// The MODEL text for a lab: the manifest's resolved model + pick tag when the lab
+    /// belongs to an active manifest, else the recorded/inferred model.
+    fn display_model(&self, lab: &Lab) -> String {
+        match overlay_info(&self.overlay, lab.name()) {
+            Some(info) => resolved_text(info),
+            None => lab.model(),
         }
     }
 
@@ -665,7 +780,13 @@ impl App {
         while self.total.len() > HISTORY * 2 {
             self.total.pop_front();
         }
-        self.labs = arrange(&probes, &self.history);
+        let live_names: Vec<&str> = probes.iter().map(|p| p.entry.name.as_str()).collect();
+        self.overlay = crate::graphspec::overlay(&live_names, &crate::graphspec::load_all());
+        let mut all = probes.clone();
+        for info in &self.overlay.planned {
+            all.push(planned_probe(info));
+        }
+        self.labs = arrange_with(&all, &self.history, &self.overlay);
         self.reselect();
     }
 
@@ -1154,7 +1275,7 @@ fn draw_labs(frame: &mut Frame, area: Rect, app: &mut App) {
             cells.push(Cell::from(lab.parent.clone().unwrap_or_else(|| "-".into())).style(Style::default().fg(GRAY)));
         }
         cells.push(Cell::from(format!("{} {}", state_glyph(lab.state()), lab.state())).style(Style::default().fg(color)));
-        cells.push(Cell::from(lab.model()).style(Style::default().fg(Color::White)));
+        cells.push(Cell::from(app.display_model(lab)).style(Style::default().fg(Color::White)));
         if medium {
             cells.push(Cell::from(spark(&lab.history, 8)).style(Style::default().fg(GREEN)));
         }
@@ -1226,16 +1347,24 @@ fn draw_graph_view(frame: &mut Frame, area: Rect, app: &mut App) {
     ];
     frame.render_widget(Paragraph::new(legend), Rect { x: legend_area.x + 2, ..legend_area });
 
+    let body = match app.overlay.header() {
+        Some(text) => {
+            let [head, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(body);
+            frame.render_widget(Paragraph::new(Span::styled(format!(" {text}"), Style::default().fg(AQUA).add_modifier(Modifier::BOLD))), head);
+            rest
+        }
+        None => body,
+    };
     let nodes = layout(&app.labs);
     let focus_lab = app.selected.as_ref().and_then(|name| app.labs.iter().position(|l| l.name() == name));
     let focus = focus_lab.and_then(|lab| nodes.iter().position(|n| n.lab == Some(lab)));
-    let (canvas, origin) = draw_graph(&app.labs, &nodes, focus);
+    let (canvas, origin) = draw_graph(&app.labs, &nodes, focus, &app.overlay);
     // keep the focused node in view
     let (fx, fy) = focus.map(|f| origin[f]).unwrap_or((0, 0));
     let view_w = body.width as usize;
     let view_h = body.height as usize;
     let ox = (fx + NODE_W).saturating_sub(view_w);
-    let oy = (fy + NODE_H).saturating_sub(view_h);
+    let oy = (fy + NODE_H_TALL).saturating_sub(view_h);
     let lines = canvas.lines();
     let shown: Vec<Line> = lines.into_iter().skip(oy).map(|line| clip_line(line, ox, view_w)).collect();
     frame.render_widget(Paragraph::new(shown), body);
@@ -1469,6 +1598,29 @@ fn is_lead(role: &str) -> bool {
     matches!(role, "manager" | "builder")
 }
 
+#[cfg(test)]
+mod overlay_tests {
+    use super::*;
+
+    #[test]
+    fn lead_roles_count_as_managers() {
+        assert!(is_lead("manager"));
+        assert!(is_lead("builder"));
+        assert!(!is_lead("worker"));
+        assert!(!is_lead("commander"));
+        assert!(!is_lead(""));
+    }
+
+    #[test]
+    fn centered_clamps_and_centers_in_area() {
+        let area = Rect { x: 0, y: 0, width: 20, height: 10 };
+        let r = centered(area, 30, 4);
+        assert_eq!((r.x, r.y, r.width, r.height), (0, 3, 20, 4));
+        let r = centered(area, 10, 2);
+        assert_eq!((r.x, r.y, r.width, r.height), (5, 4, 10, 2));
+    }
+}
+
 fn draw_crumbs(frame: &mut Frame, area: Rect, app: &App) {
     let crumb = |text: &str, active: bool| {
         Span::styled(
@@ -1547,7 +1699,7 @@ fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
         line("Role:", lab.role.clone()),
         line("Parent:", lab.parent.clone().unwrap_or_else(|| "- (reports to the commander)".into())),
         line("Children:", if children.is_empty() { "-".into() } else { children.join(", ") }),
-        line("Model:", lab.model()),
+        line("Model:", app.display_model(lab)),
         line("State:", format!("{} (quiet for {})", lab.state(), human_duration(lab.probe.quiet_ms))),
         line("Uptime:", human_duration(lab.probe.uptime_ms)),
         line("Command:", entry.command.join(" ")),
@@ -1560,6 +1712,25 @@ fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
         Line::from(""),
         Line::from(Span::styled("Screen (last lines)", Style::default().fg(AQUA).add_modifier(Modifier::BOLD))),
     ];
+    if let Some(info) = overlay_info(&app.overlay, lab.name()) {
+        let pick = &info.node.pick;
+        let via = match pick.rule.as_deref().filter(|rule| !rule.is_empty()) {
+            Some(rule) => format!("{} · {}", pick.via, rule),
+            None => pick.via.clone(),
+        };
+        let pick_text = if pick.reason.is_empty() { via } else { format!("{via} · {}", pick.reason) };
+        lines.splice(
+            5..5,
+            [
+                line("Team:", info.team.clone()),
+                line("Run:", info.run.clone()),
+                line("Harness:", info.node.harness.clone()),
+                line("Requested:", info.node.requested_model.clone()),
+                line("Pick:", pick_text),
+                line("Trace:", info.trace_dir.clone().unwrap_or_else(|| "-".into())),
+            ],
+        );
+    }
     let mut screen: Vec<&str> = lab.probe.screen.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
     let keep = 14;
     screen.drain(..screen.len().saturating_sub(keep));
@@ -1840,6 +2011,41 @@ mod tests {
         let text = render_text(&mut app, 150, 40).unwrap();
         for needle in ["◆ commander", "● mgr1", "◆ w2", "◌ mgr2", "─▶", "graph(all)[6]"] {
             assert!(text.contains(needle), "missing {needle:?} in\n{text}");
+        }
+    }
+
+    #[test]
+    fn graph_view_shows_full_model_and_tag_inside_manifest_node_boxes() {
+        let manifest: crate::graphspec::Manifest = serde_json::from_str(
+            r#"{ "version": 1, "run": "run-1", "team": "alpha", "source": "team.yah", "root": "dry-a", "created_ms": 1,
+              "nodes": [
+                { "name": "dry-a", "harness": "h", "role": "commander", "parent": null, "requested_model": "system-one", "model": "anthropic/claude-sonnet-5-5", "model_label": "sonnet", "pick": { "via": "system-one", "rule": "R3", "reason": "", "degraded_level": 0 }, "tools": [] },
+                { "name": "dry-b", "harness": "h", "role": "worker", "parent": "dry-a", "requested_model": "system-one", "model": "anthropic/claude-haiku-5-5", "model_label": "haiku", "pick": { "via": "fallback", "rule": null, "reason": "", "degraded_level": 1 }, "tools": [] },
+                { "name": "dry-c", "harness": "h", "role": "worker", "parent": "dry-a", "requested_model": "opus", "model": "anthropic/claude-opus-5-5", "model_label": "opus", "pick": { "via": "pinned", "rule": null, "reason": "", "degraded_level": 0 }, "tools": [] }
+              ],
+              "edges": [ { "from": "dry-a", "to": "dry-b", "kind": "parent" }, { "from": "dry-a", "to": "dry-c", "kind": "parent" } ] }"#,
+        )
+        .unwrap();
+        let overlay = crate::graphspec::overlay(&["dry-a"], &[manifest]);
+        assert_eq!(overlay.planned.len(), 2);
+        let mut probes = vec![probe("dry-a", None, Some("commander"), "working", &["cat"], 1)];
+        for info in &overlay.planned {
+            probes.push(planned_probe(info));
+        }
+        let labs = arrange_with(&probes, &HashMap::new(), &overlay);
+        for width in [120u16, 150] {
+            let mut app = App::new(View::Graph, 1000);
+            app.labs = labs.clone();
+            app.overlay = overlay.clone();
+            let text = render_text(&mut app, width, 36).unwrap();
+            for needle in ["claude-sonnet-5-5", "s1 R3", "claude-haiku-5-5", "fallback", "claude-opus-5-5", "pinned", "○ dry-b", "○ dry-c"] {
+                assert!(text.contains(needle), "width {width}: missing {needle:?} in\n{text}");
+            }
+            assert!(!text.contains("anthropic/cla"), "width {width}: model still truncated in\n{text}");
+            for needle in ["claude-sonnet-5-5", "s1 R3", "fallback", "pinned"] {
+                let line = text.lines().find(|l| l.contains(needle)).unwrap();
+                assert!(line.matches('│').count() >= 2, "width {width}: {needle:?} not inside a node box: {line:?}");
+            }
         }
     }
 
