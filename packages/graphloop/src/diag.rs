@@ -99,8 +99,38 @@ impl Diagnostics {
 
     /// Terraform-style text for every diagnostic. `source` is the file's text, used to print the
     /// offending line. OWNER: gl-resolve.
-    pub fn render(&self, _source: &str) -> String {
-        todo!("gl-resolve: render diagnostics")
+    pub fn render(&self, source: &str) -> String {
+        if self.0.is_empty() {
+            return String::new();
+        }
+        let lines: Vec<&str> = source.lines().collect();
+        let mut blocks: Vec<String> = Vec::with_capacity(self.0.len());
+        for d in &self.0 {
+            let severity = match d.severity {
+                Severity::Error => "Error",
+                Severity::Warning => "Warning",
+            };
+            let mut block = format!("{severity}: {}", d.summary);
+            block.push_str("\n\n");
+            block.push_str(&format!("  on {} line {}", d.file, d.line));
+            if let Some(context) = &d.context {
+                block.push_str(&format!(", in {context}"));
+            }
+            block.push(':');
+            if let Some(text) = d.line.checked_sub(1).and_then(|i| lines.get(i as usize)) {
+                block.push_str(&format!("\n  {}: {}", d.line, text.trim_end()));
+            }
+            block.push_str("\n\n");
+            block.push_str(&d.detail);
+            if let Some(hint) = &d.hint {
+                block.push_str("\n\n");
+                block.push_str(hint);
+            }
+            blocks.push(block);
+        }
+        let mut out = blocks.join("\n\n");
+        out.push('\n');
+        out
     }
 }
 
@@ -141,8 +171,8 @@ fn edit_distance(a: &str, b: &str) -> usize {
     for (i, row) in grid.iter_mut().enumerate() {
         row[0] = i;
     }
-    for j in 0..=b.len() {
-        grid[0][j] = j;
+    for (j, cell) in grid[0].iter_mut().enumerate() {
+        *cell = j;
     }
     for i in 1..=a.len() {
         for j in 1..=b.len() {
@@ -171,5 +201,70 @@ mod tests {
     fn stays_quiet_when_nothing_is_close() {
         assert_eq!(suggest("xyz", ["role", "model"]), None);
         assert_eq!(suggest("a", ["b"]), None);
+    }
+
+    fn make_diag(severity: Severity, line: u32, summary: &str, detail: &str) -> Diagnostic {
+        Diagnostic {
+            severity,
+            file: "team.yah".to_owned(),
+            line,
+            col: 3,
+            summary: summary.to_owned(),
+            detail: detail.to_owned(),
+            context: None,
+            hint: None,
+        }
+    }
+
+    #[test]
+    fn render_matches_terraform_golden() {
+        let mut source_lines: Vec<String> = (1..=30).map(|i| format!("filler {i}")).collect();
+        source_lines.push("  modle = \"sonnet\"".to_owned());
+        let source = source_lines.join("\n");
+        let d = make_diag(Severity::Error, 31, "Unsupported argument", "An argument named \"modle\" is not expected here.")
+            .with_context("harness \"builder\"")
+            .with_hint("Did you mean \"model\"?");
+        let expected = "Error: Unsupported argument\n\n  on team.yah line 31, in harness \"builder\":\n  31:   modle = \"sonnet\"\n\nAn argument named \"modle\" is not expected here.\n\nDid you mean \"model\"?\n";
+        assert_eq!(Diagnostics(vec![d]).render(&source), expected);
+    }
+
+    #[test]
+    fn render_warning_without_context_or_hint() {
+        let source = "yah 1\nx = 1\n";
+        let d = make_diag(Severity::Warning, 2, "Heads up", "Something happened.");
+        let expected = "Warning: Heads up\n\n  on team.yah line 2:\n  2: x = 1\n\nSomething happened.\n";
+        assert_eq!(Diagnostics(vec![d]).render(source), expected);
+    }
+
+    #[test]
+    fn render_skips_missing_source_line() {
+        let source = "yah 1\n";
+        let d = make_diag(Severity::Error, 99, "Gone", "No such line.");
+        let expected = "Error: Gone\n\n  on team.yah line 99:\n\nNo such line.\n";
+        assert_eq!(Diagnostics(vec![d]).render(source), expected);
+    }
+
+    #[test]
+    fn render_separates_multiple_with_one_blank_line() {
+        let source = "a\nb\n";
+        let d1 = make_diag(Severity::Error, 1, "First", "Detail one.");
+        let d2 = make_diag(Severity::Warning, 2, "Second", "Detail two.");
+        let out = Diagnostics(vec![d1, d2]).render(source);
+        let expected = "Error: First\n\n  on team.yah line 1:\n  1: a\n\nDetail one.\n\nWarning: Second\n\n  on team.yah line 2:\n  2: b\n\nDetail two.\n";
+        assert_eq!(out, expected);
+        assert!(out.ends_with('\n') && !out.ends_with("\n\n"));
+    }
+
+    #[test]
+    fn render_empty_diagnostics_is_empty() {
+        assert_eq!(Diagnostics::default().render("anything"), "");
+    }
+
+    #[test]
+    fn render_trims_trailing_whitespace_keeps_indent() {
+        let source = "yah 1\n    key = 1   \n";
+        let d = make_diag(Severity::Error, 2, "S", "D.");
+        let out = Diagnostics(vec![d]).render(source);
+        assert!(out.contains("\n  2:     key = 1\n"), "got: {out:?}");
     }
 }
