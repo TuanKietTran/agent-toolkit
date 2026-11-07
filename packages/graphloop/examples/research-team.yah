@@ -1,0 +1,101 @@
+yah 1
+
+// research-team.yah - planner at the root; researcher, builder and
+// reviewer all under the planner. The planner is pinned to a model
+// label; every other harness uses system-one, with complexity as a
+// hint for the pick. All harnesses share the MCP filesystem tool.
+
+variable "work_dir" {
+  type = "string"
+  default = "./work"
+}
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+  api_key = env.ANTHROPIC_API_KEY
+}
+
+model "sonnet" {
+  provider = "anthropic"
+  id = "claude-sonnet-5-5"
+  capabilities = ["chat", "tools", "vision"]
+}
+
+model "haiku" {
+  provider = "anthropic"
+  id = "claude-haiku-5-5"
+  capabilities = ["chat", "tools"]
+}
+
+system_one {
+  fallback = "haiku"
+  student = "data/student_model.json"
+}
+
+api "fs" {
+  type = "mcp"
+  command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", var.work_dir]
+}
+
+harness "planner" {
+  kind = "agent-cli-lab"
+  role = "planner"
+  model = "sonnet"
+  complexity = "high"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.planner.model}", "--no-session"]
+    cols = 140
+    rows = 40
+  }
+}
+
+harness "researcher" {
+  kind = "agent-cli-lab"
+  role = "researcher"
+  parent = "planner"
+  model = "system-one"
+  complexity = "medium"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.researcher.model}", "--no-session"]
+    cwd = var.work_dir
+  }
+}
+
+harness "builder" {
+  kind = "agent-cli-lab"
+  role = "builder"
+  parent = "planner"
+  model = "system-one"
+  complexity = "high"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.builder.model}", "--no-session"]
+    cwd = var.work_dir
+  }
+}
+
+harness "reviewer" {
+  kind = "agent-cli-lab"
+  role = "reviewer"
+  parent = "planner"
+  model = "system-one"
+  complexity = "low"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.reviewer.model}", "--no-session"]
+    cwd = var.work_dir
+  }
+}
+
+team "research" {
+  root = "planner"
+  members = ["researcher", "builder", "reviewer"]
+  graph = true
+}

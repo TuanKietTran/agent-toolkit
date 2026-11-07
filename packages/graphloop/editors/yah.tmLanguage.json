@@ -1,0 +1,101 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Graphspec",
+  "scopeName": "source.yah",
+  "fileTypes": ["yah"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#header" },
+    { "include": "#block-label" },
+    { "include": "#keyword" },
+    { "include": "#constant" },
+    { "include": "#number" },
+    { "include": "#string-raw" },
+    { "include": "#string" },
+    { "include": "#reference" },
+    { "include": "#key" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comment": {
+      "match": "//[^\\n]*",
+      "name": "comment.line.double-slash.yah"
+    },
+    "header": {
+      "match": "^\\s*(yah)\\s+(\\d+)\\b",
+      "captures": {
+        "1": { "name": "keyword.control.header.yah" },
+        "2": { "name": "constant.numeric.version.yah" }
+      }
+    },
+    "block-label": {
+      "match": "\\b(variable|defaults|provider|model|system_one|image|api|harness|team|workflow|output)\\s+(\u0022)([^\u0022]*)(\u0022)",
+      "captures": {
+        "1": { "name": "keyword.other.block.yah" },
+        "2": { "name": "punctuation.definition.string.begin.yah" },
+        "3": { "name": "entity.name.type.block.yah" },
+        "4": { "name": "punctuation.definition.string.end.yah" }
+      }
+    },
+    "keyword": {
+      "match": "\\b(variable|defaults|provider|model|system_one|image|api|harness|team|workflow|output|open)\\b",
+      "name": "keyword.other.block.yah"
+    },
+    "constant": {
+      "match": "\\b(true|false|null)\\b",
+      "name": "constant.language.yah"
+    },
+    "number": {
+      "match": "\\b\\d+(\\.\\d+)?\\b",
+      "name": "constant.numeric.yah"
+    },
+    "string-raw": {
+      "begin": "`",
+      "end": "`",
+      "name": "string.quoted.backtick.yah",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.yah" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.yah" } }
+    },
+    "string": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.yah",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.yah" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.string.end.yah" } },
+      "patterns": [
+        { "include": "#interpolation" },
+        { "match": "\\\\.", "name": "constant.character.escape.yah" }
+      ]
+    },
+    "interpolation": {
+      "begin": "\\$\\{",
+      "end": "\\}",
+      "name": "variable.other.interpolation.yah",
+      "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.begin.yah" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.interpolation.end.yah" } },
+      "patterns": [
+        { "match": "\\b(env|var|harnesses)\\b", "name": "support.variable.yah" },
+        { "match": "[A-Za-z_][A-Za-z0-9_-]*", "name": "variable.other.yah" },
+        { "match": "\\.", "name": "punctuation.accessor.yah" }
+      ]
+    },
+    "reference": {
+      "match": "\\b(env|var|harnesses)(\\.)([A-Za-z_][A-Za-z0-9_-]*)((\\.)([A-Za-z_][A-Za-z0-9_-]*))?",
+      "captures": {
+        "1": { "name": "support.variable.yah" },
+        "2": { "name": "punctuation.accessor.yah" },
+        "3": { "name": "variable.other.reference.yah" },
+        "5": { "name": "punctuation.accessor.yah" },
+        "6": { "name": "variable.other.reference.yah" }
+      }
+    },
+    "key": {
+      "match": "[A-Za-z_][A-Za-z0-9_-]*(?=\\s*=)",
+      "name": "variable.other.key.yah"
+    },
+    "punctuation": {
+      "match": "[{}[\\],=]",
+      "name": "punctuation.yah"
+    }
+  }
+}
