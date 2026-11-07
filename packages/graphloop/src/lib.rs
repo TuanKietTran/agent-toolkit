@@ -1,0 +1,29 @@
+//! Graphloop: the Graphspec (`.yah`) vault and the launcher that turns a `team` block into
+//! `agent-cli-lab open` calls.
+//!
+//! Pipeline (docs/graphspec.md, "Parser requirements"):
+//!
+//! ```text
+//! source --lexer--> tokens --parser--> ast::File
+//!        --resolve--> ast::File (variables substituted, references checked)
+//!        --schema---> spec::Spec (strict validation, defaults applied)
+//!        --pick-----> pick::Resolved per harness (system-one decides `model = "system-one"`)
+//!        --plan-----> plan::Plan (agent-cli-lab open argv, edges)
+//!        --cli------> `graphloop up` opens the labs, writes a manifest the console and lab-gui draw
+//! ```
+//!
+//! Owners are named in each module's header; the types in `ast`, `spec`, `diag`, `pick` (the data
+//! types) and `manifest` are the shared contract and change only by agreement with the commander.
+
+pub mod ast;
+pub mod cli;
+pub mod diag;
+pub mod lexer;
+pub mod load;
+pub mod manifest;
+pub mod parser;
+pub mod pick;
+pub mod plan;
+pub mod resolve;
+pub mod schema;
+pub mod spec;

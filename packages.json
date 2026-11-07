@@ -8,6 +8,17 @@
       "test": "cargo test --locked",
       "build": "cargo build --locked"
     },
+    "graphloop": {
+      "os": "ubuntu-latest",
+      "toolchain": "rust",
+      "dependsOn": [
+        "agent-cli-lab",
+        "system-one"
+      ],
+      "check": "cargo check --locked",
+      "test": "cargo test --locked",
+      "build": "cargo build --locked"
+    },
     "distributed-agent-chat": {
       "toolchain": "node",
       "install": "npm ci",

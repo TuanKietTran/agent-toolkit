@@ -1,0 +1,61 @@
+yah 1
+
+variable "work_dir" {
+  type    = "string"
+  default = "./work"
+}
+
+defaults {
+  model_policy = "system-one"
+  sandbox      = "local"
+}
+
+provider "anthropic" {
+  type    = "anthropic"
+  api_key = env.ANTHROPIC_API_KEY
+}
+
+model "sonnet" {
+  provider     = "anthropic"
+  capabilities = ["chat", "tools", "vision"]
+}
+
+system_one {
+  fallback = "sonnet"
+  student  = "data/student_model.json"
+}
+
+api "fs" {
+  type    = "mcp"
+  command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", var.work_dir]
+}
+
+harness "commander" {
+  kind  = "agent-cli-lab"
+  role  = "commander"
+  model = "system-one"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--no-session"]
+    cols    = 140
+    rows    = 40
+  }
+}
+
+harness "builder" {
+  kind   = "agent-cli-lab"
+  role   = "builder"
+  parent = "commander"
+  model  = "system-one"
+  tools  = ["fs"]
+  open {
+    command = ["pi", "--no-session"]
+    cwd     = var.work_dir
+  }
+}
+
+team "default" {
+  root    = "commander"
+  members = ["builder"]
+  graph   = true
+}
