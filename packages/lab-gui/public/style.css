@@ -74,6 +74,7 @@ code, kbd { font-family: var(--mono); font-size: 12px; background: var(--raised)
   padding: 8px; min-height: 160px; }
 .graph svg { display: block; }
 .edge { fill: none; stroke: var(--line); stroke-width: 2; }
+.edge.member { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 2 5; }
 .edge.live { stroke: var(--working); stroke-dasharray: 6 6; animation: flow 1.2s linear infinite; }
 @keyframes flow { to { stroke-dashoffset: -12; } }
 .node { cursor: pointer; }
@@ -86,6 +87,7 @@ code, kbd { font-family: var(--mono); font-size: 12px; background: var(--raised)
 .node.dim, .card.dim { opacity: .3; }
 .node text { fill: var(--text); font: 600 13px system-ui, sans-serif; }
 .node .t-sub { font-weight: 400; font-size: 11px; fill: var(--muted); }
+.node .t-tag { font-weight: 600; font-size: 10px; fill: var(--muted); }
 .node .badge { fill: var(--kc); }
 .node .badge-t { fill: var(--bg); font: 700 11px system-ui, sans-serif; text-anchor: middle; }
 .node .dot { fill: var(--sc); }
@@ -93,6 +95,11 @@ code, kbd { font-family: var(--mono); font-size: 12px; background: var(--raised)
 @keyframes pulse { 50% { opacity: .35; } }
 .node .spark-line, .spark-line { fill: none; stroke: var(--sc, var(--working)); stroke-width: 1.5; stroke-linejoin: round; }
 .node.state-gone .shape { stroke-dasharray: 2 4; }
+.state-planned { --sc: var(--muted); }
+.node.state-planned .shape { stroke-dasharray: 6 4; }
+.node.state-planned { opacity: .78; }
+.card.state-planned { border-style: dashed; opacity: .8; }
+.chip.team { border-color: var(--primary); }
 @media (prefers-reduced-motion: reduce) { .edge.live, .node.state-working .dot { animation: none; } }
 
 .list { display: none; list-style: none; padding: 0; gap: 8px; flex-direction: column; }
