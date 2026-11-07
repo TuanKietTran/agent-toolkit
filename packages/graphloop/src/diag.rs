@@ -114,3 +114,62 @@ impl std::fmt::Display for Diagnostics {
 }
 
 impl std::error::Error for Diagnostics {}
+
+/// The closest of `candidates` to `name` (case-insensitive edit distance of at most 2, and less than
+/// half of the longer word), for `Did you mean "..."?` hints. Ties keep the earlier candidate.
+pub fn suggest<'a, I>(name: &str, candidates: I) -> Option<String>
+where
+    I: IntoIterator<Item = &'a str>,
+{
+    let name_lower = name.to_lowercase();
+    let mut best: Option<(usize, &str)> = None;
+    for candidate in candidates {
+        let distance = edit_distance(&name_lower, &candidate.to_lowercase());
+        let longest = name.chars().count().max(candidate.chars().count());
+        if distance <= 2 && distance * 2 < longest && best.is_none_or(|(d, _)| distance < d) {
+            best = Some((distance, candidate));
+        }
+    }
+    best.map(|(_, c)| c.to_owned())
+}
+
+/// Edit distance where swapping two neighbouring letters costs one (optimal string alignment).
+fn edit_distance(a: &str, b: &str) -> usize {
+    let a: Vec<char> = a.chars().collect();
+    let b: Vec<char> = b.chars().collect();
+    let mut grid = vec![vec![0usize; b.len() + 1]; a.len() + 1];
+    for (i, row) in grid.iter_mut().enumerate() {
+        row[0] = i;
+    }
+    for j in 0..=b.len() {
+        grid[0][j] = j;
+    }
+    for i in 1..=a.len() {
+        for j in 1..=b.len() {
+            let cost = usize::from(a[i - 1] != b[j - 1]);
+            let mut best = (grid[i - 1][j] + 1).min(grid[i][j - 1] + 1).min(grid[i - 1][j - 1] + cost);
+            if i > 1 && j > 1 && a[i - 1] == b[j - 2] && a[i - 2] == b[j - 1] {
+                best = best.min(grid[i - 2][j - 2] + 1);
+            }
+            grid[i][j] = best;
+        }
+    }
+    grid[a.len()][b.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn suggests_a_close_key() {
+        assert_eq!(suggest("modle", ["role", "model", "tools"]), Some("model".into()));
+        assert_eq!(suggest("buildr", ["builder", "commander"]), Some("builder".into()));
+    }
+
+    #[test]
+    fn stays_quiet_when_nothing_is_close() {
+        assert_eq!(suggest("xyz", ["role", "model"]), None);
+        assert_eq!(suggest("a", ["b"]), None);
+    }
+}
