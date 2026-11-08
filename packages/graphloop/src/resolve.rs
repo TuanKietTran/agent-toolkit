@@ -17,6 +17,7 @@ use crate::ast::{self, Assign, Block, Expr, ExprKind, Span, Stmt, StrPart};
 use crate::diag::{suggest, Diagnostic, Diagnostics};
 use crate::refs::{self, NotAReference, Reference};
 use crate::scope::Scope;
+use crate::visit::{self, Visitor};
 
 fn make_diag(file: &str, span: Span, summary: &str, detail: String, context: Option<&str>, hint: Option<String>) -> Diagnostic {
     let mut d = Diagnostic::error(file, span, summary, detail);
@@ -127,6 +128,7 @@ struct Walker<'a> {
     declared: &'a [String],
     harnesses: &'a [String],
     vaults: &'a [String],
+    context: Option<String>,
     diags: Diagnostics,
 }
 
@@ -171,22 +173,25 @@ impl Walker<'_> {
         }
     }
 
-    fn walk_stmt(&mut self, stmt: &mut Stmt, context: Option<&str>) {
-        match stmt {
-            Stmt::Assign(a) => self.walk_expr(&mut a.value, context),
-            Stmt::Block(b) => self.walk_block(b, context),
+}
+
+impl Visitor for Walker<'_> {
+    fn visit_block(&mut self, block: &mut Block) {
+        let own = block.label.as_ref().map(|l| format!("{} {l:?}", block.kind));
+        let saved = self.context.clone();
+        if own.is_some() {
+            self.context = own;
         }
+        visit::walk_block(self, block);
+        self.context = saved;
     }
 
-    fn walk_block(&mut self, block: &mut Block, context: Option<&str>) {
-        let own = block.label.as_ref().map(|l| format!("{} \"{}\"", block.kind, l));
-        let ctx = own.as_deref().or(context);
-        for stmt in &mut block.body {
-            self.walk_stmt(stmt, ctx);
+    fn visit_expr(&mut self, expr: &mut Expr) {
+        if matches!(expr.kind, ExprKind::List(_) | ExprKind::Map(_)) {
+            visit::walk_expr(self, expr);
+            return;
         }
-    }
-
-    fn walk_expr(&mut self, expr: &mut Expr, context: Option<&str>) {
+        let context = self.context.as_deref();
         match &mut expr.kind {
             ExprKind::Ref(path) => {
                 let path = path.clone();
@@ -220,16 +225,8 @@ impl Walker<'_> {
                 }
                 *parts = out;
             }
-            ExprKind::List(items) => {
-                for item in items {
-                    self.walk_expr(item, context);
-                }
-            }
-            ExprKind::Map(assigns) => {
-                for a in assigns {
-                    self.walk_expr(&mut a.value, context);
-                }
-            }
+            ExprKind::List(_) => {}
+            ExprKind::Map(_) => {}
             ExprKind::Num(_) | ExprKind::Bool(_) | ExprKind::Null => {}
         }
     }
@@ -324,7 +321,7 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>, scope: &Sc
     }
 
     // Pass 2: walk every value, substituting and checking references.
-    let mut walker = Walker { file: &file_name, vars: &vars, declared: &scope.variables, harnesses: &scope.harnesses, vaults: &scope.vaults, diags: Diagnostics::default() };
+    let mut walker = Walker { file: &file_name, vars: &vars, declared: &scope.variables, harnesses: &scope.harnesses, vaults: &scope.vaults, context: None, diags: Diagnostics::default() };
     for stmt in &mut file.stmts {
         let is_variable = matches!(stmt, Stmt::Block(b) if b.kind == "variable");
         if is_variable {
@@ -333,12 +330,21 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>, scope: &Sc
                 for inner in &mut block.body {
                     let is_default = matches!(inner, Stmt::Assign(a) if a.key == "default");
                     if !is_default {
-                        walker.walk_stmt(inner, own.as_deref());
+                        let saved = walker.context.clone();
+                        walker.context = own.clone();
+                        match inner {
+                            Stmt::Assign(a) => walker.visit_assign(a),
+                            Stmt::Block(b) => walker.visit_block(b),
+                        }
+                        walker.context = saved;
                     }
                 }
             }
         } else {
-            walker.walk_stmt(stmt, None);
+            match stmt {
+                Stmt::Assign(a) => walker.visit_assign(a),
+                Stmt::Block(b) => walker.visit_block(b),
+            }
         }
     }
     diags.extend(walker.diags);
@@ -723,6 +729,19 @@ mod tests {
         let d = err_diags(resolve(file(vec![assign("x", reff(&["foo", "bar"], 3, 5), 3)]), &BTreeMap::new()));
         assert_eq!(d.0[0].summary, "Unknown reference");
         assert!(d.0[0].detail.contains("Valid references are"));
+        assert_eq!(d.0[0].hint, None);
+    }
+
+    #[test]
+    fn unknown_reference_root_error_carries_valid_forms_text() {
+        let d = err_diags(resolve(file(vec![assign("x", reff(&["foo", "bar"], 3, 5), 3)]), &BTreeMap::new()));
+        assert_eq!(d.0.len(), 1);
+        assert_eq!(d.0[0].summary, "Unknown reference");
+        assert!(d.0[0].detail.contains(&refs::valid_forms()), "detail {:?} does not carry valid_forms() {:?}", d.0[0].detail, refs::valid_forms());
+        for form in refs::FORMS {
+            assert!(d.0[0].detail.contains(form), "detail {:?} missing form {form}", d.0[0].detail);
+        }
+        assert_eq!((d.0[0].line, d.0[0].col), (3, 5));
         assert_eq!(d.0[0].hint, None);
     }
 

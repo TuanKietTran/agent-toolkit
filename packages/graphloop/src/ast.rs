@@ -81,6 +81,11 @@ pub enum ExprKind {
 pub enum StrPart {
     Lit(String),
     /// `${env.NAME}` -> `["env","NAME"]`. v1 expressions are reference paths only.
+    ///
+    /// EXTENSION POINT: this is the ONLY expression form today — `.yah` is a declarative
+    /// language and no interpreter is wanted. A future `Expr::Call` or conditional form
+    /// would go here, as a new expression form alongside this one, resolved by the same
+    /// resolver pass; until then, `Interp` (a reference path) is the only form.
     Interp(Vec<String>, Span),
 }
 
