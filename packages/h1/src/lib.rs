@@ -83,7 +83,7 @@ enum Commands {
     Agents(agents::AgentsArgs),
     /// k9s-style console of every lab: table, lab graph, live screens. Opens a new terminal window unless run in one.
     Console(console::ConsoleArgs),
-    /// Diagnose rename/migration problems: print the registry dir in use and whether the pre-rename registry still holds sessions, which h1 and old-named binaries and the labctl shim are on PATH, whether the lab-commander skill links resolve, and whether the lab-gui port is reachable. Exit 1 if anything needs attention.
+    /// Diagnose rename/migration problems: print the registry dir in use, whether the pre-rename registries (home dir and temp dir) still hold sessions, which h1 and old-named binaries and the labctl shim are on PATH, whether the lab-commander skill links resolve, whether the lab-gui port is reachable, and whether old-named or outside-repo lab-gui processes are still running. Exit 1 if anything needs attention.
     Doctor(DoctorArgs),
     /// End a session: stop its program and its host.
     Stop(StopArgs),
