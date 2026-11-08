@@ -29,7 +29,7 @@
       }
     },
     "block-label": {
-      "match": "\\b(variable|defaults|provider|model|system_one|image|api|harness|team|workflow|output)\\s+(\u0022)([^\u0022]*)(\u0022)",
+      "match": "\\b(variable|defaults|provider|model|system_one|image|api|harness|team|workflow|output|vault)\\s+(\u0022)([^\u0022]*)(\u0022)",
       "captures": {
         "1": { "name": "keyword.other.block.yah" },
         "2": { "name": "punctuation.definition.string.begin.yah" },
@@ -38,7 +38,7 @@
       }
     },
     "keyword": {
-      "match": "\\b(variable|defaults|provider|model|system_one|image|api|harness|team|workflow|output|open)\\b",
+      "match": "\\b(variable|defaults|provider|model|system_one|image|api|harness|team|workflow|output|vault|open)\\b",
       "name": "keyword.other.block.yah"
     },
     "constant": {
@@ -74,13 +74,13 @@
       "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.begin.yah" } },
       "endCaptures": { "0": { "name": "punctuation.definition.interpolation.end.yah" } },
       "patterns": [
-        { "match": "\\b(env|var|harnesses)\\b", "name": "support.variable.yah" },
+        { "match": "\\b(env|var|harnesses|vault)\\b", "name": "support.variable.yah" },
         { "match": "[A-Za-z_][A-Za-z0-9_-]*", "name": "variable.other.yah" },
         { "match": "\\.", "name": "punctuation.accessor.yah" }
       ]
     },
     "reference": {
-      "match": "\\b(env|var|harnesses)(\\.)([A-Za-z_][A-Za-z0-9_-]*)((\\.)([A-Za-z_][A-Za-z0-9_-]*))?",
+      "match": "\\b(env|var|harnesses|vault)(\\.)([A-Za-z_][A-Za-z0-9_-]*)((\\.)([A-Za-z_][A-Za-z0-9_-]*))?",
       "captures": {
         "1": { "name": "support.variable.yah" },
         "2": { "name": "punctuation.accessor.yah" },

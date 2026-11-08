@@ -32,6 +32,66 @@ graphloop down examples/demo.yah
 - `examples/` — `team.yah` (commander -> builder), `research-team.yah` (planner with researcher / builder / reviewer), `demo.yah` (harmless detached `cat` labs).
 - `tests/fixtures/canonical.yah` — the canonical example the grammar checks run against.
 
+## Secrets
+
+A `.yah` file never contains a secret value. A `vault` block says where a secret lives, and `${vault.NAME.KEY}` references — allowed only inside an `env` map, so a secret never appears in a readable command line — are fetched only at `graphloop up` time, held in memory, passed in the process environment (never argv), and scrubbed from output. A missing secret opens nothing and no value ever lands in a manifest.
+
+The fleet pattern switches backends without editing the block, because keys a provider does not use are ignored:
+
+```yah
+variable "secrets" {
+  type    = "string"
+  default = "dotenv"
+}
+
+vault "fleet" {
+  provider = var.secrets
+  path     = "fleet.env"
+  secrets  = {
+    FLEET_RUN_TOKEN = "FLEET_RUN_TOKEN"
+  }
+}
+
+harness "worker" {
+  kind  = "h1"
+  role  = "worker"
+  model = "haiku"
+  open {
+    command = ["cat"]
+    env = {
+      FLEET_RUN_TOKEN = "${vault.fleet.FLEET_RUN_TOKEN}"
+    }
+  }
+}
+```
+
+```sh
+graphloop up fleet.yah                    # dotenv (default)
+graphloop up fleet.yah --var secrets=env  # same block, from the process environment
+```
+
+Providers: `dotenv`, `env` and `command` now; `1password`, `bitwarden`, `bitwarden-secrets` and `keychain` behind the same block. Full chapter: [docs/graphspec.md](docs/graphspec.md) “Secret vaults”. See also `examples/vault.yah`.
+
+## Vault & secrets
+
+A `vault` block names a provider and which keys to fetch; `${vault.NAME.KEY}` references are resolved when a team is brought up, and the values are passed to the opened processes in their environment only. Choose the provider that matches where your secrets already live:
+
+| Provider | Program | What it fetches |
+|---|---|---|
+| `dotenv` | none (file read) | `KEY=VALUE` lines from the file at `path`, relative to the `.yah` file (default `.env`) |
+| `env` | none | the value from graphloop's own process environment under the referenced key |
+| `command` | the first element of the `command` list | runs that command with `{ref}` and `{key}` substituted into its arguments; the value is its stdout |
+| `1password` | `op` | the referenced 1Password item field, read with `op read` (an account can be named in the block) |
+| `bitwarden` | `bw` | a Bitwarden item field with `bw get` — the password by default, or username, notes, uri or totp when the reference names one |
+| `bitwarden-secrets` | `bws` | a Bitwarden Secrets Manager secret by id, with `bws secret get`; the value is the `value` field of its JSON output |
+| `keychain` | `security` | a macOS Keychain generic password, with `security find-generic-password` |
+
+Three rules hold for every provider:
+
+- **Names only in output.** `plan`, `graph`, `up --dry-run`, `runs`, `trace` and `vault status` print environment variable NAMES only — entries that come from a vault are marked as vault-sourced — and never print values. The run manifest likewise records only the `vault_env` names, never a value.
+- **Failures name the program and its exit status only.** All providers share one failure path: when a provider fails, the error reports the program name and the exit status, and never quotes the provider's stdout or stderr, so nothing a provider prints can leak into an error message. A locked Bitwarden vault is reported with the synthesized `vault-is-locked` indicator instead of any provider output.
+- **`--env-file` values stay out of output.** Values loaded with `--env-file` go into the environment of the processes graphloop opens, and into nothing else: they never appear in any command output.
+
 ## Tests
 
 ```sh

@@ -191,7 +191,7 @@ fn vault_plan() -> Plan {
 }
 
 fn nodes() -> Vec<Node> {
-    vec![Node { name: "alpha".into(), harness: "alpha".into(), role: "worker".into(), parent: None, requested_model: "haiku".into(), model: "anthropic/claude-haiku-5-5".into(), model_label: "haiku".into(), pick: PickInfo { via: "pinned".into(), rule: None, reason: "pinned".into(), degraded_level: 0 }, tools: vec![] }]
+    vec![Node { name: "alpha".into(), harness: "alpha".into(), role: "worker".into(), parent: None, requested_model: "haiku".into(), model: "anthropic/claude-haiku-5-5".into(), model_label: "haiku".into(), pick: PickInfo { via: "pinned".into(), rule: None, reason: "pinned".into(), degraded_level: 0 }, tools: vec![], vault_env: vec![] }]
 }
 
 fn all_files_text(dir: &Path) -> String {

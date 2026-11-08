@@ -3,11 +3,12 @@ yah 1
 // team.yah - commander -> builder, modelled on the canonical example
 // in docs/graphspec.md but with a realistic model catalog.
 // The resolved model reaches the hosted program only through
-// ${harnesses.<label>.model}, which expands at open time to the
-// resolved model in provider_type/id form (e.g.
-// anthropic/claude-sonnet-5-5). The command below follows the brief:
-// pi is given --provider claude-cli and --model with that expansion,
-// which is the form claude-cli accepts.
+// interpolation. ${harnesses.<label>.model} expands at open time to
+// the resolved model in provider_type/id form (e.g.
+// anthropic/claude-sonnet-5-5); ${harnesses.<label>.model_id} expands
+// to the bare id (e.g. claude-sonnet-5-5). The commands below use
+// model_id: pi is given --provider claude-cli, whose --model expects
+// the bare id, as in examples/research-team.yah.
 
 variable "work_dir" {
   type = "string"
@@ -58,7 +59,7 @@ harness "commander" {
   model = "system-one"
   tools = ["fs"]
   open {
-    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.commander.model}", "--no-session"]
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.commander.model_id}", "--no-session"]
     cols = 140
     rows = 40
   }
@@ -71,7 +72,7 @@ harness "builder" {
   model = "system-one"
   tools = ["fs"]
   open {
-    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.builder.model}", "--no-session"]
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.builder.model_id}", "--no-session"]
     cwd = var.work_dir
   }
 }
