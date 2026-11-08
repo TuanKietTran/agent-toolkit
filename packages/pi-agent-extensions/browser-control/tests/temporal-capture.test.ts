@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { TemporalCapture } from "../temporal-capture.ts";
 
-test("renders a chronological multi-frame contact sheet and animated GIF", async () => {
+test("renders a chronological multi-frame contact sheet and animated GIF", { skip: spawnSync("ffmpeg", ["-version"]).status !== 0 ? "ffmpeg is not installed" : false }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "browser-clip-test-"));
   try {
     const clip = new TemporalCapture();
