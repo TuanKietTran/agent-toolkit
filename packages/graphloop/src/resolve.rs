@@ -15,8 +15,7 @@ use std::collections::BTreeMap;
 
 use crate::ast::{self, Assign, Block, Expr, ExprKind, Span, Stmt, StrPart};
 use crate::diag::{suggest, Diagnostic, Diagnostics};
-
-const VALID_FORMS: &str = "Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY>, harnesses.<label>.model and harnesses.<label>.model_id.";
+use crate::refs::{self, NotAReference, Reference};
 
 fn make_diag(file: &str, span: Span, summary: &str, detail: String, context: Option<&str>, hint: Option<String>) -> Diagnostic {
     let mut d = Diagnostic::error(file, span, summary, detail);
@@ -133,53 +132,41 @@ struct Walker<'a> {
 impl Walker<'_> {
     fn classify(&self, path: &[String], span: Span, context: Option<&str>) -> Class {
         let joined = path.join(".");
+        let forms = refs::valid_forms();
         let unknown = |detail: String, hint: Option<String>| Class::Invalid(make_diag(self.file, span, "Unknown reference", detail, context, hint));
-        match path.first().map(String::as_str) {
-            Some("var") if path.len() == 2 => {
-                let name = &path[1];
-                if let Some(v) = self.vars.get(name) {
+        let not_valid = |hint: Option<String>| unknown(format!("\"{joined}\" is not a valid reference. {forms}"), hint);
+        match Reference::parse(path) {
+            Ok(Reference::Var(name)) => {
+                if let Some(v) = self.vars.get(&name) {
                     Class::Value(v.clone())
-                } else if self.declared.iter().any(|d| d == name) {
+                } else if self.declared.iter().any(|d| d == &name) {
                     Class::Poisoned
                 } else {
-                    unknown(format!("The reference \"{joined}\" does not match any declared variable. {VALID_FORMS}"), did_you_mean(name, self.declared))
+                    unknown(format!("The reference \"{joined}\" does not match any declared variable. {forms}"), did_you_mean(&name, self.declared))
                 }
             }
-            Some("var") => unknown(
-                format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"),
-                path.get(1).and_then(|n| did_you_mean(n, self.declared)),
-            ),
-            Some("vault") if path.len() == 3 => {
-                if self.vaults.iter().any(|v| v == &path[1]) {
+            Ok(Reference::Env(_)) => Class::LateBound,
+            Ok(Reference::Vault { vault, .. }) => {
+                if self.vaults.iter().any(|v| v == &vault) {
                     Class::LateBound
                 } else {
-                    unknown(
-                        format!("The reference \"{joined}\" names vault \"{}\", which is not declared in this file. {VALID_FORMS}", path[1]),
-                        did_you_mean(&path[1], self.vaults),
-                    )
+                    unknown(format!("The reference \"{joined}\" names vault \"{vault}\", which is not declared in this file. {forms}"), did_you_mean(&vault, self.vaults))
                 }
             }
-            Some("vault") => unknown(
-                format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"),
-                path.get(1).and_then(|n| did_you_mean(n, self.vaults)),
-            ),
-            Some("env") if path.len() == 2 => Class::LateBound,
-            Some("env") => unknown(format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"), None),
-            Some("harnesses") if path.len() == 3 && (path[2] == "model" || path[2] == "model_id") => {
-                if self.harnesses.iter().any(|h| h == &path[1]) {
+            Ok(Reference::HarnessModel(harness) | Reference::HarnessModelId(harness)) => {
+                if self.harnesses.iter().any(|h| h == &harness) {
                     Class::LateBound
                 } else {
-                    unknown(
-                        format!("The reference \"{joined}\" names harness \"{}\", which is not declared in this file. {VALID_FORMS}", path[1]),
-                        did_you_mean(&path[1], self.harnesses),
-                    )
+                    unknown(format!("The reference \"{joined}\" names harness \"{harness}\", which is not declared in this file. {forms}"), did_you_mean(&harness, self.harnesses))
                 }
             }
-            Some("harnesses") => unknown(
-                format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"),
-                path.get(1).and_then(|n| did_you_mean(n, self.harnesses)),
-            ),
-            _ => unknown(format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"), None),
+            // A wrong shape: the hint offers names of the kind the root word suggests.
+            Err(NotAReference { root }) => match root.as_deref() {
+                Some("var") => not_valid(path.get(1).and_then(|n| did_you_mean(n, self.declared))),
+                Some("vault") => not_valid(path.get(1).and_then(|n| did_you_mean(n, self.vaults))),
+                Some("harnesses") => not_valid(path.get(1).and_then(|n| did_you_mean(n, self.harnesses))),
+                _ => not_valid(None),
+            },
         }
     }
 
