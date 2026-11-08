@@ -58,6 +58,7 @@ code, kbd { font-family: var(--mono); font-size: 12px; background: var(--raised)
 .btn.danger:hover { background: color-mix(in srgb, var(--danger) 14%, var(--raised)); }
 .btn[disabled] { opacity: .5; cursor: not-allowed; }
 
+.registry-banner { padding: 10px 16px; border-bottom: 1px solid var(--asking); background: var(--surface); color: var(--asking); font-weight: 600; }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
 .layout.has-panel { grid-template-columns: minmax(0, 1fr) 440px; }
 .board { padding: 14px 16px 90px; min-width: 0; }
