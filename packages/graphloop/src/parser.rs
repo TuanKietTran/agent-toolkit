@@ -94,10 +94,15 @@ fn split_string(file: &str, text: &str, str_span: Span) -> Result<Vec<StrPart>, 
     Ok(parts)
 }
 
+/// Maximum number of syntax diagnostics collected in one parse (S5 error recovery).
+const MAX_ERRORS: usize = 20;
+
 struct Parser {
     tokens: Vec<Token>,
     pos: usize,
     file: String,
+    /// Syntax errors recovered from so far (capped at `MAX_ERRORS`).
+    errors: Diagnostics,
 }
 
 impl Parser {
@@ -121,7 +126,85 @@ impl Parser {
         err(&self.file, span, summary, detail)
     }
 
-    fn parse_statements_until_brace(&mut self, opener: Span) -> Result<Vec<ast::Stmt>, Diagnostics> {
+    /// Record recovered diagnostics, capped at `MAX_ERRORS`.
+    fn record(&mut self, diags: Diagnostics) {
+        for d in diags.0 {
+            if self.errors.0.len() >= MAX_ERRORS {
+                break;
+            }
+            self.errors.push(d);
+        }
+    }
+
+    fn peek_at(&self, offset: usize) -> &Tok {
+        &self.tokens[(self.pos + offset).min(self.tokens.len() - 1)].tok
+    }
+
+    /// Does the token at the cursor start a statement (`key =`, `kind {`, `kind "label" {`)?
+    fn at_statement_start(&self) -> bool {
+        if !matches!(self.peek(), Tok::Ident(_)) {
+            return false;
+        }
+        match self.peek_at(1) {
+            Tok::Eq | Tok::LBrace => true,
+            Tok::Str(_) => matches!(self.peek_at(2), Tok::LBrace),
+            _ => false,
+        }
+    }
+
+    /// Net unclosed nesting (`{`/`[` minus `}`/`]`, floored at 0) among the
+    /// tokens consumed since `start_pos` — i.e. how far inside maps/lists the
+    /// statement that started at `start_pos` was when it failed.
+    fn unclosed_depth_since(&self, start_pos: usize) -> i32 {
+        let mut depth: i32 = 0;
+        for t in &self.tokens[start_pos..self.pos.min(self.tokens.len())] {
+            match t.tok {
+                Tok::LBrace | Tok::LBracket => depth += 1,
+                Tok::RBrace | Tok::RBracket => depth -= 1,
+                _ => {}
+            }
+        }
+        depth.max(0)
+    }
+
+    /// Recovery (depth-aware): skip tokens until the nesting depth is back
+    /// to the failing statement's starting depth AND a synchronisation point
+    /// is reached — EOF, the enclosing block's `}` (left unconsumed when
+    /// `in_block`; a stray `}` at top level is skipped like other garbage),
+    /// or an identifier on a later line than the error that starts a
+    /// statement. While `depth > 0` every token is consumed and counted:
+    /// a `}` that closes a map/list opened by the failing statement must
+    /// never be mistaken for the enclosing block's `}`, and a block's real
+    /// `}` must never be reported as a statement. Passing
+    /// `err_line = u32::MAX` skips to `}`/EOF only. Every non-sync token is
+    /// consumed, so this always terminates; callers handle the sync token
+    /// (`}`/EOF) themselves.
+    fn synchronise(&mut self, err_line: u32, in_block: bool, mut depth: i32) {
+        loop {
+            if *self.peek() == Tok::Eof {
+                break;
+            }
+            if depth <= 0 {
+                match self.peek() {
+                    Tok::RBrace if in_block => break,
+                    Tok::Ident(_) if self.peek_span().line > err_line && self.at_statement_start() => break,
+                    _ => {}
+                }
+            }
+            match self.bump().tok {
+                Tok::LBrace | Tok::LBracket => depth += 1,
+                Tok::RBrace | Tok::RBracket if depth > 0 => depth -= 1,
+                _ => {}
+            }
+        }
+    }
+
+    /// Parse a block body, recovering from each bad statement: record the
+    /// diagnostic, synchronise, and keep parsing the rest of the block.
+    /// Infallible by design — recovered errors live in `self.errors`. An
+    /// unclosed block at EOF records exactly one extra diagnostic, unless a
+    /// statement error already ended at EOF.
+    fn parse_statements_until_brace(&mut self, opener: Span) -> Vec<ast::Stmt> {
         let mut body = Vec::new();
         loop {
             match self.peek() {
@@ -130,15 +213,42 @@ impl Parser {
                     break;
                 }
                 Tok::Eof => {
-                    return Err(self.error(opener, "Unclosed block", "The block starting here is not closed."));
+                    let d = self.error(opener, "Unclosed block", "The block starting here is not closed.");
+                    self.record(d);
+                    break;
                 }
-                _ => body.push(self.parse_statement()?),
+                _ => {
+                    if self.errors.0.len() >= MAX_ERRORS {
+                        // Cap reached: skip the rest of this block.
+                        self.synchronise(u32::MAX, true, 0);
+                        if matches!(self.peek(), Tok::RBrace) {
+                            self.bump();
+                        }
+                        break;
+                    }
+                    let start_pos = self.pos;
+                    match self.parse_statement() {
+                        Ok(stmt) => body.push(stmt),
+                        Err(diags) => {
+                            let err_line = diags.0.first().map(|d| d.line).unwrap_or_else(|| self.peek_span().line);
+                            let depth = self.unclosed_depth_since(start_pos);
+                            self.record(diags);
+                            if *self.peek() == Tok::Eof {
+                                break;
+                            }
+                            self.synchronise(err_line, true, depth);
+                            if *self.peek() == Tok::Eof {
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         }
-        Ok(body)
+        body
     }
 
-    fn parse_block_body(&mut self) -> Result<Vec<ast::Stmt>, Diagnostics> {
+    fn parse_block_body(&mut self) -> Vec<ast::Stmt> {
         // Caller has verified the peek is '{'.
         let opener = self.peek_span();
         self.bump();
@@ -159,7 +269,7 @@ impl Parser {
                 Ok(ast::Stmt::Assign(ast::Assign { key: kind, value, span: ident_span }))
             }
             Tok::LBrace => {
-                let body = self.parse_block_body()?;
+                let body = self.parse_block_body();
                 Ok(ast::Stmt::Block(ast::Block { kind, label: None, body, span: ident_span }))
             }
             Tok::Str(label) => {
@@ -168,7 +278,7 @@ impl Parser {
                     let span = self.peek_span();
                     return Err(self.error(span, "Expected \"=\" or \"{\"", "Expected \"{\" after a block label."));
                 }
-                let body = self.parse_block_body()?;
+                let body = self.parse_block_body();
                 Ok(ast::Stmt::Block(ast::Block { kind, label: Some(label), body, span: ident_span }))
             }
             _ => {
@@ -285,7 +395,8 @@ impl Parser {
 }
 
 /// Lex and parse `src`. Checks the `yah N` header (N must be 1 in this version) and the grammar.
-/// Stops at the first error, reported with `file:line:col`. Does NOT check which blocks or keys
+/// Header errors are fatal (a single diagnostic); statement-level syntax errors are recovered
+/// from, collecting up to 20 diagnostics in one run. Does NOT check which blocks or keys
 /// are allowed (that is `schema`), nor top-level assignments (also `schema`).
 pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
     let tokens = lexer::lex(file, src)?;
@@ -304,12 +415,28 @@ pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
     if version_num != 1.0 {
         return Err(err(file, second.span, "Unsupported version", format!("Unsupported version {}; only version 1 is supported.", version_num as i64)));
     }
-    let mut parser = Parser { tokens, pos: 2, file: file.to_string() };
+    let mut parser = Parser { tokens, pos: 2, file: file.to_string(), errors: Diagnostics::default() };
     let mut stmts = Vec::new();
     while *parser.peek() != Tok::Eof {
-        stmts.push(parser.parse_statement()?);
+        if parser.errors.0.len() >= MAX_ERRORS {
+            break;
+        }
+        let start_pos = parser.pos;
+        match parser.parse_statement() {
+            Ok(stmt) => stmts.push(stmt),
+            Err(diags) => {
+                let err_line = diags.0.first().map(|d| d.line).unwrap_or_else(|| parser.peek_span().line);
+                let depth = parser.unclosed_depth_since(start_pos);
+                parser.record(diags);
+                if *parser.peek() == Tok::Eof {
+                    break;
+                }
+                parser.synchronise(err_line, false, depth);
+            }
+        }
     }
-    Ok(ast::File { name: file.to_string(), version: 1, stmts })
+    let errors = std::mem::take(&mut parser.errors);
+    errors.into_result(ast::File { name: file.to_string(), version: 1, stmts })
 }
 
 #[cfg(test)]
@@ -608,6 +735,91 @@ mod tests {
         let d = err1("yah 1\nx = \"unterminated");
         assert_eq!(d.summary, "Unterminated string");
         assert_eq!((d.line, d.col), (2, 5));
+    }
+
+    #[test]
+    fn three_syntax_errors_all_reported() {
+        // One bad value at top level, one inside a block, one after the block:
+        // recovery must report all three, not stop at the first.
+        let src = "yah 1\na = = 1\nblk {\n  b = = 2\n  ok = 3\n}\nc = = 4\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 3, "{d:?}");
+        assert!(d.0.iter().all(|x| x.summary == "Expected value"), "{d:?}");
+        assert_eq!(d.0.iter().map(|x| x.line).collect::<Vec<_>>(), vec![2, 4, 7]);
+    }
+
+    #[test]
+    fn error_inside_nested_env_map_reports_exactly_once_and_recovers() {
+        // The bad entry is inside a map inside a block: the map's `}` must be
+        // consumed as the map's, the block's `}` must close the block, and the
+        // following statement in the block must still parse — exactly 1 error.
+        let src = "yah 1\nblk {\n  env = {\n    BAD = = 1\n  }\n  ok = 3\n}\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 1, "{d:?}");
+        assert_eq!(d.0[0].summary, "Expected value");
+        assert_eq!(d.0[0].line, 4);
+    }
+
+    #[test]
+    fn unterminated_interpolation_in_map_in_block_reports_exactly_one() {
+        // Mini A-39: the interpolation error is inside a map inside two nested
+        // blocks. Exactly the primary diagnostic — no cascade `Expected
+        // statement` on either real closing brace, no `Unclosed block`.
+        let src = "yah 1\nharness \"commander\" {\n  open {\n    env = {\n      FLEET_TOKEN = \"${vault.local.FLEET_TOKEN\"\n    }\n  }\n}\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 1, "{d:?}");
+        assert_eq!(d.0[0].summary, "Invalid interpolation");
+    }
+
+    #[test]
+    fn missing_value_after_equals_reports_exactly_once_and_recovers() {
+        // `a =` immediately before the block's `}`: exactly 1 `Expected value`,
+        // the `}` still closes the block, the next block still parses.
+        let src = "yah 1\nblk {\n  a =\n}\nnext {\n  b = 2\n}\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 1, "{d:?}");
+        assert_eq!(d.0[0].summary, "Expected value");
+        assert_eq!(d.0[0].line, 4);
+    }
+
+    #[test]
+    fn truncations_of_flat_source_never_exceed_broken_statements_plus_one() {
+        // Every prefix of this flat source breaks at most one distinct
+        // statement, so a parse may report at most 1 + 1 diagnostics — and
+        // must never panic.
+        let src = "yah 1\na = 1\nb = [1, 2]\nc = \"x\"\nd = { k = 1 }\ne = true\n";
+        for (i, _) in src.char_indices() {
+            if let Err(d) = parse("test.yah", &src[..i]) {
+                assert!(d.0.len() <= 2, "prefix {i}: {} diagnostics: {d:?}", d.0.len());
+            }
+        }
+        let _ = parse("test.yah", src).unwrap();
+    }
+
+    #[test]
+    fn recovery_is_capped_at_20_errors() {
+        let mut src = String::from("yah 1\n");
+        for i in 0..25 {
+            src.push_str(&format!("k{i} = = {i}\n"));
+        }
+        let d = parse("test.yah", &src).unwrap_err();
+        assert_eq!(d.0.len(), 20, "{d:?}");
+    }
+
+    #[test]
+    fn truncations_never_panic() {
+        let src = include_str!("../tests/fixtures/canonical.yah");
+        for (i, _) in src.char_indices() {
+            let _ = parse("test.yah", &src[..i]);
+        }
+        let _ = parse("test.yah", src);
+    }
+
+    #[test]
+    fn unclosed_block_after_error_reports_no_duplicate() {
+        // The value error already ends at EOF; no extra "Unclosed block".
+        let d = err1("yah 1\nblk {\n  b = [1,\n");
+        assert_eq!(d.summary, "Unclosed list");
     }
 
     #[test]

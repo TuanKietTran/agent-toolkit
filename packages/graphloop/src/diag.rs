@@ -70,8 +70,8 @@ impl Diagnostic {
     }
 }
 
-/// An ordered list of problems. Lexer and parser stop at the first one; `resolve` and `schema`
-/// collect all of them.
+/// An ordered list of problems. The lexer stops at the first one; the parser recovers and
+/// collects up to 20; `resolve` and `schema` collect all of them.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Diagnostics(pub Vec<Diagnostic>);
 
