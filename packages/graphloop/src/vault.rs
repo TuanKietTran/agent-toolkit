@@ -247,10 +247,29 @@ impl<'a> Vaults<'a> {
     }
 
     /// Run a provider CLI. A program that cannot be started at all becomes the one-line install
-    /// hint; any other failure is scrubbed and never carries a fetched value.
+    /// hint. A non-zero exit NEVER quotes the provider's stderr: a provider CLI handles the
+    /// secret itself and can echo it there while failing, and that value is not yet cached,
+    /// so scrubbing against fetched values cannot catch it (H2). Only the program name and
+    /// exit status survive, plus a synthesized `vault is locked` marker when stderr mentioned
+    /// locking, so the `bw` unlock translation still fires without quoting stderr. Other
+    /// failures (timeout, oversized or non-UTF-8 output) carry no provider text and are
+    /// scrubbed against fetched values as before.
     fn run_provider(&self, argv: &[String], install_hint: &str) -> Result<String, String> {
         run_command(argv, &self.command_env, self.timeout).map_err(|e| {
-            if e.starts_with("could not run ") { install_hint.to_owned() } else { scrub(&e, &self.values()) }
+            if e.starts_with("could not run ") {
+                install_hint.to_owned()
+            } else if let Some((name, rest)) = e.split_once(" exited with ") {
+                // `rest` is "<status>: <first stderr line>" or just "<status>"; the status
+                // itself contains one ": " ("exit status: 1"), stderr starts after the second.
+                let status_end = rest.find(": ").and_then(|first| rest[first + 2..].find(": ").map(|second| first + 2 + second)).unwrap_or(rest.len());
+                let mut out = format!("{name} exited with {}", &rest[..status_end]);
+                if e.to_lowercase().contains("lock") {
+                    out.push_str(": vault is locked");
+                }
+                out
+            } else {
+                scrub(&e, &self.values())
+            }
         })
     }
 

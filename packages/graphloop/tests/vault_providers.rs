@@ -84,7 +84,10 @@ fn op_failure_error_has_no_value() {
     let f = fake(dir.path(), "op", VALUE, "item not found", 1);
     let v = vault("1password", &f.bin);
     let err = fetch(v, "op://vault/item/field").unwrap_err();
-    assert!(err.contains("item not found"), "{err}");
+    // Provider stderr is never quoted (H2: it can echo the secret being fetched), so
+    // "item not found" no longer appears; the error names the program + exit status only.
+    assert!(err.contains("op") && err.contains("exited"), "{err}");
+    assert!(!err.contains("item not found"), "{err}");
     assert!(!err.contains(VALUE), "{err}");
 }
 
@@ -187,7 +190,10 @@ fn bws_failure_error_has_no_value() {
     let f = fake(dir.path(), "bws", VALUE, "access denied", 1);
     let v = vault("bitwarden-secrets", &f.bin);
     let err = fetch(v, "secret-id-123").unwrap_err();
-    assert!(err.contains("access denied"), "{err}");
+    // Provider stderr is never quoted (H2: it can echo the secret being fetched), so
+    // "access denied" no longer appears; the error names the program + exit status only.
+    assert!(err.contains("bws") && err.contains("exited"), "{err}");
+    assert!(!err.contains("access denied"), "{err}");
     assert!(!err.contains(VALUE), "{err}");
 }
 
