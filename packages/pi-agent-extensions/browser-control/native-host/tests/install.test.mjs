@@ -72,7 +72,7 @@ test("fixture installer writes path-only manifest and owner config; uninstall re
   } finally { await rm(fixture, { recursive: true, force: true }); }
 });
 
-test("manifest.path runs the real Node native host and returns ready plus broker-assigned target catalog", { skip: process.platform !== "win32" }, async t => {
+test("manifest.path runs the real Node native host and returns ready plus broker-assigned target catalog", { skip: process.platform !== "win32" ? "windows only" : process.env.GITHUB_ACTIONS === "true" && process.platform === "win32" ? "needs a real interactive Windows session; run natively" : false }, async t => {
   const nativeHost = process.env.PI_BROWSER_BRIDGE_HOST_SCRIPT ?? resolve(dirname(installer), "bridge-host.mjs");
   try { await readFile(nativeHost); } catch { t.skip(`transport-owned real bridge-host.mjs not present: ${nativeHost}`); return; }
   const { encodeNativeFrame, decodeNativeFrame } = await import("../../helper-extension/native-frame.mjs");
