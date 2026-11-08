@@ -498,6 +498,27 @@ fn load_spec(file: &Path, vars: &[String]) -> Result<Spec, String> {
     crate::load::load_file(file, &overrides).map_err(|e| format!("{e:#}"))
 }
 
+/// Format source text: parse only (no resolve/schema — formatting must work on any
+/// syntactically valid file); parse errors render exactly as `check` renders them.
+pub fn format_source(name: &str, src: &str) -> Result<String, String> {
+    let file = crate::parser::parse(name, src).map_err(|d| d.render(src))?;
+    Ok(crate::fmt::print(&file))
+}
+
+fn fmt_file(file: &Path, check: bool, write: bool) -> Result<String, String> {
+    if !file.is_file() { return Err(err(&format!("cannot read {}: no such file", file.display()))); }
+    let src = std::fs::read_to_string(file).map_err(|e| err(&format!("cannot read {}: {e}", file.display())))?;
+    let formatted = format_source(&file.display().to_string(), &src)?;
+    if check {
+        if formatted == src { Ok(String::new()) } else { Err(err(&format!("{} is not formatted", file.display()))) }
+    } else if write {
+        if formatted != src { std::fs::write(file, &formatted).map_err(|e| err(&format!("cannot write {}: {e}", file.display())))?; }
+        Ok(String::new())
+    } else {
+        Ok(formatted)
+    }
+}
+
 struct FailPicker { reason: String }
 impl Picker for FailPicker {
     fn pick(&self, _request: &PickRequest) -> anyhow::Result<PickDecision> { anyhow::bail!(self.reason.clone()) }
@@ -563,6 +584,11 @@ struct FileArgs {
 enum Cmd {
     /// Validate a .yah file
     Check { #[command(flatten)] args: FileArgs },
+    /// Print a .yah file in canonical format
+    Fmt { /// Path to a .yah (Graphspec) file
+        file: PathBuf, /// Exit non-zero if the file is not already formatted (prints no formatted text)
+        #[arg(long, conflicts_with = "write")] check: bool, /// Rewrite the file in place with its formatted form
+        #[arg(long)] write: bool },
     /// Print the h1 open commands for a team
     Plan { #[command(flatten)] args: FileArgs, /// Emit one JSON document instead of text
         #[arg(long)] json: bool },
@@ -609,6 +635,7 @@ enum VaultCmd {
 fn dispatch(cli: Cli) -> Result<String, String> {
     match cli.command {
         Cmd::Check { args } => { load_env_files(&args)?; let spec = load_spec(&args.file, &args.var)?; Ok(format!("{}\n", check_line(spec.harnesses.len(), spec.teams.len()))) }
+        Cmd::Fmt { file, check, write } => fmt_file(&file, check, write),
         Cmd::Plan { args, json } => {
             let (spec, team, resolved) = load_and_resolve(&args)?;
             let opts = PlanOpts { prefix: args.prefix.clone(), run: String::new(), trace_dir: None, detached: args.detached };
@@ -681,6 +708,8 @@ mod tests {
     use super::*;
     fn team(name: &str) -> Team { Team { name: name.to_string(), root: "commander".to_string(), members: vec![], graph: true, line: 1 } }
     #[test] fn check_line_counts() { assert_eq!(check_line(2, 1), "ok: 2 harnesses, 1 teams"); }
+    #[test] fn fmt_source_canonicalises_and_is_idempotent() { let out = format_source("t.yah", "yah 1\nx   =    1 // trail\n").unwrap(); assert_eq!(out, "yah 1\nx = 1 // trail\n"); assert_eq!(format_source("t.yah", &out).unwrap(), out); }
+    #[test] fn fmt_source_parse_error_is_rendered() { let e = format_source("t.yah", "yah 1\nx = \n").unwrap_err(); assert!(e.contains("Error"), "{e}"); }
     #[test] fn parse_vars_ok_and_bad() { let v = parse_vars(&["A=1".to_string(), "B=x=y".to_string()]).unwrap(); assert_eq!(v.get("B").unwrap(), "x=y"); assert!(parse_vars(&["A".to_string()]).is_err()); assert!(parse_vars(&["=1".to_string()]).is_err()); }
     #[test] fn select_team_cases() { let one = vec![team("default")]; assert_eq!(select_team(&one, None).unwrap().name, "default"); assert!(select_team(&one, Some("nope")).unwrap_err().contains("default")); let two = vec![team("a"), team("b")]; assert!(select_team(&two, None).unwrap_err().contains("a, b")); }
     #[test] fn shell_quote_cases() { assert_eq!(shell_quote("pi"), "pi"); assert_eq!(shell_quote("${env.X}"), "${env.X}"); assert_eq!(shell_quote("a b"), "'a b'"); assert_eq!(shell_quote(""), "''"); }

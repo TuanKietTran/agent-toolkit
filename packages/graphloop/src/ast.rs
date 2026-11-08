@@ -32,6 +32,10 @@ pub struct File {
     /// The integer after `yah` in the header.
     pub version: u32,
     pub stmts: Vec<Stmt>,
+    /// Comments not attached to any statement: everything after the last
+    /// statement, or all comments in a file with no statements. Full `//...`
+    /// text in source order, no trailing newline.
+    pub tail_comments: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -47,6 +51,10 @@ pub struct Block {
     pub label: Option<String>,
     pub body: Vec<Stmt>,
     pub span: Span,
+    /// `//` comments on the lines immediately above this block, full text, source order.
+    pub leading: Vec<String>,
+    /// `//` comment on the same line as this block's closing `}`, if any.
+    pub trailing: Option<String>,
 }
 
 /// `key = value`. Also the entries of a map value.
@@ -56,6 +64,10 @@ pub struct Assign {
     pub value: Expr,
     /// Position of the key.
     pub span: Span,
+    /// `//` comments on the lines immediately above this assignment, full text, source order.
+    pub leading: Vec<String>,
+    /// `//` comment on the same line after this assignment's value, if any.
+    pub trailing: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

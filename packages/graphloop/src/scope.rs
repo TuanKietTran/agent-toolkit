@@ -52,19 +52,19 @@ mod tests {
     use crate::ast::{Assign, Block, Expr, File, Span};
 
     fn block(kind: &str, label: &str, body: Vec<Stmt>) -> Stmt {
-        Stmt::Block(Block { kind: kind.to_string(), label: Some(label.to_string()), body, span: Span::default() })
+        Stmt::Block(Block { kind: kind.to_string(), label: Some(label.to_string()), body, span: Span::default(), leading: Vec::new(), trailing: None })
     }
 
     fn file(stmts: Vec<Stmt>) -> File {
-        File { name: "team.yah".to_string(), version: 1, stmts }
+        File { name: "team.yah".to_string(), version: 1, stmts, tail_comments: Vec::new() }
     }
 
     fn assign(key: &str, value: Expr) -> Stmt {
-        Stmt::Assign(Assign { key: key.to_string(), value, span: Span::default() })
+        Stmt::Assign(Assign { key: key.to_string(), value, span: Span::default(), leading: Vec::new(), trailing: None })
     }
 
     fn secret_entry(key: &str) -> Assign {
-        Assign { key: key.to_string(), value: Expr::str_lit("env:NAME", Span::default()), span: Span::default() }
+        Assign { key: key.to_string(), value: Expr::str_lit("env:NAME", Span::default()), span: Span::default(), leading: Vec::new(), trailing: None }
     }
 
     fn names(list: &[&str]) -> Vec<String> {
