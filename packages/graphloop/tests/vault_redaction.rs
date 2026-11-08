@@ -1,0 +1,186 @@
+//! H2 (hardening backlog): provider failure redaction. A failing external provider CLI must
+//! never echo the secret it was fetching — not on stderr, not in malformed stdout, not before
+//! a timeout. Surfaces: the fetch itself (`Vaults::get`, the path `vault status --fetch`
+//! calls) and `graphloop up` (`up_core` against a fake h1). Every failure must be clean:
+//! an error naming the provider, no secret anywhere in the error / argv / written files,
+//! and no lab opened.
+
+use std::fs;
+use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
+
+use graphloop::cli::{ProcessRunner, UpOutcome, UpRequest, up_core};
+use graphloop::manifest::{Edge, Node, PickInfo};
+use graphloop::plan::{OpenStep, Plan};
+use graphloop::spec::{Part, Templ, Vault};
+use graphloop::vault::Vaults;
+
+const SECRET_A: &str = "H2-FAKE-SECRET-stderr-7f3a9c";
+const SECRET_B: &str = "H2-FAKE-SECRET-framing-5b2d8e";
+const SECRET_C: &str = "H2-FAKE-SECRET-hang-91c4f0";
+
+/// (provider, real program name the fake is named after)
+const CLI_PROVIDERS: [(&str, &str); 4] = [("1password", "op"), ("bitwarden", "bw"), ("bitwarden-secrets", "bws"), ("keychain", "security")];
+
+fn reference(provider: &str) -> &'static str {
+    match provider {
+        "1password" => "op://vault/item/field",
+        "bitwarden" => "myitem",
+        "bitwarden-secrets" => "secret-id-123",
+        "keychain" => "myservice",
+        other => panic!("no reference for {other}"),
+    }
+}
+
+fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let p = dir.join(name);
+    fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
+    fs::set_permissions(&p, fs::Permissions::from_mode(0o755)).unwrap();
+    p
+}
+
+fn cli_vault(provider: &str, bin: &Path, reference: &str) -> Vault {
+    Vault { name: "v".into(), provider: provider.into(), path: None, account: None, command: vec![bin.to_string_lossy().into_owned()], secrets: vec![("TOKEN".into(), reference.into())], line: 1 }
+}
+
+fn fetch(v: &Vault, timeout: Duration) -> Result<String, String> {
+    let vs = std::slice::from_ref(v);
+    let env = |_: &str| -> Option<String> { None };
+    Vaults::new(vs, PathBuf::from("."), &env).with_timeout(timeout).get("v", "TOKEN")
+}
+
+/// Fake h1 from vault_up_e2e: records argv, records env on open.
+fn fake_h1(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
+    let argv_log = dir.join("argv.log");
+    let env_log = dir.join("env.log");
+    let bin = dir.join("h1");
+    let script = format!("#!/bin/sh\necho \"$@\" >> \"{argv}\"\ncase \"$1\" in\nlist) echo '[]' ;;\nconsole) echo SNAPSHOT ;;\nopen) printenv >> \"{env}\" ;;\nesac\nexit 0\n", argv = argv_log.display(), env = env_log.display());
+    fs::write(&bin, script).unwrap();
+    fs::set_permissions(&bin, fs::Permissions::from_mode(0o755)).unwrap();
+    (bin, argv_log, env_log)
+}
+
+fn plan() -> Plan {
+    let argv = vec![
+        Templ::lit("open"),
+        Templ::lit("-n"),
+        Templ::lit("alpha"),
+        Templ::lit("--env"),
+        Templ(vec![Part::Lit("FLEET_TOKEN=".into()), Part::Vault("v".into(), "TOKEN".into())]),
+        Templ::lit("--"),
+        Templ::lit("cat"),
+    ];
+    let step = OpenStep { harness: "alpha".into(), name: "alpha".into(), role: "worker".into(), parent: None, model: "anthropic/claude-haiku-5-5".into(), argv };
+    Plan { team: "t".into(), root: "alpha".into(), steps: vec![step], edges: Vec::<Edge>::new() }
+}
+
+fn nodes() -> Vec<Node> {
+    vec![Node { name: "alpha".into(), harness: "alpha".into(), role: "worker".into(), parent: None, requested_model: "haiku".into(), model: "anthropic/claude-haiku-5-5".into(), model_label: "haiku".into(), pick: PickInfo { via: "pinned".into(), rule: None, reason: "pinned".into(), degraded_level: 0 }, tools: vec![] }]
+}
+
+fn all_files_text(dir: &Path) -> String {
+    let mut out = String::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        if let Ok(entries) = fs::read_dir(&d) {
+            for e in entries.flatten() {
+                let p = e.path();
+                if p.is_dir() { stack.push(p); } else if let Ok(bytes) = fs::read(&p) { out.push_str(&String::from_utf8_lossy(&bytes)); }
+            }
+        }
+    }
+    out
+}
+
+struct UpRun { result: Result<UpOutcome, String>, argv_log: PathBuf, home: PathBuf, manifests: PathBuf }
+
+fn run_up(dir: &Path, vaults: &[Vault], timeout: Duration) -> UpRun {
+    let home = dir.join("home");
+    let manifests = dir.join("manifests");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&manifests).unwrap();
+    let (bin, argv_log, _env_log) = fake_h1(dir);
+    let plan = plan();
+    let nodes = nodes();
+    let env_fn = |_: &str| -> Option<String> { None };
+    let vaults_ref = Vaults::new(vaults, dir.to_path_buf(), &env_fn).with_timeout(timeout);
+    let vault_fn = |v: &str, k: &str| vaults_ref.get(v, k);
+    let req = UpRequest { plan: &plan, nodes, source: "/tmp/t.yah".into(), home: home.clone(), manifest_dir: manifests.clone(), run: "t-1-aaaa".into(), now_ms: 1, env: &env_fn, vault: &vault_fn };
+    let result = up_core(&req, &ProcessRunner { bin });
+    UpRun { result, argv_log, home, manifests }
+}
+
+fn assert_up_clean(run: &UpRun, provider: &str, secret: &str) -> String {
+    let err = match &run.result { Ok(_) => panic!("{provider}: up unexpectedly succeeded"), Err(e) => e.clone() };
+    assert!(err.contains(provider), "{provider}: up error does not name the provider: {err}");
+    assert!(!err.contains(secret), "{provider}: SECRET LEAKED into up error: {err}");
+    let argv = fs::read_to_string(&run.argv_log).unwrap_or_default();
+    assert!(!argv.contains("open"), "{provider}: a lab was opened despite the failed fetch:\n{argv}");
+    assert!(!argv.contains(secret), "{provider}: secret in recorded argv:\n{argv}");
+    for d in [&run.home, &run.manifests] {
+        assert!(!all_files_text(d).contains(secret), "{provider}: secret in a file under {}", d.display());
+    }
+    err
+}
+
+#[test]
+fn a_stderr_secret_is_never_echoed() {
+    for (provider, prog) in CLI_PROVIDERS {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = write_script(dir.path(), prog, &format!("echo '{SECRET_A}' >&2; exit 1"));
+        let err = fetch(&cli_vault(provider, &bin, reference(provider)), Duration::from_secs(5)).unwrap_err();
+        assert!(err.contains(provider), "{provider}: fetch error does not name the provider: {err}");
+        assert!(!err.contains(SECRET_A), "{provider}: SECRET LEAKED into fetch error: {err}");
+        let run = run_up(dir.path(), &[cli_vault(provider, &bin, reference(provider))], Duration::from_secs(5));
+        assert_up_clean(&run, provider, SECRET_A);
+    }
+}
+
+#[test]
+fn b_malformed_stdout_secret_is_never_echoed() {
+    // bws: stdout is the secret as plain text, not the JSON framing it must return.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "bws", &format!("echo '{SECRET_B}'; exit 0"));
+    let err = fetch(&cli_vault("bitwarden-secrets", &bin, "secret-id-123"), Duration::from_secs(5)).unwrap_err();
+    assert!(err.contains("bitwarden-secrets"), "{err}");
+    assert!(!err.contains(SECRET_B), "SECRET LEAKED into fetch error: {err}");
+    let run = run_up(dir.path(), &[cli_vault("bitwarden-secrets", &bin, "secret-id-123")], Duration::from_secs(5));
+    assert_up_clean(&run, "bitwarden-secrets", SECRET_B);
+    // bws: valid JSON, but the secret sits in another field and there is no string `value`.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "bws", &format!("echo '{{\"id\":\"x\",\"other\":\"{SECRET_B}\"}}'; exit 0"));
+    let err = fetch(&cli_vault("bitwarden-secrets", &bin, "secret-id-123"), Duration::from_secs(5)).unwrap_err();
+    assert!(!err.contains(SECRET_B), "SECRET LEAKED into fetch error: {err}");
+    // bw #field: valid JSON item whose only field value is the secret, under another name.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "bw", &format!("echo '{{\"fields\":[{{\"name\":\"other\",\"value\":\"{SECRET_B}\"}}]}}'; exit 0"));
+    let err = fetch(&cli_vault("bitwarden", &bin, "myitem#api_key"), Duration::from_secs(5)).unwrap_err();
+    assert!(err.contains("api_key"), "{err}");
+    assert!(!err.contains(SECRET_B), "SECRET LEAKED into fetch error: {err}");
+    // bw #field: stdout is the secret as plain text, not JSON at all.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "bw", &format!("echo '{SECRET_B}'; exit 0"));
+    let err = fetch(&cli_vault("bitwarden", &bin, "myitem#api_key"), Duration::from_secs(5)).unwrap_err();
+    assert!(!err.contains(SECRET_B), "SECRET LEAKED into fetch error: {err}");
+}
+
+#[test]
+fn c_hanging_provider_times_out_cleanly() {
+    for (provider, prog) in CLI_PROVIDERS {
+        let dir = tempfile::tempdir().unwrap();
+        let bin = write_script(dir.path(), prog, &format!("echo '{SECRET_C}' >&2; sleep 5"));
+        let started = Instant::now();
+        let err = fetch(&cli_vault(provider, &bin, reference(provider)), Duration::from_millis(300)).unwrap_err();
+        assert!(started.elapsed() < Duration::from_secs(3), "{provider}: fetch hung past the timeout: {:?}", started.elapsed());
+        assert!(err.contains("did not finish"), "{provider}: {err}");
+        assert!(!err.contains(SECRET_C), "{provider}: SECRET LEAKED into fetch error: {err}");
+    }
+    // up surface, one provider: render must fail at the timeout, no lab opened, no leak.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "op", &format!("echo '{SECRET_C}' >&2; sleep 5"));
+    let started = Instant::now();
+    let run = run_up(dir.path(), &[cli_vault("1password", &bin, reference("1password"))], Duration::from_millis(300));
+    assert!(started.elapsed() < Duration::from_secs(3), "up hung past the timeout: {:?}", started.elapsed());
+    assert_up_clean(&run, "1password", SECRET_C);
+}
