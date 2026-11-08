@@ -329,7 +329,7 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>) -> Result<
     // Overrides naming undeclared variables are errors.
     for key in overrides.keys() {
         if !declared.contains(key) {
-            diags.push(make_diag(&file_name, Span { line: 1, col: 1 }, "Unknown variable", format!("The --var override names variable \"{key}\", which is not declared in this file."), None, did_you_mean(key, &declared)));
+            diags.push(make_diag(&file_name, Span { line: 1, col: 1, offset: 0, len: 0 }, "Unknown variable", format!("The --var override names variable \"{key}\", which is not declared in this file."), None, did_you_mean(key, &declared)));
         }
     }
 
@@ -380,7 +380,7 @@ mod tests {
     use crate::ast::File;
 
     fn sp(line: u32, col: u32) -> Span {
-        Span { line, col }
+        Span { line, col, offset: 0, len: 0 }
     }
     fn s(text: &str) -> Expr {
         Expr::str_lit(text, sp(1, 1))

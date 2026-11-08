@@ -27,11 +27,12 @@ fn split_string(file: &str, text: &str, str_span: Span) -> Result<Vec<StrPart>, 
     let mut lit = String::new();
     let mut line = str_span.line;
     let mut col = str_span.col + 1;
+    let mut byte_off = str_span.offset + 1;
     let mut i = 0usize;
     while i < chars.len() {
         let c = chars[i];
         if c == '$' && i + 1 < chars.len() && chars[i + 1] == '{' {
-            let dollar_span = Span { line, col };
+            let dollar_span = Span { line, col, offset: byte_off, len: 0 };
             // Find the closing '}'.
             let mut j = i + 2;
             let mut found = false;
@@ -45,6 +46,7 @@ fn split_string(file: &str, text: &str, str_span: Span) -> Result<Vec<StrPart>, 
             if !found {
                 return Err(err(file, dollar_span, "Invalid interpolation", "Unterminated interpolation: '${' has no closing '}'."));
             }
+            let dollar_span = Span { len: chars[i..=j].iter().map(|ch| ch.len_utf8() as u32).sum(), ..dollar_span };
             let inner: String = chars[i + 2..j].iter().collect();
             let trimmed = inner.trim();
             if trimmed.is_empty() {
@@ -75,10 +77,12 @@ fn split_string(file: &str, text: &str, str_span: Span) -> Result<Vec<StrPart>, 
                 } else {
                     col += 1;
                 }
+                byte_off += chars[i].len_utf8() as u32;
                 i += 1;
             }
         } else {
             lit.push(c);
+            byte_off += c.len_utf8() as u32;
             if c == '\n' {
                 line += 1;
                 col = 1;
@@ -401,7 +405,7 @@ impl Parser {
 pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
     let tokens = lexer::lex(file, src)?;
     // Header: Ident("yah") then Num(1).
-    let first = tokens.first().cloned().unwrap_or(Token { tok: Tok::Eof, span: Span { line: 1, col: 1 } });
+    let first = tokens.first().cloned().unwrap_or(Token { tok: Tok::Eof, span: Span { line: 1, col: 1, offset: 0, len: 0 } });
     if first.tok != Tok::Ident("yah".to_string()) {
         return Err(err(file, first.span, "Missing or unsupported header", HEADER_DETAIL));
     }
@@ -587,16 +591,16 @@ mod tests {
         let f = ok("yah 1\nx = \"${env.A}-${var.b}\"");
         let ExprKind::Str(parts) = &first_assign(&f).value.kind else { panic!() };
         assert_eq!(parts.len(), 3);
-        assert_eq!(parts[0], StrPart::Interp(vec!["env".into(), "A".into()], Span { line: 2, col: 6 }));
+        assert_eq!(parts[0], StrPart::Interp(vec!["env".into(), "A".into()], Span { line: 2, col: 6, offset: 11, len: 8 }));
         assert_eq!(parts[1], StrPart::Lit("-".into()));
-        assert_eq!(parts[2], StrPart::Interp(vec!["var".into(), "b".into()], Span { line: 2, col: 15 }));
+        assert_eq!(parts[2], StrPart::Interp(vec!["var".into(), "b".into()], Span { line: 2, col: 15, offset: 20, len: 8 }));
     }
 
     #[test]
     fn interpolation_with_spaces() {
         let f = ok("yah 1\nx = \"a ${ var.x } b\"");
         let ExprKind::Str(parts) = &first_assign(&f).value.kind else { panic!() };
-        assert_eq!(parts, &vec![StrPart::Lit("a ".into()), StrPart::Interp(vec!["var".into(), "x".into()], Span { line: 2, col: 8 }), StrPart::Lit(" b".into())]);
+        assert_eq!(parts, &vec![StrPart::Lit("a ".into()), StrPart::Interp(vec!["var".into(), "x".into()], Span { line: 2, col: 8, offset: 13, len: 10 }), StrPart::Lit(" b".into())]);
     }
 
     #[test]
@@ -605,7 +609,7 @@ mod tests {
         let ExprKind::Str(parts) = &first_assign(&f).value.kind else { panic!() };
         assert_eq!(parts.len(), 3);
         assert_eq!(parts[0], StrPart::Lit("line1\nline2 ".into()));
-        assert_eq!(parts[1], StrPart::Interp(vec!["var".into(), "x".into()], Span { line: 3, col: 7 }));
+        assert_eq!(parts[1], StrPart::Interp(vec!["var".into(), "x".into()], Span { line: 3, col: 7, offset: 23, len: 8 }));
         assert_eq!(parts[2], StrPart::Lit(" end".into()));
     }
 
