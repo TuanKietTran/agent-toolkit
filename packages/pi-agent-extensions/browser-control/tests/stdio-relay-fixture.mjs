@@ -1,4 +1,5 @@
 import net from "node:net";
+import { chmodSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { MAX_MESSAGE_BYTES } from "../bridge-protocol.mjs";
 
@@ -47,6 +48,6 @@ export function startStdioRelayFixture(socketPath, worker) {
       else { worker.kill(); return; }
     }
   });
-  const listening = new Promise((resolve, reject) => server.listen(socketPath, resolve).once("error", reject));
+  const listening = new Promise((resolve, reject) => server.listen(socketPath, () => { if (process.platform !== "win32") chmodSync(socketPath, 0o600); resolve(); }).once("error", reject));
   return { listening, close: () => new Promise((resolve) => server.close(resolve)) };
 }

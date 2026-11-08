@@ -59,10 +59,14 @@ test("fixture installer writes path-only manifest and owner config; uninstall re
     assert.equal(manifest.name, "com.pi_agent_extensions.browser_bridge");
     assert.equal(manifest.type, "stdio");
     assert.deepEqual(Object.keys(manifest).sort(), ["allowed_origins", "description", "name", "path", "type"]);
-    assert.equal(manifest.path, join(fixture, "PiBrowserBridge", "bridge-host.exe"));
+    assert.equal(manifest.path, process.platform === "win32" ? join(fixture, "PiBrowserBridge", "bridge-host.exe") : join(fixture, "NativeMessagingHosts", "brave", "bridge-launcher.sh"));
     assert.deepEqual(manifest.allowed_origins, [`chrome-extension://${extensionId}/`]);
-    const config = JSON.parse(await readFile(join(fixture, "PiBrowserBridge", "host-config.json")));
-    assert.deepEqual(config, { nodeExecutable: process.execPath, hostScript: resolve(dirname(installer), "bridge-host.mjs"), pipeName, extensionOrigin: `chrome-extension://${extensionId}/` });
+    if (process.platform === "win32") {
+      const config = JSON.parse(await readFile(join(fixture, "PiBrowserBridge", "host-config.json")));
+      assert.deepEqual(config, { nodeExecutable: process.execPath, hostScript: resolve(dirname(installer), "bridge-host.mjs"), pipeName, extensionOrigin: `chrome-extension://${extensionId}/` });
+    } else {
+      assert.match(await readFile(manifest.path, "utf8"), /^#!\/bin\/sh\nexec /);
+    }
     invoke(["--uninstall", "--fixture", fixture, "--pipe-name", pipeName]);
     await assert.rejects(readFile(output.manifestPath));
   } finally { await rm(fixture, { recursive: true, force: true }); }

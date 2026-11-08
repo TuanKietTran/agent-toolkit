@@ -13,7 +13,7 @@
     "start": "npm run build && node --env-file=.env --import tsx scripts/server.ts",
     "worker": "tsx src/agent/cli.ts",
     "build": "tsc --noEmit && esbuild src/worker.ts --bundle --format=esm --external:cloudflare:workers --outfile=dist/worker.js",
-    "test": "tsx --test --test-concurrency=1 test/*.test.ts",
+    "test": "npm run build && tsx --test --test-concurrency=1 test/*.test.ts",
     "fleet:deploy": "tsx scripts/deploy.ts",
     "deploy:targets": "tsx scripts/deploy.ts",
     "serve": "node --disable-warning=ExperimentalWarning --import tsx src/node-server.ts",

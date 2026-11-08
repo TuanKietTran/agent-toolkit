@@ -65,6 +65,8 @@ function secureWindowsPath(path, directoryPath = false) {
   const icacls = join(process.env.SystemRoot || process.env.WINDIR || "C:\\Windows", "System32", "icacls.exe");
   cachedSid ??= currentSid();
   const grant = directoryPath ? `*${cachedSid}:(OI)(CI)F` : `*${cachedSid}:F`;
+  // An elevated process creates objects owned by Administrators; the launcher requires the owner to be this user.
+  execFileSync(icacls, [path, "/setowner", `*${cachedSid}`], { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
   execFileSync(icacls, [path, "/inheritance:r", "/grant:r", grant], { windowsHide: true, stdio: ["ignore", "ignore", "pipe"] });
 }
 async function compileWindowsLauncher() {
