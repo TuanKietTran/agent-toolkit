@@ -28,5 +28,6 @@ pub mod plan;
 pub mod refs;
 pub mod resolve;
 pub mod schema;
+pub mod scope;
 pub mod spec;
 pub mod vault;

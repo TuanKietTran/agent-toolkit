@@ -130,8 +130,16 @@ impl Diagnostics {
                 let line_chars = text.chars().count();
                 if col0 < line_chars {
                     let carets = (d.len.max(1) as usize).min(line_chars - col0);
-                    let indent = 2 + d.line.to_string().len() + 2 + col0;
-                    block.push_str(&format!("\n{}{}", " ".repeat(indent), "^".repeat(carets)));
+                    let prefix = 2 + d.line.to_string().len() + 2;
+                    // Copy TABs from the source prefix verbatim (every other
+                    // character becomes a space) so the caret aligns under the
+                    // token on tab-indented lines at any tab width.
+                    let padding: String = text
+                        .chars()
+                        .take(col0)
+                        .map(|c| if c == '\t' { '\t' } else { ' ' })
+                        .collect();
+                    block.push_str(&format!("\n{}{}{}", " ".repeat(prefix), padding, "^".repeat(carets)));
                 }
             }
             block.push_str("\n\n");
@@ -260,6 +268,18 @@ mod tests {
         d.len = 5;
         let out = Diagnostics(vec![d]).render(&source);
         assert!(out.contains("\n  31:   modle = \"sonnet\"\n        ^^^^^\n"), "got: {out:?}");
+    }
+
+    #[test]
+    fn render_caret_padding_copies_tabs() {
+        let source = "yah 1\n\t\tmodle = \"sonnet\"\n";
+        let mut d = make_diag(Severity::Error, 2, "Unsupported argument", "An argument named \"modle\" is not expected here.");
+        d.col = 3;
+        d.len = 5;
+        let out = Diagnostics(vec![d]).render(source);
+        // Prefix is 5 spaces (\"  2: \"), then the two source TABs verbatim,
+        // then the carets directly under `modle`.
+        assert!(out.contains("\n  2: \t\tmodle = \"sonnet\"\n     \t\t^^^^^\n"), "got: {out:?}");
     }
 
     #[test]

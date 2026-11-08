@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use crate::ast::{self, Assign, Block, Expr, ExprKind, Span, Stmt, StrPart};
 use crate::diag::{suggest, Diagnostic, Diagnostics};
 use crate::refs::{self, NotAReference, Reference};
+use crate::scope::Scope;
 
 fn make_diag(file: &str, span: Span, summary: &str, detail: String, context: Option<&str>, hint: Option<String>) -> Diagnostic {
     let mut d = Diagnostic::error(file, span, summary, detail);
@@ -244,26 +245,9 @@ fn push_lit(out: &mut Vec<StrPart>, text: String) {
     }
 }
 
-pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>) -> Result<ast::File, Diagnostics> {
+pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>, scope: &Scope) -> Result<ast::File, Diagnostics> {
     let mut file = file;
     let file_name = file.name.clone();
-    let harness_labels: Vec<String> = file
-        .stmts
-        .iter()
-        .filter_map(|s| match s {
-            Stmt::Block(b) if b.kind == "harness" => b.label.clone(),
-            _ => None,
-        })
-        .collect();
-
-    let vault_labels: Vec<String> = file
-        .stmts
-        .iter()
-        .filter_map(|s| match s {
-            Stmt::Block(b) if b.kind == "vault" => b.label.clone(),
-            _ => None,
-        })
-        .collect();
 
     let mut diags = Diagnostics::default();
     let mut vars: BTreeMap<String, Expr> = BTreeMap::new();
@@ -315,8 +299,8 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>) -> Result<
 
     // Overrides naming undeclared variables are errors.
     for key in overrides.keys() {
-        if !declared.contains(key) {
-            diags.push(make_diag(&file_name, Span { line: 1, col: 1, offset: 0, len: 0 }, "Unknown variable", format!("The --var override names variable \"{key}\", which is not declared in this file."), None, did_you_mean(key, &declared)));
+        if !scope.variables.contains(key) {
+            diags.push(make_diag(&file_name, Span { line: 1, col: 1, offset: 0, len: 0 }, "Unknown variable", format!("The --var override names variable \"{key}\", which is not declared in this file."), None, did_you_mean(key, &scope.variables)));
         }
     }
 
@@ -340,7 +324,7 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>) -> Result<
     }
 
     // Pass 2: walk every value, substituting and checking references.
-    let mut walker = Walker { file: &file_name, vars: &vars, declared: &declared, harnesses: &harness_labels, vaults: &vault_labels, diags: Diagnostics::default() };
+    let mut walker = Walker { file: &file_name, vars: &vars, declared: &scope.variables, harnesses: &scope.harnesses, vaults: &scope.vaults, diags: Diagnostics::default() };
     for stmt in &mut file.stmts {
         let is_variable = matches!(stmt, Stmt::Block(b) if b.kind == "variable");
         if is_variable {
@@ -422,6 +406,11 @@ mod tests {
             Ok(_) => panic!("expected Err(Diagnostics)"),
             Err(d) => d,
         }
+    }
+    /// Builds the `Scope` the way `load.rs` does, so test call sites keep the two-argument shape.
+    fn resolve(f: File, overrides: &BTreeMap<String, String>) -> Result<File, Diagnostics> {
+        let scope = Scope::build(&f);
+        super::resolve(f, overrides, &scope)
     }
     fn find_block<'a>(f: &'a File, kind: &str, label: &str) -> &'a Block {
         f.stmts.iter().find_map(|st| match st {
