@@ -733,6 +733,19 @@ mod tests {
     }
 
     #[test]
+    fn unknown_reference_root_error_carries_valid_forms_text() {
+        let d = err_diags(resolve(file(vec![assign("x", reff(&["foo", "bar"], 3, 5), 3)]), &BTreeMap::new()));
+        assert_eq!(d.0.len(), 1);
+        assert_eq!(d.0[0].summary, "Unknown reference");
+        assert!(d.0[0].detail.contains(&refs::valid_forms()), "detail {:?} does not carry valid_forms() {:?}", d.0[0].detail, refs::valid_forms());
+        for form in refs::FORMS {
+            assert!(d.0[0].detail.contains(form), "detail {:?} missing form {form}", d.0[0].detail);
+        }
+        assert_eq!((d.0[0].line, d.0[0].col), (3, 5));
+        assert_eq!(d.0[0].hint, None);
+    }
+
+    #[test]
     fn var_with_extra_segments_is_unknown() {
         let f = file(vec![
             var_block("x", Some("string"), Some(s("a")), 2),
