@@ -36,7 +36,11 @@ fn send_bytes(socket: &Path, data: Vec<u8>) -> Result<()> {
 }
 
 /// `request` that gives up after `timeout`, for looking at hosts that may be hung.
-pub(crate) fn request_with_timeout(socket: &Path, value: Value, timeout: Duration) -> Result<Value> {
+pub(crate) fn request_with_timeout(
+    socket: &Path,
+    value: Value,
+    timeout: Duration,
+) -> Result<Value> {
     let (sender, receiver) = mpsc::channel();
     let socket = socket.to_path_buf();
     thread::spawn(move || {
@@ -296,6 +300,128 @@ pub(crate) fn ask(args: AskArgs) -> Result<i32> {
     Ok(finish(outcome, args.tail, false))
 }
 
+/// `h1 renew -n NAME`: renew a live named session without losing its context pointers.
+/// Sends the entry's `new_cmd` (default `/new`) plus Enter, waits for `ready_regex` with
+/// 2s idle bounded by `--timeout`, then paced-types (50/150/800) the resume prompt —
+/// header, last 5 lines of `resume_log`, brief file content — plus Enter. Rearm is
+/// confirmed when the screen differs from the pre-rearm baseline; one extra Enter is
+/// tried before failing with a one-line reason and exit 1.
+pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
+    let fail = |reason: String| -> Result<i32> {
+        eprintln!("renew failed: {reason}");
+        Ok(1)
+    };
+    let Some(entry) = session::entries().into_iter().find(|e| e.name == args.name) else {
+        return fail(format!("no session named {}", args.name));
+    };
+    let socket = PathBuf::from(&entry.socket);
+    let new_cmd = entry
+        .new_cmd
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("/new");
+    let mut data = new_cmd.as_bytes().to_vec();
+    data.push(0x0d);
+    if send_bytes(&socket, data).is_err() {
+        return fail(format!(
+            "session {} did not answer the new command",
+            args.name
+        ));
+    }
+    let spec = WaitSpec {
+        idle_ms: Some(2000),
+        patterns: entry
+            .ready_regex
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| vec![s.to_owned()])
+            .unwrap_or_default(),
+        asking: false,
+        gone: Vec::new(),
+    };
+    let timeout = Duration::from_secs(args.timeout);
+    let baseline = match wait_for(&socket, &spec, timeout, Duration::ZERO) {
+        Ok(Outcome::Met(screen)) => screen,
+        Ok(Outcome::Ended(..)) => {
+            return fail(format!("session {} ended before it was ready", args.name));
+        }
+        Ok(Outcome::TimedOut(..)) => {
+            return fail(format!(
+                "session {} did not become ready within {}s",
+                args.name, args.timeout
+            ));
+        }
+        Err(_) => {
+            return fail(format!(
+                "session {} did not answer while waiting to become ready",
+                args.name
+            ));
+        }
+    };
+    let mut parts = vec!["You were renewed. Resume from your last checkpoint:".to_owned()];
+    if let Some(log) = entry.resume_log.as_deref().filter(|s| !s.trim().is_empty())
+        && let Ok(content) = fs::read_to_string(log)
+    {
+        let lines: Vec<&str> = content.lines().collect();
+        let tail = &lines[lines.len().saturating_sub(5)..];
+        parts.extend(tail.iter().map(|line| line.to_string()));
+    }
+    let brief_path = args
+        .brief
+        .as_deref()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| entry.brief.as_deref().filter(|s| !s.trim().is_empty()));
+    if let Some(brief) = brief_path
+        && let Ok(content) = fs::read_to_string(brief)
+    {
+        let trimmed = content.trim_end();
+        if !trimmed.is_empty() {
+            parts.push(trimmed.to_owned());
+        }
+    }
+    let prompt = parts.join("\n");
+    let typing = Typing {
+        chunk: 50,
+        pause: Duration::from_millis(150),
+        enter_delay: Duration::from_millis(800),
+    };
+    if type_text(&socket, &prompt, &typing).is_err() {
+        return fail(format!(
+            "session {} did not answer while the resume prompt was typed",
+            args.name
+        ));
+    }
+    thread::sleep(typing.enter_delay);
+    let _ = send_bytes(&socket, vec![0x0d]);
+    let confirmed = |socket: &Path, baseline: &str, timeout: Duration| -> bool {
+        let begun = Instant::now();
+        loop {
+            if let Ok(screen) = read_screen(socket)
+                && screen != baseline
+            {
+                return true;
+            }
+            if begun.elapsed() >= timeout {
+                return false;
+            }
+            thread::sleep(Duration::from_millis(100));
+        }
+    };
+    if !confirmed(&socket, &baseline, timeout) {
+        let _ = send_bytes(&socket, vec![0x0d]);
+        if !confirmed(&socket, &baseline, timeout) {
+            return fail(format!(
+                "session {} did not confirm rearm within {}s",
+                args.name, args.timeout
+            ));
+        }
+    }
+    println!("renewed {} (rearm confirmed)", args.name);
+    Ok(0)
+}
+
 pub(crate) fn wait(args: WaitArgs) -> Result<i32> {
     let socket = args.connection.path()?;
     let spec = WaitSpec {
@@ -532,9 +658,7 @@ pub(crate) fn list(args: ListArgs) -> Result<i32> {
         return Ok(0);
     }
     if rows.is_empty() {
-        println!(
-            "no sessions are running (start one with `h1 open -n NAME -- command`)"
-        );
+        println!("no sessions are running (start one with `h1 open -n NAME -- command`)");
         return Ok(0);
     }
     println!(
@@ -758,10 +882,7 @@ pub(crate) fn open(args: OpenArgs) -> Result<i32> {
         ));
     }
     let exe = env::current_exe().context("failed to resolve h1 executable")?;
-    let title = args
-        .title
-        .clone()
-        .unwrap_or_else(|| format!("h1: {name}"));
+    let title = args.title.clone().unwrap_or_else(|| format!("h1: {name}"));
     let window_here = cfg!(windows) && !args.detached;
 
     let mut host: Vec<OsString> = vec![

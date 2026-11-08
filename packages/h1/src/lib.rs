@@ -1,8 +1,8 @@
 mod agents;
-mod commands;
 mod commander;
-mod console;
+mod commands;
 mod conpty;
+mod console;
 mod control;
 mod doctor;
 mod graphspec;
@@ -91,6 +91,8 @@ enum Commands {
     Key(KeyArgs),
     /// Block until the screen is idle, shows a pattern, shows a dialog, or the program exits.
     Wait(WaitArgs),
+    /// Renew a named session in place: send its new_cmd, wait for its ready pattern, then re-arm it with the last lines of its resume log and its brief.
+    Renew(RenewCmdArgs),
     /// Print an event whenever a session starts asking, stalls, or ends.
     Watch(WatchArgs),
     /// Start a named agent lab.
@@ -222,9 +224,7 @@ impl SocketArgs {
     fn path(&self) -> Result<PathBuf> {
         self.resolve(
             env::var_os("H1_SOCKET").filter(|value| !value.is_empty()),
-            env::var("H1_NAME")
-                .ok()
-                .filter(|value| !value.is_empty()),
+            env::var("H1_NAME").ok().filter(|value| !value.is_empty()),
         )
     }
 
@@ -448,6 +448,19 @@ struct WaitArgs {
 }
 
 #[derive(Debug, Args)]
+struct RenewCmdArgs {
+    /// Session name given to `host --name` or `open --name`.
+    #[arg(long, short = 'n', value_name = "NAME", required = true)]
+    name: String,
+    /// Brief file to re-arm with, overriding the brief stored at `open` time.
+    #[arg(long, value_name = "FILE")]
+    brief: Option<String>,
+    /// Give up each wait after this many seconds.
+    #[arg(long, short = 't', default_value_t = 30, value_name = "SECONDS")]
+    timeout: u64,
+}
+
+#[derive(Debug, Args)]
 struct WatchArgs {
     #[command(flatten)]
     connection: SocketArgs,
@@ -600,6 +613,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
         Commands::Ledger(args) => commander::ledger(args),
         Commands::Close(args) => commander::close(args),
         Commands::Resume(args) => commander::resume(args),
+        Commands::Renew(args) => commands::renew(args),
     }
 }
 
@@ -1095,7 +1109,11 @@ fn host_detached(socket: &Path, cols: u16, rows: u16, command: &[OsString]) -> R
 
 fn open_attach_terminal(socket: &Path, terminal: Option<&str>) -> Result<()> {
     open_terminal_window(
-        &["attach".into(), "-s".into(), socket.to_string_lossy().into_owned()],
+        &[
+            "attach".into(),
+            "-s".into(),
+            socket.to_string_lossy().into_owned(),
+        ],
         terminal,
     )
 }
@@ -1113,7 +1131,11 @@ pub(crate) fn open_terminal_window(argv: &[String], terminal: Option<&str>) -> R
 #[cfg(target_os = "macos")]
 fn open_terminal_impl(exe: &Path, argv: &[String], terminal: Option<&str>) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let words = argv.iter().map(|word| shell_quote(word)).collect::<Vec<_>>().join(" ");
+    let words = argv
+        .iter()
+        .map(|word| shell_quote(word))
+        .collect::<Vec<_>>()
+        .join(" ");
 
     let terminal = terminal.unwrap_or("ghostty").to_ascii_lowercase();
     if terminal == "ghostty" {
@@ -1129,8 +1151,8 @@ fn open_terminal_impl(exe: &Path, argv: &[String], terminal: Option<&str>) -> Re
                 // `-e` makes Ghostty ask "Allow Ghostty to execute ...?" on every launch. A command
                 // set from a config file does not, so write one and layer it over the user's config.
                 prune_old_ghostty_configs();
-                let config = env::temp_dir()
-                    .join(format!("h1-ghostty-{}.conf", std::process::id()));
+                let config =
+                    env::temp_dir().join(format!("h1-ghostty-{}.conf", std::process::id()));
                 fs::write(
                     &config,
                     format!(
@@ -1162,10 +1184,7 @@ fn open_terminal_impl(exe: &Path, argv: &[String], terminal: Option<&str>) -> Re
     }
 
     // Terminal.app fallback: it opens executable .command files.
-    let script = env::temp_dir().join(format!(
-        "h1-attach-{}.command",
-        std::process::id()
-    ));
+    let script = env::temp_dir().join(format!("h1-attach-{}.command", std::process::id()));
     let body = format!(
         "#!/bin/sh\nexec {} {}\n",
         shell_quote(&exe.to_string_lossy()),
@@ -1204,10 +1223,7 @@ fn open_terminal_impl(exe: &Path, argv: &[String], terminal: Option<&str>) -> Re
     ];
     for (program, prefix) in candidates {
         let mut command = Command::new(program);
-        command
-            .args(*prefix)
-            .arg(exe)
-            .args(argv);
+        command.args(*prefix).arg(exe).args(argv);
         if command.spawn().is_ok() {
             return Ok(());
         }
@@ -1231,7 +1247,11 @@ fn open_terminal_impl(exe: &Path, argv: &[String], terminal: Option<&str>) -> Re
 #[cfg(target_os = "macos")]
 fn prune_old_ghostty_configs() {
     let cutoff = Duration::from_secs(10 * 60);
-    for item in fs::read_dir(env::temp_dir()).into_iter().flatten().flatten() {
+    for item in fs::read_dir(env::temp_dir())
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
         let name = item.file_name();
         let name = name.to_string_lossy();
         let stale = item

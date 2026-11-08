@@ -22,6 +22,13 @@ mod os {
         "-c",
         "printf ready; IFS= read -r line; printf '\\ngot:%s\\n' \"$line\"; IFS= read -r line",
     ];
+    /// Renew fake agent (brief: a shell loop): prints `ready`, answers `/new` with a
+    /// `got:/new` banner, then keeps reading lines so the session stays alive.
+    pub const RENEW_AGENT: &[&str] = &[
+        "sh",
+        "-c",
+        "printf ready; while IFS= read -r line; do if [ \"$line\" = /new ]; then printf '\\ngot:/new\\n'; fi; done",
+    ];
     /// Asks a yes/no question, reads a line and prints `answer:<line>`.
     pub const PROMPT: &[&str] = &[
         "sh",
@@ -43,6 +50,12 @@ mod os {
         "-NoProfile",
         "-Command",
         "[Console]::Write('ready'); $l = [Console]::ReadLine(); [Console]::WriteLine(''); [Console]::WriteLine('got:' + $l); [void][Console]::ReadLine()",
+    ];
+    pub const RENEW_AGENT: &[&str] = &[
+        "powershell",
+        "-NoProfile",
+        "-Command",
+        "[Console]::Write('ready'); while (($l = [Console]::ReadLine()) -ne $null) { if ($l -eq '/new') { [Console]::WriteLine(''); [Console]::WriteLine('got:/new') } }",
     ];
     pub const PROMPT: &[&str] = &[
         "powershell",
@@ -473,5 +486,86 @@ fn a_stale_registry_entry_is_pruned_by_list() {
     assert!(
         !Path::new(&lab.directory.path().join("ghost.json")).exists(),
         "the dead entry is removed"
+    );
+}
+
+#[test]
+fn renew_sends_new_cmd_then_resume_prompt_with_last_5_log_lines_and_brief() {
+    let mut lab = Lab::new();
+    let dir = lab.directory.path().to_path_buf();
+    let log = dir.join("resume.log");
+    fs::write(
+        &log,
+        "old-1\nold-2\nkeep-1\nkeep-2\nkeep-3\nkeep-4\nkeep-5\n",
+    )
+    .unwrap();
+    let brief = dir.join("brief.txt");
+    fs::write(&brief, "brief-content-xyz\n").unwrap();
+    lab.host(
+        "r",
+        &[
+            "--brief",
+            brief.to_str().unwrap(),
+            "--resume-log",
+            log.to_str().unwrap(),
+            "--new-cmd",
+            "/new",
+            "--ready-regex",
+            "got:/new",
+        ],
+        os::RENEW_AGENT,
+    );
+    let out = lab.cli(&["renew", "-n", "r", "-t", "30"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        text(&out).trim(),
+        "renewed r (rearm confirmed)",
+        "{}",
+        text(&out)
+    );
+    let prompt = lab.cli(&[
+        "wait",
+        "-n",
+        "r",
+        "--for",
+        "You were renewed. Resume from your last checkpoint:",
+        "-t",
+        "5",
+    ]);
+    assert!(prompt.status.success(), "{}", text(&prompt));
+    let brief_seen = lab.cli(&["wait", "-n", "r", "--for", "brief-content-xyz", "-t", "5"]);
+    assert!(brief_seen.status.success(), "{}", text(&brief_seen));
+    let last = lab.cli(&["wait", "-n", "r", "--for", "keep-5", "-t", "5"]);
+    assert!(last.status.success(), "{}", text(&last));
+    let screen = lab.cli(&["wait", "-n", "r", "--for", "keep-1", "-t", "5"]);
+    assert!(screen.status.success(), "{}", text(&screen));
+}
+
+#[test]
+fn renew_defaults_new_cmd_and_fails_clearly_for_missing_or_unready_sessions() {
+    let lab = Lab::new();
+    let missing = lab.cli(&["renew", "-n", "nobody", "-t", "5"]);
+    assert!(!missing.status.success());
+    assert!(!String::from_utf8_lossy(&missing.stderr).trim().is_empty());
+    let mut lab2 = Lab::new();
+    lab2.host("u", &["--ready-regex", "this never appears"], os::TWO_LINES);
+    let out = lab2.cli(&["renew", "-n", "u", "-t", "1"]);
+    assert!(
+        !out.status.success(),
+        "unready renew must fail: {}",
+        text(&out)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr)
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .count(),
+        1,
+        "one-line reason: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
