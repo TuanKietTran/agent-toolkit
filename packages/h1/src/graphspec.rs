@@ -72,6 +72,8 @@ pub struct Node {
     pub model_label: String,
     pub pick: PickInfo,
     pub tools: Vec<String>,
+    /// Env NAMES whose values came from a vault for this node (names only, never values).
+    pub vault_env: Vec<String>,
 }
 
 impl Node {

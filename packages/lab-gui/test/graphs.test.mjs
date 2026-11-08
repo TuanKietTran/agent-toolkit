@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { graphsDir, graphspecOf, loadGraphs, mergeGraphs, sessionDir } from "../lib/graphs.mjs";
+import { graphsDir, graphspecOf, loadGraphs, mergeGraphs, oldSessionDir, registryBanner, sessionDir, vaultEnvOf } from "../lib/graphs.mjs";
 
 const node = (name, extra = {}) => ({ name, harness: "pi", role: null, parent: null, requested_model: null, model: null, model_label: null, pick: { via: null, rule: null, reason: null }, tools: [], ...extra });
 const manifest = (extra = {}) => ({ version: 1, run: "run-1", team: "team.yah", source: null, root: "lead", created_ms: 100, nodes: [node("lead")], edges: [], ...extra });
@@ -22,6 +22,50 @@ test("sessionDir: H1_DIR wins, then platform rules", () => {
 test("graphsDir appends graphs/ to the session dir, dir override passes through", () => {
   assert.equal(graphsDir({ env: { H1_DIR: "/s" }, platform: "linux" }), join("/s", "graphs"));
   assert.equal(graphsDir({ dir: "/given" }), "/given");
+});
+
+test("oldSessionDir mirrors sessionDir's base rule with the old name", () => {
+  assert.equal(oldSessionDir({ env: { LOCALAPPDATA: "C:/Users/x/AppData/Local" }, platform: "win32" }), join("C:/Users/x/AppData/Local", "agent-cli-lab", "sessions"));
+  assert.equal(oldSessionDir({ env: { XDG_RUNTIME_DIR: "/run/user/1000" }, platform: "linux" }), join("/run/user/1000", "agent-cli-lab"));
+  assert.equal(oldSessionDir({ env: { TMPDIR: "/var/tmp" }, platform: "darwin" }), join("/var/tmp", "agent-cli-lab"));
+});
+
+test("registryBanner names the registry and counts its .json sessions; no warning when the old dir is absent", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-banner-"));
+  const registry = join(base, "h1");
+  await mkdir(registry);
+  await writeFile(join(registry, "a.json"), "{}");
+  await writeFile(join(registry, "b.json"), "{}");
+  await writeFile(join(registry, "a.sock"), "");
+  await mkdir(join(registry, "graphs"));
+  const lines = await registryBanner({ dir: registry, oldDir: join(base, "agent-cli-lab") });
+  assert.deepEqual(lines, [`lab-gui: registry ${registry} (2 sessions)`]);
+});
+
+test("registryBanner warns exactly once when the old dir exists, with its entry count (0 included)", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-banner-old-"));
+  const registry = join(base, "h1");
+  const old = join(base, "agent-cli-lab");
+  await mkdir(registry);
+  await mkdir(old);
+  await writeFile(join(registry, "a.json"), "{}");
+  await writeFile(join(old, "one.json"), "{}");
+  await writeFile(join(old, "two.json"), "{}");
+  assert.deepEqual(await registryBanner({ dir: registry, oldDir: old }), [
+    `lab-gui: registry ${registry} (1 sessions)`,
+    `lab-gui: old registry ${old} exists (2 sessions) - labs started by the old tool do not appear here; this server reads ${registry}`,
+  ]);
+  const empty = join(base, "empty-old");
+  await mkdir(empty);
+  const lines = await registryBanner({ dir: registry, oldDir: empty });
+  assert.equal(lines.length, 2);
+  assert.equal(lines[1], `lab-gui: old registry ${empty} exists (0 sessions) - labs started by the old tool do not appear here; this server reads ${registry}`);
+});
+
+test("registryBanner tolerates a missing registry dir (0 sessions, still named)", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-banner-missing-"));
+  const registry = join(base, "nope");
+  assert.deepEqual(await registryBanner({ dir: registry, oldDir: join(base, "also-nope") }), [`lab-gui: registry ${registry} (0 sessions)`]);
 });
 
 test("loadGraphs reads a graphs folder directly, oldest first, skipping junk", async () => {
@@ -60,9 +104,9 @@ test("graphspecOf projects team/run and copies pick and tools", () => {
   const m = manifest();
   const n = node("lead", { harness: "claude-cli", model: "claude-cli/claude-sonnet-5-5", model_label: "sonnet", requested_model: "sonnet", pick: { via: "system-one", rule: "r", reason: "why" }, tools: ["read"] });
   const gs = graphspecOf(m, n);
-  assert.deepEqual(gs, { team: "team.yah", run: "run-1", harness: "claude-cli", model: "claude-cli/claude-sonnet-5-5", model_label: "sonnet", requested_model: "sonnet", pick: { via: "system-one", rule: "r", reason: "why" }, tools: ["read"] });
-  gs.tools.push("bash"); gs.pick.via = "x";
-  assert.deepEqual(n.tools, ["read"]); assert.equal(n.pick.via, "system-one");
+  assert.deepEqual(gs, { team: "team.yah", run: "run-1", harness: "claude-cli", model: "claude-cli/claude-sonnet-5-5", model_label: "sonnet", requested_model: "sonnet", pick: { via: "system-one", rule: "r", reason: "why" }, tools: ["read"], vault_env: [] });
+  gs.tools.push("bash"); gs.pick.via = "x"; gs.vault_env.push("FLEET_TOKEN");
+  assert.deepEqual(n.tools, ["read"]); assert.equal(n.pick.via, "system-one"); assert.equal(n.vault_env, undefined);
 });
 
 test("mergeGraphs enriches live labs and appends planned nodes", () => {
@@ -110,6 +154,35 @@ test("mergeGraphs dedupes a planned node shared by two active manifests", () => 
   const out = mergeGraphs([liveLab("lead")], [a, b]);
   assert.deepEqual(out.planned.map((p) => p.name), ["shared"]);
   assert.equal(out.teams.length, 2);
+});
+
+test("R30 vault_env: names pass through the reader and graphspec, deduped in order", async () => {
+  const m = manifest({ nodes: [node("lead", { vault_env: ["FLEET_TOKEN", "VAULT_API_KEY", "FLEET_TOKEN"] })] });
+  const out = mergeGraphs([liveLab("lead")], [m]);
+  assert.deepEqual(out.labs[0].graphspec.vault_env, ["FLEET_TOKEN", "VAULT_API_KEY"]);
+  // The detail panel renders exactly those names under the exact title, and only when non-empty.
+  const appJs = await readFile(new URL("../public/app.js", import.meta.url), "utf8");
+  assert.ok(appJs.includes('...(vaultNames.length ? [["Secrets (names only)", vaultNames.join(", ")]] : [])'));
+  assert.ok(appJs.includes("/^[A-Za-z_][A-Za-z0-9_]*$/"));
+});
+
+test("R30 vault_env: a lab without vault_env gets an empty list (panel shows no Secrets row)", () => {
+  const out = mergeGraphs([liveLab("lead")], [manifest()]);
+  assert.deepEqual(out.labs[0].graphspec.vault_env, []);
+  assert.deepEqual(vaultEnvOf(undefined), []);
+  assert.deepEqual(vaultEnvOf("FLEET_TOKEN"), []);
+});
+
+test("R30 vault_env: value-shaped entries are dropped and never appear in any output", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "lab-gui-vault-"));
+  const bad = ["FLEET_TOKEN=abc123xyz", "bad name", "bad-name", "9LEADING", "dot.name", "", 123, null, {}, ["x"]];
+  await writeFile(join(dir, "r.json"), JSON.stringify(manifest({ nodes: [node("lead", { vault_env: ["FLEET_TOKEN", ...bad] })] })));
+  const loaded = await loadGraphs({ dir });
+  assert.deepEqual(loaded[0].nodes[0].vault_env, ["FLEET_TOKEN"]);
+  const out = mergeGraphs([liveLab("lead")], loaded);
+  assert.deepEqual(out.labs[0].graphspec.vault_env, ["FLEET_TOKEN"]);
+  const serialised = JSON.stringify(out);
+  for (const leak of ["abc123xyz", "bad name", "bad-name", "9LEADING", "dot.name"]) assert.ok(!serialised.includes(leak), `leaked: ${leak}`);
 });
 
 test("mergeGraphs copes with non-array inputs", () => {
