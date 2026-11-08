@@ -249,7 +249,7 @@ pub struct UpOutcome { pub run: String, pub run_dir: PathBuf, pub manifest_path:
 /// One rendered plan step: (argv, secret env pairs, vault-sourced env names).
 type RenderedStep = (Vec<String>, Vec<(String, String)>, Vec<String>);
 
-pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, String> {
+fn render_steps(req: &UpRequest) -> Result<(Vec<RenderedStep>, Vec<String>), String> {
     let models: HashMap<String, String> = req.nodes.iter().map(|n| (n.harness.clone(), n.model.clone())).collect();
     let model_fn = |h: &str| models.get(h).cloned();
     // Render every command BEFORE opening anything: a secret that cannot be fetched stops the run
@@ -282,6 +282,38 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
         }
         rendered.push((argv, secret_env, vault_env));
     }
+    Ok((rendered, secret_values))
+}
+
+/// Dry-run for `up`: render every step (fetching every `${vault.*}` / `${env.*}` secret, so a
+/// missing secret fails exactly as in `up`) but open nothing and write no manifest or run dir.
+/// Per lab, in plan order: the lab name, its resolved model + via, and the sorted list of env
+/// NAMES it would be set with — never a value.
+pub fn up_dry_run_core(req: &UpRequest) -> Result<String, String> {
+    let (rendered, _) = render_steps(req)?;
+    let mut out = format!("dry-run: {} labs, nothing opened, no manifest written\n", req.plan.steps.len());
+    for (step, (argv, secret_env, vault_env)) in req.plan.steps.iter().zip(rendered.iter()) {
+        let node = req.nodes.iter().find(|n| n.harness == step.harness);
+        let model = node.map(|n| n.model.as_str()).unwrap_or(step.model.as_str());
+        let via = node.map(|n| n.pick.via.as_str()).unwrap_or("-");
+        let mut names: Vec<(String, bool)> = secret_env.iter().map(|(name, _)| (name.clone(), vault_env.contains(name))).collect();
+        let mut i = 0;
+        while i + 1 < argv.len() {
+            if argv[i] == "--env" {
+                if let Some((name, _)) = argv[i + 1].split_once('=') && !names.iter().any(|(n, _)| n == name) { names.push((name.to_owned(), false)); }
+                i += 2;
+            } else { i += 1; }
+        }
+        names.sort_by(|a, b| a.0.cmp(&b.0));
+        let names: Vec<String> = names.iter().map(|(name, from_vault)| if *from_vault { format!("{name} (vault)") } else { name.clone() }).collect();
+        let env = if names.is_empty() { "-".to_string() } else { names.join(", ") };
+        out.push_str(&format!("{}: model {} via {}, env {}\n", step.name, model, via, env));
+    }
+    Ok(out)
+}
+
+pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, String> {
+    let (rendered, secret_values) = render_steps(req)?;
     let live = runner.list_names()?;
     for step in &req.plan.steps {
         if live.contains(&step.name) { return Err(format!("session {} is already running; stop it first or pass --prefix", step.name)); }
@@ -530,7 +562,8 @@ enum Cmd {
     /// Print the team graph as a tree
     Graph { #[command(flatten)] args: FileArgs },
     /// Open every lab in a team and write a run manifest
-    Up { #[command(flatten)] args: FileArgs },
+    Up { #[command(flatten)] args: FileArgs, /// Render and fetch secrets only: open nothing, write no manifest
+        #[arg(long = "dry-run")] dry_run: bool },
     /// Stop every lab in a run (by .yah FILE or --run RUN)
     Down { /// The .yah file the run was opened from
         file: Option<PathBuf>, /// Run id, as printed by `graphloop up`
@@ -583,7 +616,7 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             let plan = build_plan(&spec, &team, &resolved, opts)?;
             Ok(graph_output(&team, &plan, &resolved))
         }
-        Cmd::Up { args } => {
+        Cmd::Up { args, dry_run } => {
             let (spec, team, resolved) = load_and_resolve(&args)?;
             let home = graphloop_home();
             let run = new_run_id(&team.name);
@@ -599,7 +632,7 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             let vaults = crate::vault::Vaults::new(&spec.vaults, base_dir, &env_fn).with_command_env(env_files.command_env());
             let vault_fn = |vault: &str, key: &str| vaults.get(vault, key);
             let req = UpRequest { plan: &plan, nodes, source: absolute_string(&args.file), home, manifest_dir: crate::manifest::dir(), run, now_ms: now_ms(), env: &env_fn, vault: &vault_fn };
-            up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values())))
+            if dry_run { up_dry_run_core(&req).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values()))) } else { up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values()))) }
         }
         Cmd::Vault { action } => match action {
             VaultCmd::Status { file, fetch, var, env_file, no_env_file } => {

@@ -45,3 +45,12 @@ harness "worker" {
     }
   }
 }
+
+// The team makes the example runnable end to end: plan|up need a
+// team, and this one is the vault-carrying worker on its own, so
+// vault + team are demonstrated together.
+team "default" {
+  root = "worker"
+  members = []
+  graph = true
+}
