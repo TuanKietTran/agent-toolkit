@@ -22,6 +22,41 @@ export function graphsDir(opts = {}) {
   return opts.dir ? opts.dir : join(sessionDir(opts), 'graphs');
 }
 
+/** The pre-rename tool's session dir: same base rule as sessionDir, old name. */
+export function oldSessionDir({ env = process.env, platform = process.platform } = {}) {
+  if (platform === 'win32' && nonEmpty(env.LOCALAPPDATA)) return join(env.LOCALAPPDATA, 'agent-cli-lab', 'sessions');
+  const base = nonEmpty(env.XDG_RUNTIME_DIR) || nonEmpty(env.TMPDIR) || tmpdir();
+  return join(base, 'agent-cli-lab');
+}
+
+async function dirEntries(dir) {
+  try {
+    return await readdir(dir);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Startup banner lines naming the registry this server reads. Filesystem reads
+ * only — no port, no server — so tests can call it with temp dirs standing in
+ * for both registries. `dir`/`oldDir` default to the real sessionDir() /
+ * oldSessionDir() resolution. Sessions in the registry are its <name>.json
+ * session files; the old-registry count is plain entries in that dir.
+ */
+export async function registryBanner({ dir, oldDir, env, platform } = {}) {
+  const registry = dir ?? sessionDir({ env, platform });
+  const old = oldDir ?? oldSessionDir({ env, platform });
+  const entries = (await dirEntries(registry)) ?? [];
+  const sessions = entries.filter((e) => e.endsWith('.json')).length;
+  const lines = [`lab-gui: registry ${registry} (${sessions} sessions)`];
+  const oldEntries = await dirEntries(old);
+  if (oldEntries !== null) {
+    lines.push(`lab-gui: old registry ${old} exists (${oldEntries.length} sessions) - labs started by the old tool do not appear here; this server reads ${registry}`);
+  }
+  return lines;
+}
+
 function pickOf(node) {
   const p = node && typeof node.pick === 'object' && node.pick ? node.pick : {};
   return { via: typeof p.via === 'string' ? p.via : null, rule: typeof p.rule === 'string' ? p.rule : null, reason: typeof p.reason === 'string' ? p.reason : null };

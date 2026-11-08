@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { graphsDir, graphspecOf, loadGraphs, mergeGraphs, sessionDir, vaultEnvOf } from "../lib/graphs.mjs";
+import { graphsDir, graphspecOf, loadGraphs, mergeGraphs, oldSessionDir, registryBanner, sessionDir, vaultEnvOf } from "../lib/graphs.mjs";
 
 const node = (name, extra = {}) => ({ name, harness: "pi", role: null, parent: null, requested_model: null, model: null, model_label: null, pick: { via: null, rule: null, reason: null }, tools: [], ...extra });
 const manifest = (extra = {}) => ({ version: 1, run: "run-1", team: "team.yah", source: null, root: "lead", created_ms: 100, nodes: [node("lead")], edges: [], ...extra });
@@ -22,6 +22,50 @@ test("sessionDir: H1_DIR wins, then platform rules", () => {
 test("graphsDir appends graphs/ to the session dir, dir override passes through", () => {
   assert.equal(graphsDir({ env: { H1_DIR: "/s" }, platform: "linux" }), join("/s", "graphs"));
   assert.equal(graphsDir({ dir: "/given" }), "/given");
+});
+
+test("oldSessionDir mirrors sessionDir's base rule with the old name", () => {
+  assert.equal(oldSessionDir({ env: { LOCALAPPDATA: "C:/Users/x/AppData/Local" }, platform: "win32" }), join("C:/Users/x/AppData/Local", "agent-cli-lab", "sessions"));
+  assert.equal(oldSessionDir({ env: { XDG_RUNTIME_DIR: "/run/user/1000" }, platform: "linux" }), join("/run/user/1000", "agent-cli-lab"));
+  assert.equal(oldSessionDir({ env: { TMPDIR: "/var/tmp" }, platform: "darwin" }), join("/var/tmp", "agent-cli-lab"));
+});
+
+test("registryBanner names the registry and counts its .json sessions; no warning when the old dir is absent", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-banner-"));
+  const registry = join(base, "h1");
+  await mkdir(registry);
+  await writeFile(join(registry, "a.json"), "{}");
+  await writeFile(join(registry, "b.json"), "{}");
+  await writeFile(join(registry, "a.sock"), "");
+  await mkdir(join(registry, "graphs"));
+  const lines = await registryBanner({ dir: registry, oldDir: join(base, "agent-cli-lab") });
+  assert.deepEqual(lines, [`lab-gui: registry ${registry} (2 sessions)`]);
+});
+
+test("registryBanner warns exactly once when the old dir exists, with its entry count (0 included)", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-banner-old-"));
+  const registry = join(base, "h1");
+  const old = join(base, "agent-cli-lab");
+  await mkdir(registry);
+  await mkdir(old);
+  await writeFile(join(registry, "a.json"), "{}");
+  await writeFile(join(old, "one.json"), "{}");
+  await writeFile(join(old, "two.json"), "{}");
+  assert.deepEqual(await registryBanner({ dir: registry, oldDir: old }), [
+    `lab-gui: registry ${registry} (1 sessions)`,
+    `lab-gui: old registry ${old} exists (2 sessions) - labs started by the old tool do not appear here; this server reads ${registry}`,
+  ]);
+  const empty = join(base, "empty-old");
+  await mkdir(empty);
+  const lines = await registryBanner({ dir: registry, oldDir: empty });
+  assert.equal(lines.length, 2);
+  assert.equal(lines[1], `lab-gui: old registry ${empty} exists (0 sessions) - labs started by the old tool do not appear here; this server reads ${registry}`);
+});
+
+test("registryBanner tolerates a missing registry dir (0 sessions, still named)", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-banner-missing-"));
+  const registry = join(base, "nope");
+  assert.deepEqual(await registryBanner({ dir: registry, oldDir: join(base, "also-nope") }), [`lab-gui: registry ${registry} (0 sessions)`]);
 });
 
 test("loadGraphs reads a graphs folder directly, oldest first, skipping junk", async () => {
