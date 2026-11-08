@@ -57,6 +57,25 @@ export async function registryBanner({ dir, oldDir, env, platform } = {}) {
   return lines;
 }
 
+/**
+ * Visible page banner text when the registry this GUI reads is empty but the
+ * old registry still holds sessions, or null when no banner applies (current
+ * registry non-empty, old registry missing, or old registry has 0 sessions).
+ * Filesystem reads only; sessions are .json files only in both registries,
+ * the same counting registryBanner uses for the current registry.
+ */
+export async function pageBanner({ dir, oldDir, env, platform } = {}) {
+  const registry = dir ?? sessionDir({ env, platform });
+  const old = oldDir ?? oldSessionDir({ env, platform });
+  const entries = (await dirEntries(registry)) ?? [];
+  if (entries.filter((e) => e.endsWith('.json')).length > 0) return null;
+  const oldEntries = await dirEntries(old);
+  if (oldEntries === null) return null;
+  const oldSessions = oldEntries.filter((e) => e.endsWith('.json')).length;
+  if (oldSessions < 1) return null;
+  return `This GUI reads ${registry}, which is empty; ${oldSessions} session(s) exist in the old registry ${old}; those sessions belong to the pre-rename install and are not shown here; no automatic migration happens.`;
+}
+
 function pickOf(node) {
   const p = node && typeof node.pick === 'object' && node.pick ? node.pick : {};
   return { via: typeof p.via === 'string' ? p.via : null, rule: typeof p.rule === 'string' ? p.rule : null, reason: typeof p.reason === 'string' ? p.reason : null };
