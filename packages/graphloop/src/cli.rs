@@ -5,6 +5,7 @@
 //! are thin and separate, so tests drive the cores with a hand-built plan and a fake lab.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::Write as _;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -406,17 +407,46 @@ fn vault_presence(vault: &Vault, base_dir: &Path, env: &dyn Fn(&str) -> Option<S
     }
 }
 
-/// `graphloop vault status`: one line per vault, then one line per declared secret key.
-/// Without `fetch`, only presence is checked and no provider is run; with `fetch`, each key
-/// is fetched and only its ok/error is printed. A value is never printed. The returned bool
-/// is true only when every printed line is ok/ready.
-pub fn vault_status_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>, command_env: Vec<(String, String)>, fetch: bool) -> (String, bool) {
+/// One vault's status verdicts, computed once and rendered either as the human lines of
+/// [`vault_status_core`] or as the JSON object of [`vault_status_json_core`].
+struct VaultStatus {
+    name: String,
+    provider: String,
+    ready: bool,
+    reason: Option<String>,
+    program: Option<String>,
+    keys: Vec<VaultKeyStatus>,
+}
+
+/// One declared key's status: `line` is the human verdict (`ok`, `missing` or
+/// `error: ...`); `fetched` is `Some` only when the key was actually fetched.
+struct VaultKeyStatus {
+    name: String,
+    line: String,
+    fetched: Option<bool>,
+}
+
+/// The program a vault's provider needs on PATH: the configured `command` override's first
+/// word, else the provider table's program. `None` when the provider needs no program
+/// (`dotenv`, `env`), when no provider by that name exists, or when none is configured.
+fn vault_program(vault: &Vault) -> Option<String> {
+    let info = crate::vault::provider(&vault.provider)?;
+    if info.name == "dotenv" || info.name == "env" { return None; }
+    let program = vault.command.first().map(String::as_str).unwrap_or(info.program);
+    if program.is_empty() { None } else { Some(program.to_string()) }
+}
+
+/// Compute every vault/key verdict once. The returned bool is the `vault status` exit-code
+/// contract: true — exit 0 — only when every vault is ready and every key line is ok (with
+/// `fetch`, every key fetched). The third value is every fetched secret value, for scrubbing.
+fn vault_status_report(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>, command_env: Vec<(String, String)>, fetch: bool) -> (Vec<VaultStatus>, bool, Vec<String>) {
     let vaults = crate::vault::Vaults::new(&spec.vaults, base_dir.to_path_buf(), env).with_command_env(command_env);
-    let mut out = String::new();
+    let mut report = Vec::new();
     let mut all_ok = true;
     for vault in &spec.vaults {
         let (ready, reason) = vault_presence(vault, base_dir, env);
-        if ready { out.push_str(&format!("vault {} ({}): ready\n", vault.name, vault.provider)); } else { all_ok = false; out.push_str(&format!("vault {} ({}): not ready: {}\n", vault.name, vault.provider, reason.unwrap_or_default())); }
+        if !ready { all_ok = false; }
+        let mut keys = Vec::new();
         for (key, reference) in &vault.secrets {
             let line = if fetch {
                 match vaults.get(&vault.name, key) { Ok(_) => "ok".to_string(), Err(e) => format!("error: {e}") }
@@ -437,11 +467,44 @@ pub fn vault_status_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Opt
                 }
             };
             if line != "ok" { all_ok = false; }
-            out.push_str(&format!("{} {}: {}\n", vault.name, key, line));
+            keys.push(VaultKeyStatus { name: key.clone(), fetched: if fetch { Some(line == "ok") } else { None }, line });
         }
+        report.push(VaultStatus { name: vault.name.clone(), provider: vault.provider.clone(), ready, reason, program: vault_program(vault), keys });
     }
-    if spec.vaults.is_empty() { out.push_str("no vaults declared\n"); }
-    (crate::vault::scrub(&out, &vaults.values()), all_ok)
+    (report, all_ok, vaults.values())
+}
+
+/// `graphloop vault status`: one line per vault, then one line per declared secret key.
+/// Without `fetch`, only presence is checked and no provider is run; with `fetch`, each key
+/// is fetched and only its ok/error is printed. A value is never printed. The returned bool
+/// is true only when every printed line is ok/ready.
+pub fn vault_status_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>, command_env: Vec<(String, String)>, fetch: bool) -> (String, bool) {
+    let (report, all_ok, values) = vault_status_report(spec, base_dir, env, command_env, fetch);
+    let mut out = String::new();
+    for vault in &report {
+        if vault.ready { out.push_str(&format!("vault {} ({}): ready\n", vault.name, vault.provider)); } else { out.push_str(&format!("vault {} ({}): not ready: {}\n", vault.name, vault.provider, vault.reason.clone().unwrap_or_default())); }
+        for key in &vault.keys { out.push_str(&format!("{} {}: {}\n", vault.name, key.name, key.line)); }
+    }
+    if report.is_empty() { out.push_str("no vaults declared\n"); }
+    (crate::vault::scrub(&out, &values), all_ok)
+}
+
+/// `graphloop vault status --json`: the same verdicts as [`vault_status_core`], as one JSON
+/// object — {"vaults":[{"name","provider","ready","program","keys":[{"name","fetched"}]}]} —
+/// where `program` is null when the provider needs none and `fetched` is null unless `fetch`
+/// was passed. Names only: the object is scrubbed with every fetched value before returning,
+/// so a secret value can never appear in it. The bool is the exit-code contract above.
+pub fn vault_status_json_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>, command_env: Vec<(String, String)>, fetch: bool) -> (String, bool) {
+    let (report, all_ok, values) = vault_status_report(spec, base_dir, env, command_env, fetch);
+    let vaults: Vec<serde_json::Value> = report.iter().map(|vault| serde_json::json!({
+        "name": vault.name,
+        "provider": vault.provider,
+        "ready": vault.ready,
+        "program": vault.program,
+        "keys": vault.keys.iter().map(|key| serde_json::json!({ "name": key.name, "fetched": key.fetched })).collect::<Vec<_>>(),
+    })).collect();
+    let out = serde_json::to_string(&serde_json::json!({ "vaults": vaults })).unwrap_or_else(|_| "{\"vaults\":[]}".to_string()) + "\n";
+    (crate::vault::scrub(&out, &values), all_ok)
 }
 
 pub fn format_age(age_ms: u64) -> String {
@@ -587,13 +650,17 @@ enum Cmd {
 
 #[derive(Subcommand, Debug)]
 enum VaultCmd {
-    /// One line per vault and per declared secret key; values are never printed
+    /// One line per vault and per declared secret key; values are never printed.
+    /// Exit code is 0 only when every vault is ready (and, with --fetch, every key fetches)
     Status {
         /// Path to a .yah (Graphspec) file
         file: PathBuf,
         /// Actually fetch each key (default: presence checks only)
         #[arg(long)]
         fetch: bool,
+        /// Print one JSON object instead of the human lines (composable with --fetch)
+        #[arg(long)]
+        json: bool,
         /// Override a variable, NAME=VALUE (repeatable)
         #[arg(long = "var", value_name = "NAME=VALUE")]
         var: Vec<String>,
@@ -642,14 +709,25 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             if dry_run { up_dry_run_core(&req).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values()))) } else { up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values()))) }
         }
         Cmd::Vault { action } => match action {
-            VaultCmd::Status { file, fetch, var, env_file, no_env_file } => {
+            VaultCmd::Status { file, fetch, json, var, env_file, no_env_file } => {
                 let spec = load_spec(&file, &var)?;
                 let env_files = crate::envfile::EnvFiles::load(&file, &env_file, !no_env_file).map_err(|e| err(&e))?;
                 let real_env = |name: &str| std::env::var(name).ok();
                 let env_fn = |name: &str| env_files.lookup(name, &real_env);
                 let base_dir = std::path::Path::new(&absolute_string(&file)).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
-                let (out, ok) = vault_status_core(&spec, &base_dir, &env_fn, env_files.command_env(), fetch);
-                if ok { Ok(out) } else { Err(out) }
+                if json {
+                    let (out, ok) = vault_status_json_core(&spec, &base_dir, &env_fn, env_files.command_env(), fetch);
+                    if ok { Ok(out) } else {
+                        // A failed JSON run still puts its JSON on stdout (it is the
+                        // machine-readable result); only the human message goes to stderr.
+                        print!("{out}");
+                        let _ = std::io::stdout().flush();
+                        Err(err("vault status: not all vaults are ready"))
+                    }
+                } else {
+                    let (out, ok) = vault_status_core(&spec, &base_dir, &env_fn, env_files.command_env(), fetch);
+                    if ok { Ok(out) } else { Err(out) }
+                }
             }
         },
         Cmd::Down { file, run, purge } => {
