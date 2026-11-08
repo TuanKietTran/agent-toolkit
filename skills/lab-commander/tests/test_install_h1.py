@@ -77,11 +77,11 @@ class InstallH1Tests(unittest.TestCase):
             env = os.environ.copy()
             env["PATH"] = f"{bindir}{os.pathsep}{env['PATH']}"
             result = subprocess.run(
-                [str(SKILL / "bin/labctl"), "status", "-n", "w-inst"],
+                [str(SKILL / "bin/labctl"), "status", "-n", "worker-1"],
                 env=env, capture_output=True, text=True, check=False,
             )
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.strip(), "h1:status -n w-inst")
+            self.assertEqual(result.stdout.strip(), "h1:status -n worker-1")
             self.assertIn("exec h1", (SKILL / "bin/labctl").read_text())
 
     def test_old_bin_on_path_prints_one_note_and_is_not_deleted(self):

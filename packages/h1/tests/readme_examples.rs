@@ -13,7 +13,7 @@
 //! - `--help` for the top level and for every subcommand named by an extracted command;
 //! - a full named-session lifecycle (`open` / `send` / `screen` / `status` / `stop`, the forms
 //!   of the README's named-session block) on a disposable `cat` lab, with
-//!   `H1_DIR=/Users/handlerone/Downloads/h1-rd` (short path, for socket length limits).
+//!   `H1_DIR=/tmp/h1-rd` (short path, for socket length limits).
 //!   Adaptations versus the README text: `--detached` is added so no visible window opens,
 //!   and the lab is named `readme-cat` running `cat` instead of `ux` running `pi`.
 //!
@@ -29,7 +29,7 @@ use std::{
 };
 
 const TIMEOUT: Duration = Duration::from_secs(60);
-const LIFECYCLE_DIR: &str = "/Users/handlerone/Downloads/h1-rd";
+const LIFECYCLE_DIR: &str = "/tmp/h1-rd";
 const LIFECYCLE_NAME: &str = "readme-cat";
 
 fn binary() -> &'static str {
