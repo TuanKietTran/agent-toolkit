@@ -24,6 +24,9 @@ pub enum Tok {
     Comma,
     Dot,
     Eof,
+    /// A `//` comment to end of line, kept as trivia for the parser to attach
+    /// to a statement. The text includes the leading `//`, verbatim.
+    Comment(String),
     /// A lexical error (unterminated string, unexpected character, invalid
     /// number). Lexing continued past it; the parser reports this diagnostic
     /// exactly once when it reaches the token.
@@ -88,23 +91,25 @@ impl Lexer {
         Diagnostics::one(Diagnostic::error(&self.file, span, summary, detail))
     }
 
-    fn skip_ws_and_comments(&mut self) {
-        loop {
-            match self.peek() {
-                Some(c) if c.is_whitespace() => {
-                    self.bump();
-                }
-                Some('/') if self.peek_at(1) == Some('/') => {
-                    while let Some(c) = self.peek() {
-                        if c == '\n' {
-                            break;
-                        }
-                        self.bump();
-                    }
-                }
-                _ => break,
-            }
+    fn skip_ws(&mut self) {
+        while matches!(self.peek(), Some(c) if c.is_whitespace()) {
+            self.bump();
         }
+    }
+
+    /// Consume a `//` comment starting at the cursor (the caller has checked
+    /// both slashes) up to but not including the newline.
+    fn lex_comment(&mut self) -> Token {
+        let start = self.span();
+        let mut text = String::new();
+        while let Some(c) = self.peek() {
+            if c == '\n' {
+                break;
+            }
+            text.push(c);
+            self.bump();
+        }
+        Token { tok: Tok::Comment(text), span: self.end_span(start) }
     }
 
     fn lex_string(&mut self, quote: char) -> Token {
@@ -242,13 +247,14 @@ pub fn lex(file: &str, src: &str) -> Vec<Token> {
     let mut lx = Lexer { chars: src.chars().collect(), pos: 0, byte_pos: 0, line: 1, col: 1, file: file.to_string() };
     let mut tokens = Vec::new();
     loop {
-        lx.skip_ws_and_comments();
+        lx.skip_ws();
         let span = lx.span();
         let Some(c) = lx.peek() else {
             tokens.push(Token { tok: Tok::Eof, span });
             break;
         };
         let token = match c {
+            '/' if lx.peek_at(1) == Some('/') => lx.lex_comment(),
             '"' => lx.lex_string('"'),
             '`' => lx.lex_string('`'),
             '{' => { lx.bump(); Token { tok: Tok::LBrace, span: lx.end_span(span) } }
@@ -333,12 +339,17 @@ mod tests {
     }
 
     #[test]
-    fn comments_are_skipped_everywhere() {
+    fn comments_are_kept_as_tokens_in_place() {
         let t = toks("// lead\nyah // mid\n1 // tail");
-        assert_eq!(t[0].tok, Tok::Ident("yah".into()));
-        assert_eq!((t[0].span.line, t[0].span.col), (2, 1));
-        assert_eq!(t[1].tok, Tok::Num(1.0));
-        assert_eq!((t[1].span.line, t[1].span.col), (3, 1));
+        assert_eq!(t[0].tok, Tok::Comment("// lead".into()));
+        assert_eq!((t[0].span.line, t[0].span.col), (1, 1));
+        assert_eq!(t[1].tok, Tok::Ident("yah".into()));
+        assert_eq!((t[1].span.line, t[1].span.col), (2, 1));
+        assert_eq!(t[2].tok, Tok::Comment("// mid".into()));
+        assert_eq!((t[2].span.line, t[2].span.col), (2, 5));
+        assert_eq!(t[3].tok, Tok::Num(1.0));
+        assert_eq!((t[3].span.line, t[3].span.col), (3, 1));
+        assert_eq!(t[4].tok, Tok::Comment("// tail".into()));
     }
 
     #[test]
@@ -444,8 +455,11 @@ mod tests {
     #[test]
     fn non_ascii_in_comment_does_not_shift_next_line() {
         let t = toks("// caf\u{e9} \u{2615}\nyah 1");
-        assert_eq!(t[0].span.line, 2);
-        assert_eq!(t[0].span.col, 1);
+        assert_eq!(t[0].tok, Tok::Comment("// caf\u{e9} \u{2615}".into()));
+        assert_eq!((t[0].span.line, t[0].span.col), (1, 1));
+        assert_eq!(t[1].tok, Tok::Ident("yah".into()));
+        assert_eq!(t[1].span.line, 2);
+        assert_eq!(t[1].span.col, 1);
     }
 
     #[test]

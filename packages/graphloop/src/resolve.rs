@@ -315,7 +315,7 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>, scope: &Sc
                 }
             }
             if !replaced {
-                block.body.push(Stmt::Assign(Assign { key: "default".to_string(), value: effective, span }));
+                block.body.push(Stmt::Assign(Assign { key: "default".to_string(), value: effective, span, leading: Vec::new(), trailing: None }));
             }
         }
     }
@@ -386,10 +386,10 @@ mod tests {
         Expr { kind: ExprKind::Str(parts), span: sp(line, 1) }
     }
     fn assign(key: &str, value: Expr, line: u32) -> Stmt {
-        Stmt::Assign(Assign { key: key.to_string(), value, span: sp(line, 1) })
+        Stmt::Assign(Assign { key: key.to_string(), value, span: sp(line, 1), leading: Vec::new(), trailing: None })
     }
     fn block(kind: &str, label: Option<&str>, body: Vec<Stmt>, line: u32) -> Stmt {
-        Stmt::Block(Block { kind: kind.to_string(), label: label.map(str::to_string), body, span: sp(line, 1) })
+        Stmt::Block(Block { kind: kind.to_string(), label: label.map(str::to_string), body, span: sp(line, 1), leading: Vec::new(), trailing: None })
     }
     fn var_block(name: &str, type_name: Option<&str>, default: Option<Expr>, line: u32) -> Stmt {
         let mut body = Vec::new();
@@ -402,7 +402,7 @@ mod tests {
         block("variable", Some(name), body, line)
     }
     fn file(stmts: Vec<Stmt>) -> File {
-        File { name: "team.yah".to_string(), version: 1, stmts }
+        File { name: "team.yah".to_string(), version: 1, stmts, tail_comments: Vec::new() }
     }
     fn overrides(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
@@ -779,7 +779,7 @@ mod tests {
 
     #[test]
     fn references_inside_lists_and_maps_are_walked() {
-        let map = Expr { kind: ExprKind::Map(vec![Assign { key: "dir".into(), value: reff(&["var", "work_dir"], 7, 12), span: sp(7, 5) }]), span: sp(7, 1) };
+        let map = Expr { kind: ExprKind::Map(vec![Assign { key: "dir".into(), value: reff(&["var", "work_dir"], 7, 12), span: sp(7, 5), leading: Vec::new(), trailing: None }]), span: sp(7, 1) };
         let list = Expr { kind: ExprKind::List(vec![reff(&["var", "work_dir"], 8, 3)]), span: sp(8, 1) };
         let f = file(vec![
             var_block("work_dir", Some("string"), Some(s("./work")), 2),
