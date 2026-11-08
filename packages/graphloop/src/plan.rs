@@ -112,7 +112,7 @@ fn push_lit(parts: &mut Vec<Part>, text: String) {
     }
 }
 
-/// Replace every `${harnesses.X.model}` part with X's resolved `provider/id` NOW. `Part::Env`
+/// Replace every `${harnesses.X.model}` part with X's resolved `provider/id` NOW, and every `${harnesses.X.model_id}` part with X's bare resolved id. `Part::Env`
 /// stays late-bound. Errors name the harness holding the reference and the unresolved harness.
 fn substitute(templ: &Templ, resolved: &[Resolved], spec: &Spec, line: u32, owner: &str) -> Result<Templ, Diagnostics> {
     let mut parts: Vec<Part> = Vec::new();
@@ -131,6 +131,17 @@ fn substitute(templ: &Templ, resolved: &[Resolved], spec: &Spec, line: u32, owne
                     )));
                 };
                 push_lit(&mut parts, found.display_model());
+            }
+            Part::HarnessModelId(name) => {
+                let Some(found) = resolved.iter().find(|r| &r.harness == name) else {
+                    return Err(Diagnostics::one(error(
+                        spec,
+                        line,
+                        "Unresolved harness model",
+                        format!("harness {owner:?} references ${{harnesses.{name}.model_id}}, but no model was resolved for harness {name:?}"),
+                    )));
+                };
+                push_lit(&mut parts, found.id.clone());
             }
         }
     }
@@ -611,6 +622,16 @@ mod tests {
     }
 
     #[test]
+    fn render_harness_model_id_part_strips_provider() {
+        let step = manual_step(vec![Templ(vec![Part::HarnessModelId("builder".to_owned())])]);
+        assert_eq!(step.argv[0].display(), "${harnesses.builder.model_id}");
+        let ctx = RenderCtx { env: &|_| None, model: &|name| (name == "builder").then(|| "anthropic/x".to_owned()), vault: &|_, _| Err("no vault".to_owned()) };
+        assert_eq!(step.render(&ctx).unwrap(), strings(&["x"]));
+        let ctx_none = RenderCtx { env: &|_| None, model: &|_| None, vault: &|_, _| Err("no vault".to_owned()) };
+        assert!(step.render(&ctx_none).unwrap_err().contains("builder"));
+    }
+
+    #[test]
     fn topo_children_declared_before_parents() {
         let s = spec(vec![harness("builder", "worker", Some("commander"), 20), harness("commander", "commander", None, 10)], team("commander", &["builder"]));
         let plan = build(&s, "default", &resolved(&["commander", "builder"]), &opts()).unwrap();
@@ -751,6 +772,26 @@ mod tests {
         let last = plan.steps[0].argv.last().unwrap();
         assert_eq!(last.display(), "run --model prov/b-model");
         assert!(last.is_static());
+    }
+
+    #[test]
+    fn harness_model_id_reference_is_substituted_bare() {
+        let (mut s, _) = basic();
+        s.harnesses[0].open.command = vec![Templ(vec![Part::Lit("run --model ".to_owned()), Part::HarnessModelId("builder".to_owned())])];
+        let r = vec![res("commander", "anthropic", "c-model"), res("builder", "prov", "b-model")];
+        let plan = build(&s, "default", &r, &opts()).unwrap();
+        let last = plan.steps[0].argv.last().unwrap();
+        assert_eq!(last.display(), "run --model b-model");
+        assert!(last.is_static());
+    }
+
+    #[test]
+    fn harness_model_id_reference_without_resolved_is_an_error() {
+        let (mut s, r) = basic();
+        s.harnesses[0].open.command = vec![Templ(vec![Part::HarnessModelId("ghost".to_owned())])];
+        let text = err_text(build(&s, "default", &r, &opts()));
+        assert!(text.contains("ghost"), "{text}");
+        assert!(text.contains("model_id"), "{text}");
     }
 
     #[test]

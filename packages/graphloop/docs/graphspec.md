@@ -246,7 +246,7 @@ Parsed and validated in v1, not executed (see Semantics).
 
 Pipeline (vault, "Parser requirements"): lexer → parser → resolve interpolations → resolve references → schema validation → apply defaults. On top of that:
 
-- **Late binding.** Two interpolations are not resolved at load time (vault: "Interpolation: `${env.NAME}` `${var.name}` `${harnesses.builder.model}`"). `${env.NAME}` is read from the process environment when a command is rendered, never at parse time, so a file can be checked on a machine without the secrets. `${harnesses.<label>.model}` is bound after model resolution, per harness.
+- **Late binding.** Two interpolations are not resolved at load time (vault: "Interpolation: `${env.NAME}` `${var.name}` `${harnesses.builder.model}`"). `${env.NAME}` is read from the process environment when a command is rendered, never at parse time, so a file can be checked on a machine without the secrets. `${harnesses.<label>.model}` and `${harnesses.<label>.model_id}` are bound after model resolution, per harness.
 - **Variables.** `var.<name>` resolves to the variable's `default`, overridden by `--var NAME=VALUE` (repeatable). A variable with no default and no `--var` is an error at resolve time.
 - **Defaults.** The `defaults` block supplies values a harness does not set itself; a harness's own keys always win. Schema defaults from the tables above are applied after validation, before planning.
 - **Edges.** A team's graph has two edge kinds. A `parent` key gives a parent edge `parent -> harness`. Every member with no parent gets a member edge `root -> member` from the team's `root`. The root itself has no incoming edge. Parents are opened before children (topological order, stable in declaration order). For the canonical example (vault, "Canonical example"):
@@ -260,7 +260,7 @@ A parentless member `reviewer` of the same team would add `commander -> reviewer
 
 - **Session naming.** Each harness becomes one h1 session named after its label, optionally prefixed: `--prefix P` names sessions `P-<label>`, which keeps teams from colliding. Session names must match `[A-Za-z0-9._-]`, be at most 40 characters, and not start with `.`.
 - **Model resolution.** `model = "system-one"` is resolved by system-one (`packages/system-one`) at plan time, using the harness's `role` and `complexity` hint. If system-one cannot decide or cannot be located, the resolved model is the `system_one.fallback` model — that fallback, and only that fallback, as defined in the `system_one` block. A pinned `model = "<label>"` is never re-decided.
-- **How the model reaches the program.** Only through interpolation: `open.command` (and `cwd`/`env`/`title`) may embed `${harnesses.<label>.model}`, replaced by the resolved model's `id` when the step is rendered. Graphloop does not inject the model any other way.
+- **How the model reaches the program.** Only through interpolation: `open.command` (and `cwd`/`env`/`title`) may embed one of two model forms. `${harnesses.<label>.model}` is replaced by the resolved model in `provider_type/id` form (e.g. `anthropic/claude-sonnet-5-5`) — use it for programs that take a provider-qualified model; Graphloop itself passes that form to `h1 open --model`. `${harnesses.<label>.model_id}` is replaced by the bare model id (e.g. `claude-sonnet-5-5`) — use it when the program already knows the provider, as with `pi --provider claude-cli --model ${harnesses.<label>.model_id}` in `examples/research-team.yah` and `examples/team.yah`. Graphloop does not inject the model any other way.
 - **`workflow` in v1.** `workflow` blocks are parsed, validated and listed, but not executed in v1. Loops live inside h1 (see Orchestration rules).
 
 ## Error format
@@ -360,7 +360,9 @@ A `.yah` file never contains a secret value. It contains a `vault` block that sa
 
 ## The `vault` block
 
-```yah
+```yah check
+yah 1
+
 vault "local" {
   provider = "dotenv"
   path     = "fleet.env"
@@ -425,7 +427,9 @@ The first three are the adapters in this build. The last four are being added be
 
 Because a block ignores keys the selected provider does not use, the provider itself can come from a variable:
 
-```yah
+```yah check
+yah 1
+
 variable "secrets" {
   type    = "string"
   default = "dotenv"
@@ -461,7 +465,7 @@ This is the pattern `fleet.yah` uses: the graph, the harness `env` maps and the 
 
 ### 1. A dotenv vault for local development
 
-```yah
+```yah check
 yah 1
 
 vault "local" {
@@ -475,7 +479,7 @@ vault "local" {
 harness "worker" {
   kind  = "h1"
   role  = "worker"
-  model = "haiku"
+  model = "system-one"
   open {
     command = ["cat"]
     env = {
