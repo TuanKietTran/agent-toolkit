@@ -988,12 +988,12 @@ mod tests {
 
     #[test]
     fn worktree_roots_exclude_the_main_worktree() {
-        let porcelain = "worktree /Users/x/Downloads/agent-toolkit\nHEAD 78234fb\nbranch refs/heads/feat/old\n\nworktree /Users/x/Downloads/graphloop-lab/repo\nHEAD 776d7f7\n\nworktree /Users/x/Downloads/graphloop-lab/wt/w-sweep\nHEAD 1218227\n";
+        let porcelain = "worktree /Users/x/work/main\nHEAD 78234fb\nbranch refs/heads/feat/old\n\nworktree /Users/x/work/wt-a\nHEAD 776d7f7\n\nworktree /Users/x/work/wt-b\nHEAD 1218227\n";
         assert_eq!(
             worktree_roots(porcelain),
             vec![
-                PathBuf::from("/Users/x/Downloads/graphloop-lab/repo"),
-                PathBuf::from("/Users/x/Downloads/graphloop-lab/wt/w-sweep"),
+                PathBuf::from("/Users/x/work/wt-a"),
+                PathBuf::from("/Users/x/work/wt-b"),
             ]
         );
         assert!(worktree_roots("").is_empty());

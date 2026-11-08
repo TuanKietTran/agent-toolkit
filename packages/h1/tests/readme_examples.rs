@@ -13,11 +13,11 @@
 //! - `--help` for the top level and for every subcommand named by an extracted command;
 //! - a full named-session lifecycle (`open` / `send` / `screen` / `status` / `stop`, the forms
 //!   of the README's named-session block) on a disposable `cat` lab, with
-//!   `H1_DIR=/Users/handlerone/Downloads/h1-rd` (short path, for socket length limits).
+//!   `H1_DIR` set to a short temp dir built at run time (`std::env::temp_dir()` joined with `h1-rd-<pid>`, for socket length limits).
 //!   Adaptations versus the README text: `--detached` is added so no visible window opens,
 //!   and the lab is named `readme-cat` running `cat` instead of `ux` running `pi`.
 //!
-//! The lifecycle test always stops its lab and removes `h1-rd`, and no test ever touches the
+//! The lifecycle test always stops its lab and removes that temp dir, and no test ever touches the
 //! default/fleet `H1_DIR`.
 
 use std::{
@@ -29,8 +29,11 @@ use std::{
 };
 
 const TIMEOUT: Duration = Duration::from_secs(60);
-const LIFECYCLE_DIR: &str = "/Users/handlerone/Downloads/h1-rd";
 const LIFECYCLE_NAME: &str = "readme-cat";
+
+fn lifecycle_dir() -> PathBuf {
+    std::env::temp_dir().join(format!("h1-rd-{}", std::process::id()))
+}
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_h1")
@@ -270,7 +273,8 @@ fn readme_help_variants_and_list_run_clean_on_an_empty_private_dir() {
 #[cfg(unix)]
 #[test]
 fn readme_named_session_lifecycle_on_a_disposable_cat_lab() {
-    let dir = Path::new(LIFECYCLE_DIR);
+    let dir_buf = lifecycle_dir();
+    let dir = dir_buf.as_path();
     let cleanup = |dir: &Path| {
         let _ = run_in(dir, &["stop", "-n", LIFECYCLE_NAME]);
         let _ = fs::remove_dir_all(dir);
@@ -334,7 +338,8 @@ fn readme_named_session_lifecycle_on_a_disposable_cat_lab() {
     cleanup(dir);
     assert!(
         !dir.exists(),
-        "the lifecycle test must remove {LIFECYCLE_DIR}"
+        "the lifecycle test must remove {}",
+        dir.display()
     );
     steps.unwrap();
 }
