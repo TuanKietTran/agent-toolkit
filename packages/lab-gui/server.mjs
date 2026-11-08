@@ -4,6 +4,7 @@
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { registryBanner } from "./lib/graphs.mjs";
 import { loadRemoteKey, startGui } from "./lib/serve.mjs";
 
 function parseArgs(argv) {
@@ -53,6 +54,7 @@ try {
   console.error(`lab-gui: ${error.message}`);
   process.exit(1);
 }
+for (const line of await registryBanner()) console.log(line);
 if (opts.listen) {
   console.log(`lab-gui (remote): ${gui.origin}`);
   console.log(`  pairing key: ${gui.key}`);

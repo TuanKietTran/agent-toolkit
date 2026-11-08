@@ -35,9 +35,9 @@ const tagOf = (pick) => (pick.via === "system-one" ? (pick.rule ? `s1 ${pick.rul
 const KEY = "launch-key";
 const COOKIE = `lab_gui=${KEY}`;
 
-async function boot() {
+async function boot(fixture = FIXTURE) {
   const dir = await mkdtemp(join(tmpdir(), "lab-gui-xcheck-"));
-  await writeFile(join(dir, "run-1.json"), JSON.stringify(FIXTURE));
+  await writeFile(join(dir, "run-1.json"), JSON.stringify(fixture));
   const cli = createFakeCli([{ name: "cmdr", role: "commander", parent: null, model: "anthropic/claude-sonnet-5-5" }]);
   const monitor = createMonitor({ cli });
   let port = 0;
@@ -76,6 +76,19 @@ test("R6 cross-check: h1 graphspec.rs fixture nodes + resolved models reach /api
     assert.deepEqual(snap.teams, [{ team: "alpha", run: "run-1", up: 1, total: 2 }]);
     assert.deepEqual(snap.memberEdges, []);
     assert.deepEqual(snap.edges, []);
+  } finally { await s.close(); }
+});
+
+test("R30 vault_env: names reach /api/labs, value-shaped entries never do", async () => {
+  const fixture = { ...FIXTURE, nodes: [{ ...FIXTURE.nodes[0], vault_env: ["FLEET_TOKEN", "FLEET_TOKEN=abc123xyz"] }, FIXTURE.nodes[1]] };
+  const s = await boot(fixture);
+  try {
+    const snap = await s.labs();
+    const cmdr = snap.labs.find((l) => l.name === "cmdr");
+    const builder = snap.labs.find((l) => l.name === "builder");
+    assert.deepEqual(cmdr.graphspec.vault_env, ["FLEET_TOKEN"]);
+    assert.deepEqual(builder.graphspec.vault_env, []);
+    assert.ok(!JSON.stringify(snap).includes("abc123xyz"));
   } finally { await s.close(); }
 });
 
