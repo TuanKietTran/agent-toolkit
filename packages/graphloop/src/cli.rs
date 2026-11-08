@@ -384,17 +384,25 @@ fn program_found(program: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
 
 /// One `(ready, reason)` presence verdict for a vault: nothing is fetched.
 fn vault_presence(vault: &Vault, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>) -> (bool, Option<String>) {
-    match vault.provider.as_str() {
+    // Readiness is derived from the PROVIDERS table in vault.rs: a provider in the table is
+    // ready iff what it needs is present (the dotenv file, nothing for env, or its program on
+    // PATH). Only a provider that is not in the table at all is "not available in this build".
+    let Some(info) = crate::vault::provider(&vault.provider) else {
+        return (false, Some(format!("provider {:?} is not available in this build", vault.provider)));
+    };
+    match info.name {
         "dotenv" => {
             let path = dotenv_path(vault, base_dir, env);
             match std::fs::read_to_string(&path) { Ok(_) => (true, None), Err(e) => (false, Some(format!("cannot read {}: {e}", path.display()))) }
         }
         "env" => (true, None),
-        "command" => {
-            let Some(program) = vault.command.first() else { return (false, Some("no command configured".to_string())) };
+        _ => {
+            // CLI providers and `command`: a configured command override replaces the
+            // provider's own program (tests point it at a fake CLI; users can pin a path).
+            let program = vault.command.first().map(String::as_str).unwrap_or(info.program);
+            if program.is_empty() { return (false, Some("no command configured".to_string())); }
             if program_found(program, env) { (true, None) } else { (false, Some(format!("program {program} not found"))) }
         }
-        other => (false, Some(format!("provider {other:?} is not available in this build"))),
     }
 }
 
@@ -422,11 +430,10 @@ pub fn vault_status_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Opt
                         }
                     }
                     "env" => match env(reference) { Some(v) if !v.is_empty() => "ok".to_string(), _ => "missing".to_string() },
-                    "command" => {
+                    _ => {
                         let (ready, reason) = vault_presence(vault, base_dir, env);
                         if ready { "ok".to_string() } else { format!("error: {}", reason.unwrap_or_default()) }
                     }
-                    other => format!("error: provider {other:?} is not available in this build"),
                 }
             };
             if line != "ok" { all_ok = false; }
