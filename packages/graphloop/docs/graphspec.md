@@ -224,6 +224,9 @@ Strict mode (vault: "Strict mode: unknown keys or missing required fields = erro
 | `env` | map of template | no | `{}` |
 | `title` | template | no | the session name |
 | `detached` | bool | no | `false` — **extension** beyond the canonical example |
+| `brief` | template | no | — — maps to `h1 open --brief`: file whose contents re-arm the session on renew |
+| `resume_log` | template | no | — — maps to `h1 open --resume-log`: log whose last lines re-arm the session on renew |
+| `auto_rearm` | bool | no | `false` — maps to `h1 open --auto-rearm`: re-arm automatically when the session's new-command is submitted |
 
 ### `team "<name>"` (0..n)
 
