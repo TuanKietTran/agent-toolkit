@@ -23,6 +23,10 @@ export function createFakeCli(initial = []) {
       calls.push(["stop", name]);
       sessions.delete(name);
     },
+    renew: async (name) => {
+      calls.push(["renew", name]);
+      if (!sessions.has(name)) throw new Error("no such lab");
+    },
     attach: async (name) => void calls.push(["attach", name]),
   };
   return cli;

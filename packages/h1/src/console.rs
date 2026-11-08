@@ -704,6 +704,7 @@ enum Mode {
     Command(String),
     Message(String),
     Confirm(String),
+    ConfirmRenew(String),
     Peek,
     Describe,
     Help,
@@ -996,6 +997,15 @@ impl App {
                 }
                 self.mode = Mode::Normal;
             }
+            Mode::ConfirmRenew(name) => {
+                match key.code {
+                    KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                        self.spawn_self(&["renew", "-n", &name], format!("renewing {name}"));
+                    }
+                    _ => self.say("cancelled", false),
+                }
+                self.mode = Mode::Normal;
+            }
             Mode::Peek | Mode::Describe | Mode::Help => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter if !matches!(self.mode, Mode::Peek) || key.code != KeyCode::Enter => {
                     self.mode = Mode::Normal;
@@ -1028,6 +1038,11 @@ impl App {
                 KeyCode::Char('k') if ctrl => {
                     if let Some(name) = self.selected.clone() {
                         self.mode = Mode::Confirm(name);
+                    }
+                }
+                KeyCode::Char('R') => {
+                    if let Some(name) = self.selected.clone() {
+                        self.mode = Mode::ConfirmRenew(name);
                     }
                 }
                 KeyCode::Char('d') => self.mode = Mode::Describe,
@@ -1112,6 +1127,7 @@ fn draw(frame: &mut Frame, app: &mut App) {
         Mode::Describe => draw_describe(frame, area, app),
         Mode::Help => draw_help(frame, area),
         Mode::Confirm(ref name) => draw_confirm(frame, area, name),
+        Mode::ConfirmRenew(ref name) => draw_confirm_renew(frame, area, name),
         _ => {}
     }
 }
@@ -1641,6 +1657,7 @@ fn draw_crumbs(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Describe => Some("describe"),
         Mode::Help => Some("help"),
         Mode::Confirm(_) => Some("stop?"),
+        Mode::ConfirmRenew(_) => Some("renew?"),
         _ => None,
     };
     if let Some(name) = overlay {
@@ -1783,6 +1800,7 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         row("a  s", "attach in a new terminal window (Ctrl-] detaches)"),
         row("m", "type a message into the lab (Enter sends)"),
         row("ctrl-d  ctrl-k", "stop the lab (asks first)"),
+        row("R", "renew the lab (asks first)"),
         Line::from(""),
         section("Filtering and commands"),
         row("/", "filter by name, role, state, model or parent"),
@@ -1806,6 +1824,18 @@ fn draw_confirm(frame: &mut Frame, area: Rect, name: &str) {
         Line::from(""),
         Line::from(vec![Span::raw("Stop lab "), Span::styled(name.to_owned(), Style::default().fg(AQUA).add_modifier(Modifier::BOLD)), Span::raw("?")]).alignment(Alignment::Center),
         Line::from(Span::styled("<y> stop    <any other key> cancel", Style::default().fg(GRAY))).alignment(Alignment::Center),
+    ];
+    frame.render_widget(Paragraph::new(lines).block(block), rect);
+}
+
+fn draw_confirm_renew(frame: &mut Frame, area: Rect, name: &str) {
+    let rect = centered(area, 52, 5);
+    frame.render_widget(Clear, rect);
+    let block = Block::bordered().border_style(Style::default().fg(GREEN)).title(Span::styled(" Renew ", Style::default().fg(GREEN))).title_alignment(Alignment::Center);
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![Span::raw("Renew lab "), Span::styled(name.to_owned(), Style::default().fg(AQUA).add_modifier(Modifier::BOLD)), Span::raw("?")]).alignment(Alignment::Center),
+        Line::from(Span::styled("<y> renew    <any other key> cancel", Style::default().fg(GRAY))).alignment(Alignment::Center),
     ];
     frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
@@ -2126,6 +2156,24 @@ mod tests {
         assert_eq!(app.mode, Mode::Normal);
         app.key(key('q'));
         assert!(app.quit);
+    }
+
+    #[test]
+    fn renew_key_asks_for_confirmation_and_renders_the_dialog() {
+        let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+        let mut app = App::new(View::Labs, 1000);
+        app.apply(fleet());
+        assert_eq!(app.selected.as_deref(), Some("mgr1"));
+        app.key(key('R'));
+        assert!(matches!(app.mode, Mode::ConfirmRenew(ref n) if n == "mgr1"), "R must ask before renewing, got {:?}", app.mode);
+        let text = render_text(&mut app, 120, 30).unwrap();
+        assert!(text.contains("Renew lab") && text.contains("mgr1") && text.contains("<y> renew"), "{text}");
+        assert!(text.contains("renew?"), "crumb must name the renew overlay in\n{text}");
+        app.key(key('n'));
+        assert_eq!(app.mode, Mode::Normal);
+        app.key(key('?'));
+        let text = render_text(&mut app, 120, 30).unwrap();
+        assert!(text.contains("renew the lab (asks first)"), "help must list R in\n{text}");
     }
 
     #[test]

@@ -124,6 +124,32 @@ test("stop requires the lab name as confirmation", async () => {
   }
 });
 
+test("renew requires the lab name as confirmation and keeps the lab running", async () => {
+  const s = await boot();
+  try {
+    assert.equal((await s.post("/api/labs/scout/renew", {})).status, 400);
+    assert.equal((await s.post("/api/labs/scout/renew", { confirm: "lead" })).status, 400);
+    assert.equal(s.cli.calls.filter((c) => c[0] === "renew").length, 0);
+    assert.equal((await s.post("/api/labs/scout/renew", { confirm: "scout" })).status, 200);
+    assert.deepEqual(s.cli.calls.find((c) => c[0] === "renew"), ["renew", "scout"]);
+    assert.ok(s.cli.sessions.has("scout"), "renew must not stop the lab");
+  } finally {
+    await s.close();
+  }
+});
+
+test("renew failures surface the h1 error text", async () => {
+  const s = await boot();
+  try {
+    s.cli.renew = async () => { throw new Error("renew failed: rearm not confirmed"); };
+    const res = await s.post("/api/labs/scout/renew", { confirm: "scout" });
+    assert.equal(res.status, 500);
+    assert.match((await res.json()).error, /rearm not confirmed/);
+  } finally {
+    await s.close();
+  }
+});
+
 test("keys are allow-listed, names are validated, unknown labs surface as errors", async () => {
   const s = await boot();
   try {

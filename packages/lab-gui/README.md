@@ -37,7 +37,7 @@ This process can type into and stop real terminals, so:
 - every request, including the page, the API and the event stream, needs the per-launch key (as the cookie set from the printed link), so other local users, other websites and anything that merely finds the port get a 401;
 - every state-changing request also needs a second per-launch token that only the served page knows, a JSON body, and a same-origin `Origin` when the browser sends one; the key is visible briefly in the arguments of the `open` command when `--open` is used, so on a shared machine paste the printed link instead;
 - typed text may not contain control characters (so it cannot press keys the key allow-list refuses);
-- stopping needs the lab's name as confirmation in the request, not only a click;
+- stopping and renewing need the lab's name as confirmation in the request, not only a click;
 - lab names are validated and every CLI call is an argument array (no shell); only a short list of keys can be pressed;
 - the page's content-security policy allows only its own files, with no inline script or style, and screen text is inserted as text, never as HTML;
 - no external service is contacted and nothing is sent anywhere. The server only polls the CLI while a page is open (about every 1.5 s) and goes idle 20 s after the last viewer leaves.
@@ -56,7 +56,7 @@ This is a separate mode with its own guards: clients send the saved pairing key 
 
 ```
 server.mjs        entry point: arguments, listen on 127.0.0.1, optional browser open
-lib/cli.mjs       the h1 wrapper (list / status / screen / send / key / stop / foreground)
+lib/cli.mjs       the h1 wrapper (list / status / screen / send / key / stop / renew / foreground)
 lib/monitor.mjs   builds the snapshot: graph, roles, state, models, activity, token and cost counters
 lib/app.mjs       HTTP: static page, JSON API, server-sent events, request guards
 lib/themes.mjs    reads themes/<name>/colors.toml
@@ -65,7 +65,7 @@ public/           index.html, style.css, app.js, theme.js (palette -> colours; s
 test/             offline tests against a fake CLI; nothing here starts a lab
 ```
 
-API (all JSON): `GET /api/labs`, `GET /api/themes`, `GET /api/stream` (server-sent events), `GET /api/labs/:name/screen?tail=N`, `POST /api/labs/:name/{send,key,stop,attach}`.
+API (all JSON): `GET /api/labs`, `GET /api/themes`, `GET /api/stream` (server-sent events), `GET /api/labs/:name/screen?tail=N`, `POST /api/labs/:name/{send,key,stop,renew,attach}`.
 
 ## Tests
 

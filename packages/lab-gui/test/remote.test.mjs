@@ -56,7 +56,7 @@ test("remote mode is read-only until control is on, and never allows attach", as
     assert.equal((await ro.get("/api/info")).status, 200);
     assert.deepEqual(await (await ro.get("/api/info")).json(), { name: "lab-gui", api: 1, remote: true, control: false, attach: false });
     assert.equal((await ro.get("/api/labs/lead/screen")).status, 200);
-    for (const [path, body] of [["/api/labs/lead/send", { text: "hi" }], ["/api/labs/lead/key", { key: "enter" }], ["/api/labs/lead/stop", { confirm: "lead" }]]) {
+    for (const [path, body] of [["/api/labs/lead/send", { text: "hi" }], ["/api/labs/lead/key", { key: "enter" }], ["/api/labs/lead/stop", { confirm: "lead" }], ["/api/labs/lead/renew", { confirm: "lead" }]]) {
       assert.equal((await ro.post(path, body)).status, 403, path);
     }
     assert.deepEqual(ro.cli.calls.filter((c) => c[0] !== "screen"), []);
@@ -66,6 +66,8 @@ test("remote mode is read-only until control is on, and never allows attach", as
   const rw = await boot({ remote: { control: true } });
   try {
     assert.equal((await rw.post("/api/labs/lead/send", { text: "hi" })).status, 200);
+    assert.equal((await rw.post("/api/labs/lead/renew", { confirm: "wrong" })).status, 400, "renew still needs the name");
+    assert.equal((await rw.post("/api/labs/lead/renew", { confirm: "lead" })).status, 200);
     assert.equal((await rw.post("/api/labs/lead/stop", { confirm: "wrong" })).status, 400, "stop still needs the name");
     assert.equal((await rw.post("/api/labs/lead/stop", { confirm: "lead" })).status, 200);
     assert.equal((await rw.post("/api/labs/scout/attach", {})).status, 403);
