@@ -6,6 +6,8 @@
 //! run dir, and not in the `up` output. A provider with no wiring here fails the test
 //! (the match in `setup` panics), never skips silently.
 
+#![cfg(unix)]
+
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 

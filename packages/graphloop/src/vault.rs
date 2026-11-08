@@ -130,7 +130,7 @@ fn kill_process_group(_child: &Child) {}
 /// transient by definition: it appears when the file was written an instant ago and a handle opened for
 /// writing is still alive, for example in a forked child that has not reached `exec` yet. Any other error,
 /// including a missing program, is returned at once.
-fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
+pub(crate) fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
     #[cfg(unix)]
     {
         const ETXTBSY: i32 = 26;

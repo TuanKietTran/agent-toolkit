@@ -15,6 +15,8 @@
 //! the same `Vaults::get` / render path. dotenv/env run no program, so they have no
 //! provider output to quote.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

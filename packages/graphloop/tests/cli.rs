@@ -53,6 +53,7 @@ const RUN: &str = "default-1700000000-ab12";
 const NOW_MS: u64 = 1_700_000_000_000;
 
 /// Write the fake `h1` script into `dir`; returns (bin, argv log).
+#[cfg(unix)]
 fn make_fake(dir: &Path, list_json: &str, fail_open: &str, fail_stop: &str) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     let fixture = dir.join("list.json");

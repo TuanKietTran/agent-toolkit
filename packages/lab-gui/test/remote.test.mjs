@@ -113,7 +113,10 @@ test("the remote key file is created private, reused, and rotated on request", a
     const file = join(dir, "sub", "remote-key");
     const first = await loadRemoteKey(file);
     assert.match(first, /^[0-9a-f]{48}$/);
-    assert.equal((await stat(file)).mode & 0o777, 0o600);
+    // Windows does not expose POSIX file modes through fs.stat; check the private mode where supported.
+    if (process.platform !== "win32") {
+      assert.equal((await stat(file)).mode & 0o777, 0o600);
+    }
     assert.equal(await loadRemoteKey(file), first);
     const rotated = await loadRemoteKey(file, true);
     assert.notEqual(rotated, first);

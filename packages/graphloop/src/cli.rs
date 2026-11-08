@@ -188,7 +188,9 @@ impl ProcessRunner {
         ProcessRunner { bin }
     }
     fn run_capture(&self, args: &[&str]) -> Result<String, String> {
-        let out = std::process::Command::new(&self.bin).args(args).output().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
+        let mut cmd = std::process::Command::new(&self.bin);
+        cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        let out = crate::vault::spawn_retrying(&mut cmd).map_err(|e| format!("run {}: {e}", self.bin.display()))?.wait_with_output().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
         if out.status.success() { Ok(String::from_utf8_lossy(&out.stdout).into_owned()) } else { Err(format!("{} {} failed ({})", self.bin.display(), args.join(" "), out.status)) }
     }
 }
@@ -198,7 +200,9 @@ impl LabRunner for ProcessRunner {
     fn open(&self, argv: &[String], env: &[(String, String)], log_path: &Path) -> Result<(), String> {
         let file = std::fs::File::create(log_path).map_err(|e| format!("create {}: {e}", log_path.display()))?;
         let file_err = file.try_clone().map_err(|e| format!("clone {}: {e}", log_path.display()))?;
-        let status = std::process::Command::new(&self.bin).args(argv).envs(env.iter().cloned()).stdout(std::process::Stdio::from(file)).stderr(std::process::Stdio::from(file_err)).status().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
+        let mut cmd = std::process::Command::new(&self.bin);
+        cmd.args(argv).envs(env.iter().cloned()).stdout(std::process::Stdio::from(file)).stderr(std::process::Stdio::from(file_err));
+        let status = crate::vault::spawn_retrying(&mut cmd).map_err(|e| format!("run {}: {e}", self.bin.display()))?.wait().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
         if status.success() { Ok(()) } else { Err(format!("h1 open failed ({status}); see {}", log_path.display())) }
     }
     fn stop(&self, name: &str) -> Result<(), String> { self.run_capture(&["stop", "-n", name]).map(|_| ()) }
