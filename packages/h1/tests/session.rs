@@ -569,3 +569,209 @@ fn renew_defaults_new_cmd_and_fails_clearly_for_missing_or_unready_sessions() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// Fake agent that answers `/new` with `got:/new`, appends every later line it
+/// receives to `record` (one line per submission) and prints `ack-line` for each,
+/// so a correct rearm is confirmed. Returns the program argv running the script.
+#[cfg(unix)]
+fn renew_recording_agent(dir: &Path, record: &Path) -> Vec<String> {
+    let script = dir.join("record-agent.sh");
+    fs::write(
+        &script,
+        format!(
+            "printf ready; while IFS= read -r line; do if [ \"$line\" = /new ]; then echo; echo 'got:/new'; continue; fi; echo \"$line\" >> '{}'; echo; echo 'ack-line'; done",
+            record.display()
+        ),
+    )
+    .unwrap();
+    vec!["sh".to_owned(), script.to_str().unwrap().to_owned()]
+}
+
+#[cfg(windows)]
+fn renew_recording_agent(dir: &Path, record: &Path) -> Vec<String> {
+    let script = dir.join("record-agent.ps1");
+    fs::write(
+        &script,
+        format!(
+            "[Console]::Write('ready'); while (($l = [Console]::ReadLine()) -ne $null) {{ if ($l -eq '/new') {{ [Console]::WriteLine(''); [Console]::WriteLine('got:/new'); continue }}; Add-Content -Path '{}' -Value $l; [Console]::WriteLine(''); [Console]::WriteLine('ack-line') }}",
+            record.display()
+        ),
+    )
+    .unwrap();
+    vec![
+        "powershell".to_owned(),
+        "-NoProfile".to_owned(),
+        "-File".to_owned(),
+        script.to_str().unwrap().to_owned(),
+    ]
+}
+
+/// Fake agent that answers `/new` with `got:/new` but never reacts to the resume
+/// prompt: terminal echo is off and it prints nothing for other lines, so the
+/// screen never changes after the prompt and rearm stays unconfirmed.
+#[cfg(unix)]
+fn renew_silent_agent(dir: &Path) -> Vec<String> {
+    let script = dir.join("silent-agent.sh");
+    fs::write(
+        &script,
+        "printf ready; stty -echo; while IFS= read -r line; do if [ \"$line\" = /new ]; then echo; echo 'got:/new'; fi; done",
+    )
+    .unwrap();
+    vec!["sh".to_owned(), script.to_str().unwrap().to_owned()]
+}
+
+#[cfg(windows)]
+fn renew_silent_agent(dir: &Path) -> Vec<String> {
+    let script = dir.join("silent-agent.ps1");
+    fs::write(
+        &script,
+        "[Console]::Write('ready'); while (($l = [Console]::ReadLine()) -ne $null) { if ($l -eq '/new') { [Console]::WriteLine(''); [Console]::WriteLine('got:/new') } }",
+    )
+    .unwrap();
+    vec![
+        "powershell".to_owned(),
+        "-NoProfile".to_owned(),
+        "-File".to_owned(),
+        script.to_str().unwrap().to_owned(),
+    ]
+}
+
+#[test]
+fn renew_rearm_is_one_single_line_submission_after_new() {
+    let mut lab = Lab::new();
+    let dir = lab.directory.path().to_path_buf();
+    let log = dir.join("resume.log");
+    fs::write(
+        &log,
+        "old-1\nold-2\nkeep-1\nkeep-2\nkeep-3\nkeep-4\nkeep-5\n",
+    )
+    .unwrap();
+    let brief = dir.join("brief.txt");
+    fs::write(&brief, "brief-content-xyz\n").unwrap();
+    let record = dir.join("submissions.txt");
+    let program = renew_recording_agent(&dir, &record);
+    let program_refs: Vec<&str> = program.iter().map(String::as_str).collect();
+    lab.host(
+        "r",
+        &[
+            "--brief",
+            brief.to_str().unwrap(),
+            "--resume-log",
+            log.to_str().unwrap(),
+            "--new-cmd",
+            "/new",
+            "--ready-regex",
+            "got:/new",
+        ],
+        &program_refs,
+    );
+    let out = lab.cli(&["renew", "-n", "r", "-t", "30"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    wait_until(|| {
+        fs::read_to_string(&record)
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    });
+    // Give any extra (buggy) submissions a moment to land, then count.
+    thread::sleep(Duration::from_millis(500));
+    let recorded = fs::read_to_string(&record).unwrap();
+    let lines: Vec<&str> = recorded.lines().collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "exactly one submission after /new: {recorded:?}"
+    );
+    assert_eq!(
+        lines[0],
+        "You were renewed. Resume from your last checkpoint: keep-1 keep-2 keep-3 keep-4 keep-5 brief-content-xyz",
+        "header, log tail and brief together on the single submitted line"
+    );
+}
+
+#[test]
+fn renew_unconfirmed_rearm_exits_1() {
+    let mut lab = Lab::new();
+    let dir = lab.directory.path().to_path_buf();
+    let program = renew_silent_agent(&dir);
+    let program_refs: Vec<&str> = program.iter().map(String::as_str).collect();
+    lab.host("s", &["--ready-regex", "got:/new"], &program_refs);
+    let out = lab.cli(&["renew", "-n", "s", "-t", "5"]);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "unconfirmed rearm must exit 1: {} {}",
+        text(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(
+        stderr.lines().filter(|l| !l.trim().is_empty()).count(),
+        1,
+        "one-line reason: {stderr}"
+    );
+    assert!(stderr.contains("did not confirm rearm"), "{stderr}");
+}
+
+#[test]
+fn renew_long_brief_becomes_pointer_line() {
+    let mut lab = Lab::new();
+    let dir = lab.directory.path().to_path_buf();
+    let brief = dir.join("big-brief.txt");
+    let mut body = String::from("UNIQUE-LONG-BRIEF-MARKER");
+    body.push_str(&" x".repeat(1100));
+    fs::write(&brief, &body).unwrap();
+    assert!(body.trim().chars().count() > 2000);
+    let record = dir.join("submissions.txt");
+    let program = renew_recording_agent(&dir, &record);
+    let program_refs: Vec<&str> = program.iter().map(String::as_str).collect();
+    lab.host(
+        "p",
+        &[
+            "--brief",
+            brief.to_str().unwrap(),
+            "--new-cmd",
+            "/new",
+            "--ready-regex",
+            "got:/new",
+        ],
+        &program_refs,
+    );
+    let out = lab.cli(&["renew", "-n", "p", "-t", "30"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    wait_until(|| {
+        fs::read_to_string(&record)
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    });
+    thread::sleep(Duration::from_millis(500));
+    let recorded = fs::read_to_string(&record).unwrap();
+    let lines: Vec<&str> = recorded.lines().collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "exactly one submission after /new: {recorded:?}"
+    );
+    let pointer = format!("read {} and continue", brief.to_str().unwrap());
+    assert!(
+        lines[0].contains(&pointer),
+        "single line carries the pointer {pointer:?}: {:?}",
+        lines[0]
+    );
+    assert!(
+        !lines[0].contains("UNIQUE-LONG-BRIEF-MARKER"),
+        "brief body must not be inlined: {:?}",
+        lines[0]
+    );
+    assert_eq!(
+        lines[0],
+        format!("You were renewed. Resume from your last checkpoint: {pointer}")
+    );
+}

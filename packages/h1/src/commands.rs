@@ -302,10 +302,13 @@ pub(crate) fn ask(args: AskArgs) -> Result<i32> {
 
 /// `h1 renew -n NAME`: renew a live named session without losing its context pointers.
 /// Sends the entry's `new_cmd` (default `/new`) plus Enter, waits for `ready_regex` with
-/// 2s idle bounded by `--timeout`, then paced-types (50/150/800) the resume prompt —
-/// header, last 5 lines of `resume_log`, brief file content — plus Enter. Rearm is
-/// confirmed when the screen differs from the pre-rearm baseline; one extra Enter is
-/// tried before failing with a one-line reason and exit 1.
+/// 2s idle bounded by `--timeout`, then paced-types (50/150/800) the resume prompt plus
+/// exactly ONE Enter. The prompt is ONE single line: the header, the last 5 lines of
+/// `resume_log` and the brief piece, newline-collapsed and joined with single spaces.
+/// A brief whose trimmed content exceeds 2000 chars is not inlined; its piece is
+/// `read <brief path> and continue` instead. Rearm is confirmed when the screen differs
+/// from the pre-rearm baseline; if it does not, renew fails with a one-line reason and
+/// exit 1, with no second Enter sent.
 pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
     let fail = |reason: String| -> Result<i32> {
         eprintln!("renew failed: {reason}");
@@ -360,13 +363,32 @@ pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
             ));
         }
     };
+    // The resume prompt is ONE single line: the agent reads line-by-line, so any
+    // newline in the prompt would split it into separate submissions. Collapse every
+    // CR/LF run in each piece to a single space and join the pieces with one space.
+    let collapse = |text: &str| -> String {
+        let mut out = String::with_capacity(text.len());
+        let mut in_newlines = false;
+        for ch in text.chars() {
+            if ch == '\r' || ch == '\n' {
+                if !in_newlines {
+                    out.push(' ');
+                    in_newlines = true;
+                }
+            } else {
+                out.push(ch);
+                in_newlines = false;
+            }
+        }
+        out
+    };
     let mut parts = vec!["You were renewed. Resume from your last checkpoint:".to_owned()];
     if let Some(log) = entry.resume_log.as_deref().filter(|s| !s.trim().is_empty())
         && let Ok(content) = fs::read_to_string(log)
     {
         let lines: Vec<&str> = content.lines().collect();
         let tail = &lines[lines.len().saturating_sub(5)..];
-        parts.extend(tail.iter().map(|line| line.to_string()));
+        parts.extend(tail.iter().map(|line| collapse(line)));
     }
     let brief_path = args
         .brief
@@ -376,12 +398,15 @@ pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
     if let Some(brief) = brief_path
         && let Ok(content) = fs::read_to_string(brief)
     {
-        let trimmed = content.trim_end();
-        if !trimmed.is_empty() {
-            parts.push(trimmed.to_owned());
+        let trimmed = content.trim();
+        if trimmed.chars().count() > 2000 {
+            parts.push(format!("read {brief} and continue"));
+        } else if !trimmed.is_empty() {
+            parts.push(collapse(trimmed));
         }
     }
-    let prompt = parts.join("\n");
+    let prompt = parts.join(" ");
+    debug_assert!(!prompt.contains('\n') && !prompt.contains('\r'));
     let typing = Typing {
         chunk: 50,
         pause: Duration::from_millis(150),
@@ -410,13 +435,10 @@ pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
         }
     };
     if !confirmed(&socket, &baseline, timeout) {
-        let _ = send_bytes(&socket, vec![0x0d]);
-        if !confirmed(&socket, &baseline, timeout) {
-            return fail(format!(
-                "session {} did not confirm rearm within {}s",
-                args.name, args.timeout
-            ));
-        }
+        return fail(format!(
+            "session {} did not confirm rearm within {}s",
+            args.name, args.timeout
+        ));
     }
     println!("renewed {} (rearm confirmed)", args.name);
     Ok(0)
