@@ -16,7 +16,7 @@ function frame(v) { const b = Buffer.from(JSON.stringify(v)); const h = Buffer.a
 const delay = ms => new Promise(r => setTimeout(r, ms));
 async function eventually(fn) { for (let i = 0; i < 250; i++) { if (fn()) return; await delay(20); } throw new Error("Timed out waiting for subprocess protocol event"); }
 
-test("stdio MCP child calls the real broker/native host through a protocol mock extension", async t => {
+test("stdio MCP child calls the real broker/native host through a protocol mock extension", { skip: process.env.GITHUB_ACTIONS === "true" && process.platform === "win32" ? "needs a real interactive Windows session; run natively" : false }, async t => {
   const windows = process.platform === "win32";
   const socketPath = windows ? defaultSocketPath() : join(tmpdir(), `pi-mcp-${randomUUID()}.sock`);
   const configPath = join(tmpdir(), `pi-mcp-${randomUUID()}.json`);

@@ -87,7 +87,7 @@ class McpProcessClient {
   notify(method, params = {}) { this.child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`); }
 }
 
-test("production broker relay + actual helper service worker + bridge client and MCP subprocess", async (t) => {
+test("production broker relay + actual helper service worker + bridge client and MCP subprocess", { skip: process.env.GITHUB_ACTIONS === "true" && process.platform === "win32" ? "needs a real interactive Windows session; run natively" : false }, async (t) => {
   const socketPath = process.platform === "win32" ? `\\\\.\\pipe\\pi-browser-bridge-${randomUUID().replace(/-/g, "").slice(0, 32)}` : join(tmpdir(), `pi-bridge-e2e-${randomUUID()}.sock`);
   const privateDir = await mkdtemp(join(tmpdir(), `pi-bridge-e2e-${randomUUID()}-`));
   if (process.platform !== "win32") await chmod(privateDir, 0o700);

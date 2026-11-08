@@ -15,11 +15,11 @@ function verifyWindowsAcl(path) {
   ].join(";");
   try {
     const output = execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", script], {
-      encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "ignore"],
-      env: { ...process.env, PI_BRIDGE_ACL_TARGET: path },
+      encoding: "utf8", windowsHide: true, stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, PI_BRIDGE_ACL_TARGET: path, PSModulePath: join(process.env.SystemRoot || process.env.WINDIR || "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "Modules") },
     });
     if (output !== "OK") throw new Error("Windows ACL verification did not complete");
-  } catch { throw new Error("Runtime config and parent directory must have current-user-only ACL (SYSTEM/Administrators may retain access)"); }
+  } catch (error) { throw new Error(`Runtime config and parent directory must have current-user-only ACL (SYSTEM/Administrators may retain access): ${String(error?.stderr ?? "").trim().split("\n")[0].slice(0, 160)}`); }
 }
 
 export async function verifyConfigProtection(path) {

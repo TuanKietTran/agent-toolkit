@@ -181,7 +181,7 @@ for (const mode of ['codex','opencode'] as const) {
   for (const [name, prompt, pattern] of [
     ['failure', 'error', /run failed/], ['early exit', 'exit', mode === 'codex' ? /Codex stdout ended before completion/ : /stdout ended before session completion/],
     ['no terminal event', 'no-terminal', mode === 'codex' ? /Codex stdout ended before completion/ : /stdout ended before session completion/],
-    ['open stdout without terminal event', 'incomplete', /stdout ended before session completion/],
+    ['open stdout without terminal event', 'incomplete', mode === 'codex' ? /Codex stdout ended before completion/ : /stdout ended before session completion/],
     ['nonzero exit', 'nonzero', /exited unsuccessfully/]
   ] as const) test(`${mode} ${name} is not success`, { timeout: 10000 }, async t => {
     if (process.platform === 'win32' && prompt === 'incomplete') { t.skip('Windows Node child stdio does not expose live-process stdout EOF reliably'); return; }
