@@ -468,6 +468,133 @@ fn renew_with(
     Ok(0)
 }
 
+/// `h1 recover -n NAME` / `h1 recover --all`: reopen a session whose host is gone but whose
+/// registry record remains, then re-arm it with the renew machinery. Environment values are
+/// never stored: the record holds names only and each value comes from the current
+/// environment; a missing name fails the recovery listing the names only. A session whose
+/// host still answers is refused, never touched.
+pub(crate) fn recover(args: RecoverCmdArgs) -> Result<i32> {
+    let entries = session::entries();
+    let targets: Vec<session::Entry> = if args.all {
+        entries
+    } else {
+        let name = args.name.as_deref().unwrap_or_default();
+        match entries.into_iter().find(|entry| entry.name == name) {
+            Some(entry) => vec![entry],
+            None => {
+                eprintln!("recover failed: no session record named {name}");
+                return Ok(1);
+            }
+        }
+    };
+    if targets.is_empty() {
+        eprintln!("recover failed: no session records to recover");
+        return Ok(1);
+    }
+    let mut code = 0;
+    for entry in &targets {
+        if let Err(reason) = recover_one(entry, args.timeout) {
+            eprintln!("recover failed: {reason}");
+            code = 1;
+        }
+    }
+    Ok(code)
+}
+
+fn recover_one(entry: &session::Entry, timeout_secs: u64) -> Result<(), String> {
+    let name = &entry.name;
+    let socket = PathBuf::from(&entry.socket);
+    if request_with_timeout(
+        &socket,
+        json!({ "op": "screen" }),
+        Duration::from_millis(1500),
+    )
+    .is_ok()
+    {
+        return Err(format!("session {name} is already running"));
+    }
+    // A killed host leaves its socket file behind and a new host cannot bind over it;
+    // the liveness check above proved nothing is listening, so the file is stale.
+    let _ = std::fs::remove_file(&socket);
+    let missing: Vec<&str> = entry
+        .env_names
+        .iter()
+        .filter(|var| env::var_os(var.as_str()).is_none())
+        .map(String::as_str)
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "session {name} needs environment variable(s) {} which are not set in the current environment (names only: values are never stored)",
+            missing.join(", ")
+        ));
+    }
+    let exe = env::current_exe()
+        .map_err(|error| format!("failed to resolve h1 executable: {error}"))?;
+    let mut argv: Vec<OsString> = vec![
+        "open".into(),
+        "--detached".into(),
+        "-n".into(),
+        name.clone().into(),
+        "-C".into(),
+        entry.cols.to_string().into(),
+        "-R".into(),
+        entry.rows.to_string().into(),
+        "--timeout".into(),
+        timeout_secs.to_string().into(),
+    ];
+    if let Some(title) = &entry.title {
+        argv.extend(["--title".into(), title.clone().into()]);
+    }
+    if let Some(cwd) = &entry.cwd {
+        argv.extend(["--cwd".into(), cwd.clone().into()]);
+    }
+    for var in &entry.env_names {
+        let value = env::var(var).map_err(|_| {
+            format!("session {name} needs environment variable {var} which is not valid unicode in the current environment")
+        })?;
+        argv.extend(["--env".into(), format!("{var}={value}").into()]);
+    }
+    for (flag, value) in [
+        ("--role", &entry.role),
+        ("--parent", &entry.parent),
+        ("--model", &entry.model),
+        ("--brief", &entry.brief),
+        ("--resume-log", &entry.resume_log),
+        ("--new-cmd", &entry.new_cmd),
+        ("--ready-regex", &entry.ready_regex),
+    ] {
+        if let Some(value) = value {
+            argv.extend([flag.into(), value.clone().into()]);
+        }
+    }
+    if entry.auto_rearm {
+        argv.push("--auto-rearm".into());
+    }
+    argv.push("--".into());
+    argv.extend(entry.command.iter().map(|word| word.clone().into()));
+    let output = Command::new(&exe)
+        .args(&argv)
+        .output()
+        .map_err(|error| format!("could not reopen session {name}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "could not reopen session {name}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    if entry.brief.is_some() || entry.resume_log.is_some() {
+        let code = renew_with(name, None, timeout_secs, true, false)
+            .map_err(|error| format!("session {name} reopened but its re-arm failed: {error:#}"))?;
+        if code != 0 {
+            return Err(format!(
+                "session {name} reopened but did not confirm re-arm"
+            ));
+        }
+    }
+    println!("recovered {name}");
+    Ok(())
+}
+
 pub(crate) fn wait(args: WaitArgs) -> Result<i32> {
     let socket = args.connection.path()?;
     let spec = WaitSpec {

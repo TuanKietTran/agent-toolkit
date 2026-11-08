@@ -52,6 +52,7 @@ enum LinkState {
 struct Inputs {
     registry_dir: PathBuf,
     registry_exists: bool,
+    dead_sessions: Vec<String>,
     old_registry_dir: PathBuf,
     old_registry_exists: bool,
     old_sessions: usize,
@@ -88,6 +89,11 @@ fn assess(inputs: &Inputs) -> Report {
             "not created yet"
         }
     ));
+    for name in &inputs.dead_sessions {
+        lines.push(format!(
+            "session {name} has a record but no host: h1 recover -n {name} would fix it"
+        ));
+    }
     if inputs.old_temp_sessions > 0 {
         attention = true;
         lines.push(format!(
@@ -223,6 +229,23 @@ fn link_state(path: &Path) -> LinkState {
     } else {
         LinkState::Absent
     }
+}
+
+/// Names of sessions with a registry record in `dir` whose host does not answer on its
+/// socket: `h1 recover` would fix them. Names only, never values from the record.
+fn dead_session_names(dir: &Path) -> Vec<String> {
+    crate::session::entries_in(dir)
+        .into_iter()
+        .filter(|entry| {
+            crate::commands::request_with_timeout(
+                Path::new(&entry.socket),
+                serde_json::json!({ "op": "screen" }),
+                Duration::from_millis(300),
+            )
+            .is_err()
+        })
+        .map(|entry| entry.name)
+        .collect()
 }
 
 fn count_registry_sessions(dir: &Path) -> usize {
@@ -468,6 +491,7 @@ fn diagnose_inner(
     let inputs = Inputs {
         registry_dir: registry_dir.to_path_buf(),
         registry_exists: registry_dir.is_dir(),
+        dead_sessions: dead_session_names(registry_dir),
         old_registry_exists: old_registry_dir.is_dir(),
         old_sessions: count_registry_sessions(&old_registry_dir),
         old_registry_dir,

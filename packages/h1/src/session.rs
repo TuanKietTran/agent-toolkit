@@ -57,6 +57,10 @@ pub struct Entry {
     /// The host watches typed input and re-arms by itself when `new_cmd` is submitted. Off by default.
     #[serde(default)]
     pub auto_rearm: bool,
+    /// Environment variable NAMES the session was opened with. Values are never stored:
+    /// `recover` takes each value from the current environment instead.
+    #[serde(default)]
+    pub env_names: Vec<String>,
 }
 
 impl Entry {
@@ -174,7 +178,7 @@ pub fn entries() -> Vec<Entry> {
     entries_in(&session_dir())
 }
 
-fn entries_in(directory: &Path) -> Vec<Entry> {
+pub(crate) fn entries_in(directory: &Path) -> Vec<Entry> {
     let mut found: Vec<Entry> = fs::read_dir(directory)
         .into_iter()
         .flatten()
@@ -222,6 +226,7 @@ mod tests {
             new_cmd: None,
             ready_regex: None,
             auto_rearm: false,
+            env_names: Vec::new(),
         }
     }
 

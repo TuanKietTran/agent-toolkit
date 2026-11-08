@@ -107,6 +107,10 @@ With `--auto-rearm`, you type `/new` and Enter in the lab yourself (attached, or
 h1 open -n worker --detached --auto-rearm --brief /abs/brief.md --resume-log /abs/status.log -- pi
 ```
 
+### Recover
+
+If the host itself dies — a crash, a kill, a reboot — the registry record remains, and `h1 recover -n NAME` reopens the lab from it: the recorded command, working directory, size, title, role, parent and model, plus the stored brief, resume log, new-session command and ready pattern. `h1 recover --all` recovers every record whose host is gone. The record stores the **names** of the `--env` variables the lab was opened with, never their values: each value is taken from the current environment, and if a recorded name is not set there, recovery fails listing the missing names only. After reopening, recover runs the same re-arm as `renew` when a brief or resume log is stored, and prints `recovered NAME`. A lab whose host still answers is refused and never touched. `h1 doctor` lists sessions that have a record but no host and says `h1 recover` would fix them.
+
 ## Platforms
 
 Linux, macOS and Windows (native, through ConPTY) are supported. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds and tests all three; see [`specs/006-cross-platform.md`](specs/006-cross-platform.md) for what has been verified on each.

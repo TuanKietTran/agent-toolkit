@@ -817,6 +817,129 @@ fn renew_unconfirmed_rearm_exits_1() {
     assert!(stderr.contains("did not confirm rearm"), "{stderr}");
 }
 
+fn kill_only_host(lab: &mut Lab) {
+    lab.hosts[0].kill().unwrap();
+    lab.hosts[0].wait().unwrap();
+    thread::sleep(Duration::from_millis(200));
+}
+
+#[test]
+fn recover_killed_fake_agent_resends_brief() {
+    let mut lab = Lab::new();
+    let dir = lab.directory.path().to_path_buf();
+    let log = dir.join("resume.log");
+    fs::write(&log, "old-1\nold-2\nkeep-1\nkeep-2\nkeep-3\nkeep-4\nkeep-5\n").unwrap();
+    let brief = dir.join("brief.txt");
+    fs::write(&brief, "brief-content-xyz\n").unwrap();
+    let record = dir.join("submissions.txt");
+    let program = renew_recording_agent(&dir, &record);
+    let program_refs: Vec<&str> = program.iter().map(String::as_str).collect();
+    lab.host(
+        "k",
+        &[
+            "--brief",
+            brief.to_str().unwrap(),
+            "--resume-log",
+            log.to_str().unwrap(),
+            "--new-cmd",
+            "/new",
+            "--ready-regex",
+            "got:/new",
+        ],
+        &program_refs,
+    );
+    kill_only_host(&mut lab);
+    let out = lab.cli(&["recover", "-n", "k", "-t", "30"]);
+    assert!(
+        out.status.success(),
+        "recover: {} {}",
+        text(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    wait_until(|| {
+        fs::read_to_string(&record)
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    });
+    thread::sleep(Duration::from_millis(500));
+    let recorded = fs::read_to_string(&record).unwrap();
+    let lines: Vec<&str> = recorded.lines().collect();
+    assert_eq!(lines.len(), 1, "brief re-sent exactly once: {recorded:?}");
+    assert_eq!(
+        lines[0],
+        "You were renewed. Resume from your last checkpoint: keep-1 keep-2 keep-3 keep-4 keep-5 brief-content-xyz"
+    );
+    assert!(lab.cli(&["status", "-n", "k"]).status.success());
+    assert!(lab.cli(&["stop", "-n", "k"]).status.success());
+}
+
+#[test]
+fn recover_missing_env_name_reports_name_only() {
+    let mut lab = Lab::new();
+    lab.host(
+        "m",
+        &["--env", "R42_ONLY_NAME=original-secret-value"],
+        os::TWO_LINES,
+    );
+    kill_only_host(&mut lab);
+    let mut cmd = lab.command(&["recover", "-n", "m", "-t", "5"]);
+    cmd.env_remove("R42_ONLY_NAME");
+    let out = cmd.output().unwrap();
+    assert!(!out.status.success(), "missing env name must fail recover");
+    let combined = format!(
+        "{} {}",
+        text(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("R42_ONLY_NAME"),
+        "missing name reported by name: {combined}"
+    );
+    assert!(
+        !combined.contains("original-secret-value"),
+        "env value must never be reported: {combined}"
+    );
+    assert!(
+        !lab.cli(&["status", "-n", "m"]).status.success(),
+        "session must not be reopened"
+    );
+}
+
+#[test]
+fn recover_live_session_refused() {
+    let mut lab = Lab::new();
+    lab.host("live", &[], os::TWO_LINES);
+    let out = lab.cli(&["recover", "-n", "live", "-t", "5"]);
+    assert!(!out.status.success(), "live session must be refused");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("running"), "refusal says running: {stderr}");
+    assert!(
+        lab.cli(&["status", "-n", "live"]).status.success(),
+        "live session untouched"
+    );
+}
+
+#[test]
+fn doctor_lists_record_but_no_host() {
+    let mut lab = Lab::new();
+    lab.host("deadlab", &[], os::TWO_LINES);
+    kill_only_host(&mut lab);
+    let out = lab.cli(&["doctor"]);
+    let combined = format!(
+        "{} {}",
+        text(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        combined.contains("deadlab"),
+        "doctor lists the dead session: {combined}"
+    );
+    assert!(
+        combined.contains("recover"),
+        "doctor says h1 recover would fix it: {combined}"
+    );
+}
+
 #[test]
 fn renew_long_brief_becomes_pointer_line() {
     let mut lab = Lab::new();

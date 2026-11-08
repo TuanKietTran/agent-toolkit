@@ -93,6 +93,8 @@ enum Commands {
     Wait(WaitArgs),
     /// Renew a named session in place: send its new_cmd, wait for its ready pattern, then re-arm it with the last lines of its resume log and its brief.
     Renew(RenewCmdArgs),
+    /// Recover a session whose host is gone but whose registry record remains: reopen it with its recorded command, cwd and settings, then re-arm it like renew.
+    Recover(RecoverCmdArgs),
     /// Print an event whenever a session starts asking, stalls, or ends.
     Watch(WatchArgs),
     /// Start a named agent lab.
@@ -464,6 +466,19 @@ struct RenewCmdArgs {
 }
 
 #[derive(Debug, Args)]
+struct RecoverCmdArgs {
+    /// Session name given to `host --name` or `open --name`.
+    #[arg(long, short = 'n', value_name = "NAME", required_unless_present = "all")]
+    name: Option<String>,
+    /// Recover every session that has a record but no host.
+    #[arg(long, conflicts_with = "name")]
+    all: bool,
+    /// Give up each wait after this many seconds.
+    #[arg(long, short = 't', default_value_t = 30, value_name = "SECONDS")]
+    timeout: u64,
+}
+
+#[derive(Debug, Args)]
 struct WatchArgs {
     #[command(flatten)]
     connection: SocketArgs,
@@ -617,6 +632,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
         Commands::Close(args) => commander::close(args),
         Commands::Resume(args) => commander::resume(args),
         Commands::Renew(args) => commands::renew(args),
+        Commands::Recover(args) => commands::recover(args),
     }
 }
 
@@ -878,6 +894,13 @@ fn host(mut args: HostArgs) -> Result<i32> {
             new_cmd: args.renew.new_cmd.clone(),
             ready_regex: args.renew.ready_regex.clone(),
             auto_rearm: args.renew.auto_rearm,
+            env_names: args
+                .terminal
+                .env
+                .iter()
+                .map(|(name, _value)| name.clone())
+                .filter(|name| name != "H1_SELF")
+                .collect(),
         })?),
         None => None,
     };
