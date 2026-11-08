@@ -43,6 +43,84 @@ pub(crate) struct HostShared {
     pub info: HostInfo,
     pub started: Instant,
     pub handlers: AtomicUsize,
+    /// Present only for labs opened with `--auto-rearm` and a name.
+    pub watch: Option<InputWatch>,
+}
+
+/// Watches what is typed into a hosted program (`h1 open --auto-rearm`) and reports when a submitted
+/// line is exactly the new-session command. Text that merely contains the command does not match; the
+/// line buffer follows backspace and kill-line, and ignores escape sequences (arrows, bracketed paste).
+pub(crate) struct InputWatch {
+    new_cmd: String,
+    line: Mutex<Vec<u8>>,
+    busy: AtomicBool,
+}
+
+impl InputWatch {
+    pub fn new(new_cmd: &str) -> Self {
+        InputWatch {
+            new_cmd: new_cmd.trim().to_owned(),
+            line: Mutex::new(Vec::new()),
+            busy: AtomicBool::new(false),
+        }
+    }
+
+    /// Feeds typed bytes. True when a submitted line equals the command and no re-arm is already running.
+    pub fn feed(&self, data: &[u8]) -> bool {
+        let mut line = self.line.lock().unwrap();
+        let mut hit = false;
+        let mut i = 0;
+        while i < data.len() {
+            match data[i] {
+                0x1b => {
+                    i += 1;
+                    if data.get(i) == Some(&b'[') {
+                        i += 1;
+                        while i < data.len() && !(0x40..=0x7e).contains(&data[i]) {
+                            i += 1;
+                        }
+                    }
+                }
+                b'\r' | b'\n' => {
+                    if !line.is_empty() && line.as_slice() == self.new_cmd.as_bytes() {
+                        hit = true;
+                    }
+                    line.clear();
+                }
+                0x7f | 0x08 => {
+                    line.pop();
+                }
+                0x03 | 0x15 => line.clear(),
+                0x20..=0x7e | 0x80..=0xff => line.push(data[i]),
+                _ => {}
+            }
+            i += 1;
+        }
+        hit && !self.busy.swap(true, Ordering::SeqCst)
+    }
+
+    pub fn done(&self) {
+        self.busy.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Called with every chunk written into the hosted program by a person or by `h1 send`.
+pub(crate) fn watch_input(shared: &Arc<HostShared>, data: &[u8]) {
+    let Some(watch) = &shared.watch else { return };
+    if !watch.feed(data) {
+        return;
+    }
+    let Some(name) = shared.info.name.clone() else {
+        watch.done();
+        return;
+    };
+    let shared = shared.clone();
+    std::thread::spawn(move || {
+        let _ = crate::commands::auto_rearm(&name);
+        if let Some(watch) = &shared.watch {
+            watch.done();
+        }
+    });
 }
 
 impl HostShared {
@@ -138,7 +216,7 @@ fn dispatch(request: &Value, shared: &Arc<HostShared>) -> Value {
     }
 }
 
-fn op_send(request: &Value, shared: &HostShared) -> Value {
+fn op_send(request: &Value, shared: &Arc<HostShared>) -> Value {
     let data: Vec<u8> = match request.get("data").cloned().map(serde_json::from_value) {
         Some(Ok(data)) => data,
         Some(Err(error)) => return failure(format!("invalid request: {error}")),
@@ -153,6 +231,9 @@ fn op_send(request: &Value, shared: &HostShared) -> Value {
         }
         Ok(())
     })();
+    if result.is_ok() && request.get("watch").and_then(Value::as_bool) != Some(false) {
+        watch_input(shared, &data);
+    }
     match result {
         Ok(()) => ok(),
         Err(error) => failure(error.to_string()),

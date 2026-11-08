@@ -692,6 +692,107 @@ fn renew_rearm_is_one_single_line_submission_after_new() {
     );
 }
 
+/// Opens a recording lab with `extra` flags and a brief and resume log; returns (record path, lab).
+fn autorearm_lab(extra: &[&str]) -> (Lab, std::path::PathBuf) {
+    let lab = Lab::new();
+    let dir = lab.directory.path().to_path_buf();
+    let log = dir.join("resume.log");
+    fs::write(&log, "keep-1\nkeep-2\n").unwrap();
+    let brief = dir.join("brief.txt");
+    fs::write(&brief, "brief-content-xyz\n").unwrap();
+    let record = dir.join("submissions.txt");
+    let program = renew_recording_agent(&dir, &record);
+    let program_refs: Vec<&str> = program.iter().map(String::as_str).collect();
+    let mut flags = vec![
+        "--brief",
+        brief.to_str().unwrap(),
+        "--resume-log",
+        log.to_str().unwrap(),
+        "--new-cmd",
+        "/new",
+        "--ready-regex",
+        "got:/new",
+    ];
+    flags.extend_from_slice(extra);
+    let mut lab = lab;
+    lab.host("r", &flags, &program_refs);
+    (lab, record)
+}
+
+#[test]
+fn autorearm_submitted_new_cmd_triggers_exactly_one_rearm() {
+    let (lab, record) = autorearm_lab(&["--auto-rearm"]);
+    let out = lab.cli(&["send", "-n", "r", "/new", "-e"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    wait_until(|| {
+        fs::read_to_string(&record)
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    });
+    thread::sleep(Duration::from_millis(1500));
+    let recorded = fs::read_to_string(&record).unwrap();
+    let lines: Vec<&str> = recorded.lines().collect();
+    assert_eq!(
+        lines.len(),
+        1,
+        "exactly one re-arm submission: {recorded:?}"
+    );
+    assert_eq!(
+        lines[0],
+        "You were renewed. Resume from your last checkpoint: keep-1 keep-2 brief-content-xyz"
+    );
+}
+
+#[test]
+fn autorearm_ignores_text_that_only_contains_the_command() {
+    let (lab, record) = autorearm_lab(&["--auto-rearm"]);
+    for text in ["please do not run /new yet", "/newer", "x/new"] {
+        let out = lab.cli(&["send", "-n", "r", text, "-e"]);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    wait_until(|| {
+        fs::read_to_string(&record)
+            .map(|s| s.lines().count() >= 3)
+            .unwrap_or(false)
+    });
+    thread::sleep(Duration::from_millis(2500));
+    let recorded = fs::read_to_string(&record).unwrap();
+    assert_eq!(
+        recorded.lines().collect::<Vec<_>>(),
+        ["please do not run /new yet", "/newer", "x/new"],
+        "only the typed lines, no re-arm: {recorded:?}"
+    );
+}
+
+#[test]
+fn autorearm_is_off_unless_asked_for() {
+    let (lab, record) = autorearm_lab(&[]);
+    let out = lab.cli(&["send", "-n", "r", "/new", "-e"]);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    wait_until(|| {
+        let screen = lab.cli(&["screen", "-n", "r"]);
+        String::from_utf8_lossy(&screen.stdout).contains("got:/new")
+    });
+    thread::sleep(Duration::from_millis(3000));
+    let recorded = fs::read_to_string(&record).unwrap_or_default();
+    assert!(
+        recorded.trim().is_empty(),
+        "no re-arm without --auto-rearm: {recorded:?}"
+    );
+}
+
 #[test]
 fn renew_unconfirmed_rearm_exits_1() {
     let mut lab = Lab::new();

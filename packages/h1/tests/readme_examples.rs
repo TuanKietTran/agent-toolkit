@@ -88,6 +88,7 @@ const EXPECTED: &[&str] = &[
     "h1 agents --json",
     "h1 agents --publish --watch 5",
     "h1 console --view agents",
+    "h1 open -n worker --detached --auto-rearm --brief /abs/brief.md --resume-log /abs/status.log -- pi",
     "h1 doctor",
 ];
 
@@ -97,6 +98,10 @@ const RUN_VERBATIM: &[&str] = &["h1 list"];
 /// Every other extracted command, with the reason it is not run verbatim. Where a command's
 /// form is exercised by the lifecycle test instead, the reason says so.
 const SKIPPED: &[(&str, &str)] = &[
+    (
+        "h1 open -n worker --detached --auto-rearm --brief /abs/brief.md --resume-log /abs/status.log -- pi",
+        "needs the pi agent CLI and absolute brief and log paths; the same flags are exercised against a fake agent by the renew and autorearm session tests",
+    ),
     (
         "h1 run -- command --flag",
         "placeholder program `command` is not a real executable, and `run` is an interactive proxy",

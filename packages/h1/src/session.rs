@@ -54,6 +54,9 @@ pub struct Entry {
     /// Regex the screen must match before renew re-arms the session.
     #[serde(default)]
     pub ready_regex: Option<String>,
+    /// The host watches typed input and re-arms by itself when `new_cmd` is submitted. Off by default.
+    #[serde(default)]
+    pub auto_rearm: bool,
 }
 
 impl Entry {
@@ -218,6 +221,7 @@ mod tests {
             resume_log: None,
             new_cmd: None,
             ready_regex: None,
+            auto_rearm: false,
         }
     }
 

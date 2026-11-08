@@ -89,6 +89,24 @@ Keys: `kind`, `exe_names`, `script_keywords`, `argv_keywords`, `interpreters`, `
 
 Scan platform support: live-verified on macOS. On Linux the same `ps` table is used, with working directories read from `/proc/<pid>/cwd` instead of `lsof`; that path is not yet live-verified. The scan relies on `ps`, so it is not supported on Windows (the rest of the CLI is, see below).
 
+## Recoverable sessions
+
+A lab can remember how to pick its work back up after you start it over with `/new`, without you pasting the brief again. `open` (and `host`) store **paths and settings only**, never file contents and never secret values:
+
+- `--brief FILE`: the brief to re-arm with (absolute path).
+- `--resume-log FILE`: a status log; its last five lines go into the re-arm prompt.
+- `--new-cmd TEXT`: the command that starts a fresh session in the hosted program (default `/new`).
+- `--ready-regex RE`: what the screen must show before the re-arm is typed (default: the screen is quiet for two seconds).
+- `--auto-rearm`: the host watches what is typed into the lab and re-arms by itself when a submitted line is exactly the new-session command. Off by default.
+
+`h1 renew -n NAME` renews a live lab on demand: it sends the new-session command, waits for the ready screen, then types the re-arm prompt and presses Enter once. The prompt is **one line**: a short header, the last five resume-log lines and the brief, with line breaks collapsed to spaces. A brief longer than 2000 characters is not inlined; the prompt says `read <brief path> and continue` instead. If the screen does not change after the prompt, `renew` exits with status 1 and a one-line reason and does not press Enter again.
+
+With `--auto-rearm`, you type `/new` and Enter in the lab yourself (attached, or with `h1 send`), and the re-arm follows once the screen is ready. Only a submitted line that equals the new-session command counts: text that merely contains it, such as `please do not run /new yet`, does nothing, and backspace and arrow keys are followed. `h1 renew` does not trigger a second re-arm.
+
+```sh
+h1 open -n worker --detached --auto-rearm --brief /abs/brief.md --resume-log /abs/status.log -- pi
+```
+
 ## Platforms
 
 Linux, macOS and Windows (native, through ConPTY) are supported. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds and tests all three; see [`specs/006-cross-platform.md`](specs/006-cross-platform.md) for what has been verified on each.

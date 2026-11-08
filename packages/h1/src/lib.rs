@@ -179,6 +179,9 @@ struct RenewArgs {
     /// Regex the screen must match before renew re-arms the session.
     #[arg(long = "ready-regex", value_name = "RE")]
     ready_regex: Option<String>,
+    /// Re-arm by itself when the new-session command is typed and submitted in the lab. Off by default.
+    #[arg(long = "auto-rearm")]
+    auto_rearm: bool,
 }
 
 #[derive(Debug, Args)]
@@ -874,6 +877,7 @@ fn host(mut args: HostArgs) -> Result<i32> {
             resume_log: args.renew.resume_log.clone(),
             new_cmd: args.renew.new_cmd.clone(),
             ready_regex: args.renew.ready_regex.clone(),
+            auto_rearm: args.renew.auto_rearm,
         })?),
         None => None,
     };
@@ -900,6 +904,15 @@ fn host(mut args: HostArgs) -> Result<i32> {
         },
         started: Instant::now(),
         handlers: AtomicUsize::new(0),
+        watch: (args.renew.auto_rearm && args.target.name.is_some()).then(|| {
+            control::InputWatch::new(
+                args.renew
+                    .new_cmd
+                    .as_deref()
+                    .filter(|c| !c.trim().is_empty())
+                    .unwrap_or("/new"),
+            )
+        }),
     });
     let listener_thread = {
         let shared = shared.clone();
@@ -920,6 +933,7 @@ fn host(mut args: HostArgs) -> Result<i32> {
     if args.stdio {
         let terminal_writer = writer.clone();
         let terminal_recorder = recorder.clone();
+        let terminal_shared = shared.clone();
         thread::spawn(move || {
             let mut stdin = io::stdin().lock();
             let mut buffer = [0_u8; 8192];
@@ -931,10 +945,13 @@ fn host(mut args: HostArgs) -> Result<i32> {
                 if let Some(recorder) = &terminal_recorder {
                     let _ = recorder.lock().unwrap().chunk("input", &buffer[..count]);
                 }
-                let mut output = terminal_writer.lock().unwrap();
-                if output.write_all(&buffer[..count]).is_err() || output.flush().is_err() {
-                    break;
+                {
+                    let mut output = terminal_writer.lock().unwrap();
+                    if output.write_all(&buffer[..count]).is_err() || output.flush().is_err() {
+                        break;
+                    }
                 }
+                control::watch_input(&terminal_shared, &buffer[..count]);
             }
         });
     }

@@ -35,6 +35,16 @@ fn send_bytes(socket: &Path, data: Vec<u8>) -> Result<()> {
     Ok(())
 }
 
+/// Like `send_bytes`, but the host's auto re-arm watcher does not see this input: it is h1's own
+/// new-session command, which the same code path is already about to follow with a re-arm.
+fn send_bytes_unwatched(socket: &Path, data: Vec<u8>) -> Result<()> {
+    request(
+        socket,
+        json!({ "op": "send", "data": data, "watch": false }),
+    )?;
+    Ok(())
+}
+
 /// `request` that gives up after `timeout`, for looking at hosts that may be hung.
 pub(crate) fn request_with_timeout(
     socket: &Path,
@@ -310,12 +320,31 @@ pub(crate) fn ask(args: AskArgs) -> Result<i32> {
 /// from the pre-rearm baseline; if it does not, renew fails with a one-line reason and
 /// exit 1, with no second Enter sent.
 pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
+    renew_with(&args.name, args.brief.as_deref(), args.timeout, true, false)
+}
+
+/// The host calls this when the person (or `h1 send`) submitted the new-session command in a lab
+/// opened with `--auto-rearm`: the command is already typed, so only the re-arm remains. Quiet,
+/// because the host's own console may be the terminal the person is looking at.
+pub(crate) fn auto_rearm(name: &str) -> Result<i32> {
+    renew_with(name, None, 60, false, true)
+}
+
+fn renew_with(
+    name: &str,
+    brief_override: Option<&str>,
+    timeout_secs: u64,
+    send_new_cmd: bool,
+    quiet: bool,
+) -> Result<i32> {
     let fail = |reason: String| -> Result<i32> {
-        eprintln!("renew failed: {reason}");
+        if !quiet {
+            eprintln!("renew failed: {reason}");
+        }
         Ok(1)
     };
-    let Some(entry) = session::entries().into_iter().find(|e| e.name == args.name) else {
-        return fail(format!("no session named {}", args.name));
+    let Some(entry) = session::entries().into_iter().find(|e| e.name == name) else {
+        return fail(format!("no session named {name}"));
     };
     let socket = PathBuf::from(&entry.socket);
     let new_cmd = entry
@@ -324,13 +353,12 @@ pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .unwrap_or("/new");
-    let mut data = new_cmd.as_bytes().to_vec();
-    data.push(0x0d);
-    if send_bytes(&socket, data).is_err() {
-        return fail(format!(
-            "session {} did not answer the new command",
-            args.name
-        ));
+    if send_new_cmd {
+        let mut data = new_cmd.as_bytes().to_vec();
+        data.push(0x0d);
+        if send_bytes_unwatched(&socket, data).is_err() {
+            return fail(format!("session {name} did not answer the new command"));
+        }
     }
     let spec = WaitSpec {
         idle_ms: Some(2000),
@@ -344,22 +372,20 @@ pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
         asking: false,
         gone: Vec::new(),
     };
-    let timeout = Duration::from_secs(args.timeout);
+    let timeout = Duration::from_secs(timeout_secs);
     let baseline = match wait_for(&socket, &spec, timeout, Duration::ZERO) {
         Ok(Outcome::Met(screen)) => screen,
         Ok(Outcome::Ended(..)) => {
-            return fail(format!("session {} ended before it was ready", args.name));
+            return fail(format!("session {name} ended before it was ready"));
         }
         Ok(Outcome::TimedOut(..)) => {
             return fail(format!(
-                "session {} did not become ready within {}s",
-                args.name, args.timeout
+                "session {name} did not become ready within {timeout_secs}s"
             ));
         }
         Err(_) => {
             return fail(format!(
-                "session {} did not answer while waiting to become ready",
-                args.name
+                "session {name} did not answer while waiting to become ready"
             ));
         }
     };
@@ -390,9 +416,7 @@ pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
         let tail = &lines[lines.len().saturating_sub(5)..];
         parts.extend(tail.iter().map(|line| collapse(line)));
     }
-    let brief_path = args
-        .brief
-        .as_deref()
+    let brief_path = brief_override
         .filter(|s| !s.trim().is_empty())
         .or_else(|| entry.brief.as_deref().filter(|s| !s.trim().is_empty()));
     if let Some(brief) = brief_path
@@ -414,8 +438,7 @@ pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
     };
     if type_text(&socket, &prompt, &typing).is_err() {
         return fail(format!(
-            "session {} did not answer while the resume prompt was typed",
-            args.name
+            "session {name} did not answer while the resume prompt was typed"
         ));
     }
     thread::sleep(typing.enter_delay);
@@ -436,11 +459,12 @@ pub(crate) fn renew(args: RenewCmdArgs) -> Result<i32> {
     };
     if !confirmed(&socket, &baseline, timeout) {
         return fail(format!(
-            "session {} did not confirm rearm within {}s",
-            args.name, args.timeout
+            "session {name} did not confirm rearm within {timeout_secs}s"
         ));
     }
-    println!("renewed {} (rearm confirmed)", args.name);
+    if !quiet {
+        println!("renewed {name} (rearm confirmed)");
+    }
     Ok(0)
 }
 
@@ -926,6 +950,9 @@ pub(crate) fn open(args: OpenArgs) -> Result<i32> {
     }
     if let Some(record) = &args.record {
         host.extend(["-r".into(), record.clone().into_os_string()]);
+    }
+    if args.renew.auto_rearm {
+        host.push("--auto-rearm".into());
     }
     for (flag, value) in [
         ("--role", &args.graph.role),
