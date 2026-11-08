@@ -43,6 +43,7 @@ fn is_ident_continue(c: char) -> bool {
 struct Lexer {
     chars: Vec<char>,
     pos: usize,
+    byte_pos: u32,
     line: u32,
     col: u32,
     file: String,
@@ -50,7 +51,12 @@ struct Lexer {
 
 impl Lexer {
     fn span(&self) -> Span {
-        Span { line: self.line, col: self.col }
+        Span { line: self.line, col: self.col, offset: self.byte_pos, len: 0 }
+    }
+
+    /// Fill in the byte length of a token that started at `start`, now fully consumed.
+    fn end_span(&self, start: Span) -> Span {
+        Span { len: self.byte_pos.saturating_sub(start.offset), ..start }
     }
 
     fn peek(&self) -> Option<char> {
@@ -64,6 +70,7 @@ impl Lexer {
     fn bump(&mut self) -> Option<char> {
         let c = self.peek()?;
         self.pos += 1;
+        self.byte_pos += c.len_utf8() as u32;
         if c == '\n' {
             self.line += 1;
             self.col = 1;
@@ -116,7 +123,7 @@ impl Lexer {
             }
         }
         let tok = if quote == '`' { Tok::Raw(text) } else { Tok::Str(text) };
-        Ok(Token { tok, span: start })
+        Ok(Token { tok, span: self.end_span(start) })
     }
 
     fn lex_number(&mut self) -> Result<Token, Diagnostics> {
@@ -160,11 +167,11 @@ impl Lexer {
                     break;
                 }
             }
-            return Err(self.err(start, "Invalid number", format!("Invalid number '{bad}'.")));
+            return Err(self.err(self.end_span(start), "Invalid number", format!("Invalid number '{bad}'.")));
         }
         match text.parse::<f64>() {
-            Ok(n) => Ok(Token { tok: Tok::Num(n), span: start }),
-            Err(_) => Err(self.err(start, "Invalid number", format!("Invalid number '{text}'."))),
+            Ok(n) => Ok(Token { tok: Tok::Num(n), span: self.end_span(start) }),
+            Err(_) => Err(self.err(self.end_span(start), "Invalid number", format!("Invalid number '{text}'."))),
         }
     }
 
@@ -179,13 +186,13 @@ impl Lexer {
                 break;
             }
         }
-        Token { tok: Tok::Ident(text), span: start }
+        Token { tok: Tok::Ident(text), span: self.end_span(start) }
     }
 }
 
 /// Tokenize `src`. Stops at the first error (unterminated string, stray character).
 pub fn lex(file: &str, src: &str) -> Result<Vec<Token>, Diagnostics> {
-    let mut lx = Lexer { chars: src.chars().collect(), pos: 0, line: 1, col: 1, file: file.to_string() };
+    let mut lx = Lexer { chars: src.chars().collect(), pos: 0, byte_pos: 0, line: 1, col: 1, file: file.to_string() };
     let mut tokens = Vec::new();
     loop {
         lx.skip_ws_and_comments();
@@ -197,17 +204,17 @@ pub fn lex(file: &str, src: &str) -> Result<Vec<Token>, Diagnostics> {
         let token = match c {
             '"' => lx.lex_string('"')?,
             '`' => lx.lex_string('`')?,
-            '{' => { lx.bump(); Token { tok: Tok::LBrace, span } }
-            '}' => { lx.bump(); Token { tok: Tok::RBrace, span } }
-            '[' => { lx.bump(); Token { tok: Tok::LBracket, span } }
-            ']' => { lx.bump(); Token { tok: Tok::RBracket, span } }
-            '=' => { lx.bump(); Token { tok: Tok::Eq, span } }
-            ',' => { lx.bump(); Token { tok: Tok::Comma, span } }
-            '.' => { lx.bump(); Token { tok: Tok::Dot, span } }
+            '{' => { lx.bump(); Token { tok: Tok::LBrace, span: lx.end_span(span) } }
+            '}' => { lx.bump(); Token { tok: Tok::RBrace, span: lx.end_span(span) } }
+            '[' => { lx.bump(); Token { tok: Tok::LBracket, span: lx.end_span(span) } }
+            ']' => { lx.bump(); Token { tok: Tok::RBracket, span: lx.end_span(span) } }
+            '=' => { lx.bump(); Token { tok: Tok::Eq, span: lx.end_span(span) } }
+            ',' => { lx.bump(); Token { tok: Tok::Comma, span: lx.end_span(span) } }
+            '.' => { lx.bump(); Token { tok: Tok::Dot, span: lx.end_span(span) } }
             _ if c.is_ascii_digit() || (c == '-' && lx.peek_at(1).is_some_and(|n| n.is_ascii_digit())) => lx.lex_number()?,
             _ if is_ident_start(c) => lx.lex_ident(),
             _ => {
-                return Err(lx.err(span, "Unexpected character", format!("Unexpected character '{c}'.")));
+                return Err(lx.err(Span { len: c.len_utf8() as u32, ..span }, "Unexpected character", format!("Unexpected character '{c}'.")));
             }
         };
         tokens.push(token);
@@ -227,6 +234,18 @@ mod tests {
         let d = lex("test.yah", src).unwrap_err();
         assert_eq!(d.0.len(), 1);
         d.0[0].clone()
+    }
+
+    #[test]
+    fn token_spans_carry_byte_offset_and_len() {
+        let t = toks("yah 1\nx = \"ab\"");
+        assert_eq!((t[0].span.offset, t[0].span.len), (0, 3));
+        assert_eq!((t[1].span.offset, t[1].span.len), (4, 1));
+        let str_tok = t.iter().find(|t| matches!(t.tok, Tok::Str(_))).unwrap();
+        assert_eq!((str_tok.span.offset, str_tok.span.len), (10, 4));
+        // Byte offsets, not char counts: the two-byte 'é' makes the token 4 bytes.
+        let t2 = toks("\"é\"");
+        assert_eq!((t2[0].span.offset, t2[0].span.len), (0, 4));
     }
 
     #[test]

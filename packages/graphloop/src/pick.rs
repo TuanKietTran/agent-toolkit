@@ -363,6 +363,8 @@ fn fallback_resolved(
             Span {
                 line: harness.line,
                 col: 1,
+                offset: 0,
+                len: 0,
             },
             format!("Could not resolve model for harness \"{}\"", harness.name),
             format!(
@@ -395,7 +397,7 @@ pub fn resolve_all(spec: &Spec, picker: &dyn Picker) -> Result<Vec<Resolved>, Di
                 }),
                 None => diagnostics.push(Diagnostic::error(
                     &spec.file,
-                    Span { line: harness.line, col: 1 },
+                    Span { line: harness.line, col: 1, offset: 0, len: 0 },
                     format!("Unknown model for harness \"{}\"", harness.name),
                     format!("Harness \"{}\" is pinned to model label \"{label}\", which is not in the catalog.", harness.name),
                 )),

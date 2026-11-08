@@ -19,6 +19,10 @@ use serde::Serialize;
 pub struct Span {
     pub line: u32,
     pub col: u32,
+    /// 0-based byte offset of the first character into the source.
+    pub offset: u32,
+    /// Byte length of the token (0 for synthetic spans with no source token).
+    pub len: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]

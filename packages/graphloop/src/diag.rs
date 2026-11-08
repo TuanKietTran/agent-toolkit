@@ -35,6 +35,9 @@ pub struct Diagnostic {
     /// 1-based line and column of the offending token or block.
     pub line: u32,
     pub col: u32,
+    /// Byte length of the offending token (from its `Span`); the renderer underlines
+    /// that many characters starting at `col`. `0` renders as a single caret.
+    pub len: u32,
     /// Short title: `Missing required argument`, `Unsupported argument`, `Unknown reference` ...
     pub summary: String,
     /// The sentence under the source line.
@@ -52,6 +55,7 @@ impl Diagnostic {
             file: file.to_owned(),
             line: at.line,
             col: at.col,
+            len: at.len,
             summary: summary.into(),
             detail: detail.into(),
             context: None,
@@ -118,7 +122,17 @@ impl Diagnostics {
             }
             block.push(':');
             if let Some(text) = d.line.checked_sub(1).and_then(|i| lines.get(i as usize)) {
-                block.push_str(&format!("\n  {}: {}", d.line, text.trim_end()));
+                let text = text.trim_end();
+                block.push_str(&format!("\n  {}: {}", d.line, text));
+                // Caret line under the exact token: the source text starts after
+                // the "  " + line-digits + ": " prefix, then `col - 1` characters in.
+                let col0 = d.col.saturating_sub(1) as usize;
+                let line_chars = text.chars().count();
+                if col0 < line_chars {
+                    let carets = (d.len.max(1) as usize).min(line_chars - col0);
+                    let indent = 2 + d.line.to_string().len() + 2 + col0;
+                    block.push_str(&format!("\n{}{}", " ".repeat(indent), "^".repeat(carets)));
+                }
             }
             block.push_str("\n\n");
             block.push_str(&d.detail);
@@ -209,6 +223,7 @@ mod tests {
             file: "team.yah".to_owned(),
             line,
             col: 3,
+            len: 1,
             summary: summary.to_owned(),
             detail: detail.to_owned(),
             context: None,
@@ -224,7 +239,7 @@ mod tests {
         let d = make_diag(Severity::Error, 31, "Unsupported argument", "An argument named \"modle\" is not expected here.")
             .with_context("harness \"builder\"")
             .with_hint("Did you mean \"model\"?");
-        let expected = "Error: Unsupported argument\n\n  on team.yah line 31, in harness \"builder\":\n  31:   modle = \"sonnet\"\n\nAn argument named \"modle\" is not expected here.\n\nDid you mean \"model\"?\n";
+        let expected = "Error: Unsupported argument\n\n  on team.yah line 31, in harness \"builder\":\n  31:   modle = \"sonnet\"\n        ^\n\nAn argument named \"modle\" is not expected here.\n\nDid you mean \"model\"?\n";
         assert_eq!(Diagnostics(vec![d]).render(&source), expected);
     }
 
@@ -232,8 +247,19 @@ mod tests {
     fn render_warning_without_context_or_hint() {
         let source = "yah 1\nx = 1\n";
         let d = make_diag(Severity::Warning, 2, "Heads up", "Something happened.");
-        let expected = "Warning: Heads up\n\n  on team.yah line 2:\n  2: x = 1\n\nSomething happened.\n";
+        let expected = "Warning: Heads up\n\n  on team.yah line 2:\n  2: x = 1\n       ^\n\nSomething happened.\n";
         assert_eq!(Diagnostics(vec![d]).render(source), expected);
+    }
+
+    #[test]
+    fn render_underlines_exact_token() {
+        let mut source_lines: Vec<String> = (1..=30).map(|i| format!("filler {i}")).collect();
+        source_lines.push("  modle = \"sonnet\"".to_owned());
+        let source = source_lines.join("\n");
+        let mut d = make_diag(Severity::Error, 31, "Unsupported argument", "An argument named \"modle\" is not expected here.");
+        d.len = 5;
+        let out = Diagnostics(vec![d]).render(&source);
+        assert!(out.contains("\n  31:   modle = \"sonnet\"\n        ^^^^^\n"), "got: {out:?}");
     }
 
     #[test]
