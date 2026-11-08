@@ -4,6 +4,7 @@
 
 use crate::ast::{Expr, ExprKind, Span, Stmt, StrPart};
 use crate::diag::{suggest, Diagnostic, Diagnostics};
+use crate::refs::{self, Reference};
 use crate::spec::*;
 use std::collections::{HashMap, HashSet};
 
@@ -103,34 +104,43 @@ fn static_string(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<Strin
 }
 
 fn interp_part(cx: &mut Cx, path: &[String], span: Span, harnesses: &[String], key: &str, ctx: &str) -> Option<Part> {
-    if path.len() == 2 && path[0] == "env" && !path[1].is_empty() {
-        Some(Part::Env(path[1].clone()))
-    } else if path.len() == 3 && path[0] == "harnesses" && (path[2] == "model" || path[2] == "model_id") {
-        if !harnesses.contains(&path[1]) {
-            cx.unknown_ref(span, format!("The reference \"harnesses.{}.{}\" names an unknown harness.", path[1], path[2]), &path[1], harnesses, ctx);
-            return None;
+    match Reference::parse(path) {
+        Ok(Reference::Env(name)) => Some(Part::Env(name)),
+        Ok(r @ (Reference::HarnessModel(_) | Reference::HarnessModelId(_))) => {
+            let (harness, as_id) = match r {
+                Reference::HarnessModel(h) => (h, false),
+                Reference::HarnessModelId(h) => (h, true),
+                _ => unreachable!("matched above"),
+            };
+            if !harnesses.contains(&harness) {
+                cx.unknown_ref(span, format!("The reference \"harnesses.{}.{}\" names an unknown harness.", harness, path[2]), &harness, harnesses, ctx);
+                return None;
+            }
+            Some(if as_id { Part::HarnessModelId(harness) } else { Part::HarnessModel(harness) })
         }
-        if path[2] == "model_id" { Some(Part::HarnessModelId(path[1].clone())) } else { Some(Part::HarnessModel(path[1].clone())) }
-    } else if path.len() == 3 && path[0] == "vault" {
-        let Some(keys) = cx.vault_keys.get(&path[1]).cloned() else {
-            let mut names: Vec<String> = cx.vault_keys.keys().cloned().collect();
-            names.sort();
-            cx.unknown_ref(span, format!("The reference \"vault.{}.{}\" names a vault that is not declared in this file.", path[1], path[2]), &path[1], &names, ctx);
-            return None;
-        };
-        if !cx.allow_vault {
-            cx.err(span, "Vault reference not allowed here", format!("\"${{{}}}\" can only be the value of a key in an \"env\" map. A command line is visible to every process on the machine; an environment variable is not.", path.join(".")), Some(ctx), Some("Put it under env = { NAME = \"${vault.NAME.KEY}\" } and read NAME in the program.".to_owned()));
-            return None;
+        Ok(Reference::Vault { vault, key: secret }) => {
+            let Some(keys) = cx.vault_keys.get(&vault).cloned() else {
+                let mut names: Vec<String> = cx.vault_keys.keys().cloned().collect();
+                names.sort();
+                cx.unknown_ref(span, format!("The reference \"vault.{vault}.{secret}\" names a vault that is not declared in this file."), &vault, &names, ctx);
+                return None;
+            };
+            if !cx.allow_vault {
+                cx.err(span, "Vault reference not allowed here", format!("\"${{{}}}\" can only be the value of a key in an \"env\" map. A command line is visible to every process on the machine; an environment variable is not.", path.join(".")), Some(ctx), Some("Put it under env = { NAME = \"${vault.NAME.KEY}\" } and read NAME in the program.".to_owned()));
+                return None;
+            }
+            if !keys.is_empty() && !keys.contains(&secret) {
+                cx.unknown_ref(span, format!("The vault \"{vault}\" does not declare a secret named \"{secret}\"."), &secret, &keys, ctx);
+                return None;
+            }
+            Some(Part::Vault(vault, secret))
         }
-        if !keys.is_empty() && !keys.contains(&path[2]) {
-            cx.unknown_ref(span, format!("The vault \"{}\" does not declare a secret named \"{}\".", path[1], path[2]), &path[2], &keys, ctx);
-            return None;
+        // `var.*` is gone after resolve; anything else is not a reference form this position accepts.
+        Ok(Reference::Var(_)) | Err(_) => {
+            cx.err(span, "Unsupported reference", format!("The reference \"${{{}}}\" is not supported here. {}", path.join("."), refs::valid_forms()), Some(ctx), None);
+            let _ = key;
+            None
         }
-        Some(Part::Vault(path[1].clone(), path[2].clone()))
-    } else {
-        cx.err(span, "Unsupported reference", format!("The reference \"${{{}}}\" is not supported here. Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY>, harnesses.<label>.model and harnesses.<label>.model_id.", path.join(".")), Some(ctx), None);
-        let _ = key;
-        None
     }
 }
 
@@ -414,12 +424,20 @@ fn parse_defaults(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Op
     policy
 }
 
+/// The variable name of an `env.NAME` reference path, if that is what the path is.
+fn env_ref(path: &[String]) -> Option<String> {
+    match Reference::parse(path) {
+        Ok(Reference::Env(name)) => Some(name),
+        _ => None,
+    }
+}
+
 fn api_key_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<String> {
     match &a.value.kind {
-        ExprKind::Ref(path) if path.len() == 2 && path[0] == "env" && !path[1].is_empty() => Some(path[1].clone()),
+        ExprKind::Ref(path) if env_ref(path).is_some() => env_ref(path),
         ExprKind::Str(parts) if parts.len() == 1 => {
             match &parts[0] {
-                StrPart::Interp(path, _) if path.len() == 2 && path[0] == "env" && !path[1].is_empty() => Some(path[1].clone()),
+                StrPart::Interp(path, _) if env_ref(path).is_some() => env_ref(path),
                 _ => { cx.err(a.value.span, "Secrets are never stored", "The argument \"api_key\" must be a bare env.NAME reference.".to_string(), Some(ctx), Some("Use env.NAME instead.".to_string())); None }
             }
         }
