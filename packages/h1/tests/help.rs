@@ -21,6 +21,7 @@ const SUBCOMMANDS: &[&str] = &[
     "status",
     "agents",
     "console",
+    "doctor",
     "stop",
     "key",
     "wait",

@@ -4,6 +4,7 @@ mod commander;
 mod console;
 mod conpty;
 mod control;
+mod doctor;
 mod graphspec;
 mod ipc;
 mod keys;
@@ -82,6 +83,8 @@ enum Commands {
     Agents(agents::AgentsArgs),
     /// k9s-style console of every lab: table, lab graph, live screens. Opens a new terminal window unless run in one.
     Console(console::ConsoleArgs),
+    /// Diagnose rename/migration problems: print the registry dir in use and whether the pre-rename registry still holds sessions, which h1 and old-named binaries and the labctl shim are on PATH, whether the lab-commander skill links resolve, and whether the lab-gui port is reachable. Exit 1 if anything needs attention.
+    Doctor(DoctorArgs),
     /// End a session: stop its program and its host.
     Stop(StopArgs),
     /// Send named keys (Enter, Down, Esc, Ctrl-C, Down*3, ...) to a session.
@@ -473,6 +476,9 @@ struct StopArgs {
 }
 
 #[derive(Debug, Args)]
+struct DoctorArgs {}
+
+#[derive(Debug, Args)]
 struct ListArgs {
     /// Print JSON instead of a table.
     #[arg(long)]
@@ -554,6 +560,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
         },
         Commands::Stop(args) => commands::stop(args),
         Commands::Console(args) => console::run(args),
+        Commands::Doctor(_args) => doctor::run(),
         Commands::Agents(args) => agents::run(args),
         Commands::Key(args) => commands::key(args),
         Commands::Wait(args) => match args.lab_name {
