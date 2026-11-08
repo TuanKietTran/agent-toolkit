@@ -7,6 +7,10 @@
 //! created yet, an old registry existing with no sessions, the `labctl` compat shim
 //! (it execs `h1` by design), absent skill links, lab-gui not currently reachable
 //! (it is started on demand), and a lab-gui server running from this repo.
+//! With `--fix-hints` it also prints, after the findings, the exact shell command
+//! for each fixable finding (kill a stale process, re-link a broken lab-commander
+//! skill link, remove the stale binary); hints are printed only, never executed,
+//! and findings with no safe one-line fix (either old registry) get no hint.
 
 use std::{
     env, fs,
@@ -50,6 +54,8 @@ struct Inputs {
     old_temp_sessions: usize,
     processes: Vec<String>,
     local_roots: Vec<PathBuf>,
+    fix_hints: bool,
+    skill_source: Option<PathBuf>,
 }
 
 pub struct Report {
@@ -61,6 +67,7 @@ pub struct Report {
 fn assess(inputs: &Inputs) -> Report {
     let mut lines = Vec::new();
     let mut attention = false;
+    let mut hints: Vec<String> = Vec::new();
     lines.push(format!(
         "registry dir: {} ({})",
         inputs.registry_dir.display(),
@@ -121,6 +128,7 @@ fn assess(inputs: &Inputs) -> Report {
                 "old binary {OLD_BINARY_NAME} on PATH: {} (stale, pre-rename)",
                 path.display()
             ));
+            hints.push(format!("rm {}", path.display()));
         }
         None => lines.push(format!("old binary {OLD_BINARY_NAME} on PATH: not found")),
     }
@@ -137,6 +145,15 @@ fn assess(inputs: &Inputs) -> Report {
             LinkState::Broken => {
                 attention = true;
                 lines.push(format!("skill link {}: broken", link.display()));
+                if link.file_name().is_some_and(|name| name == "lab-commander")
+                    && let Some(source) = &inputs.skill_source
+                {
+                    hints.push(format!(
+                        "ln -sfn {} {}",
+                        source.display(),
+                        link.display()
+                    ));
+                }
             }
             LinkState::Absent => {
                 lines.push(format!("skill link {}: not installed", link.display()))
@@ -156,6 +173,15 @@ fn assess(inputs: &Inputs) -> Report {
     for finding in process_findings(&inputs.processes, &inputs.local_roots) {
         attention |= finding.attention;
         lines.push(finding.line);
+        if let Some(hint) = finding.hint {
+            hints.push(hint);
+        }
+    }
+    if inputs.fix_hints && !hints.is_empty() {
+        lines.push("fix hints (print only, not executed):".to_string());
+        for hint in &hints {
+            lines.push(format!("  {hint}"));
+        }
     }
     lines.push(
         if attention {
@@ -205,6 +231,7 @@ fn count_registry_sessions(dir: &Path) -> usize {
 struct ProcessFinding {
     line: String,
     attention: bool,
+    hint: Option<String>,
 }
 
 /// Lexically resolve `.`/`..` components (no filesystem access), so a path
@@ -260,6 +287,7 @@ fn process_findings(processes: &[String], local_roots: &[PathBuf]) -> Vec<Proces
             findings.push(ProcessFinding {
                 line,
                 attention: true,
+                hint: Some(format!("kill {pid}")),
             });
             continue;
         }
@@ -299,6 +327,7 @@ fn process_findings(processes: &[String], local_roots: &[PathBuf]) -> Vec<Proces
             findings.push(ProcessFinding {
                 line: format!("lab-gui on port {port} started from {server}: current (this repo)"),
                 attention: false,
+                hint: None,
             });
         } else {
             findings.push(ProcessFinding {
@@ -306,6 +335,7 @@ fn process_findings(processes: &[String], local_roots: &[PathBuf]) -> Vec<Proces
                     "lab-gui on port {port} started from {server}: restart it if it shows no labs"
                 ),
                 attention: true,
+                hint: Some(format!("kill {pid}")),
             });
         }
     }
@@ -391,7 +421,7 @@ fn probe_port(port: u16) -> bool {
 /// the port probe, `processes` the injected process list and `local_roots`
 /// the injected "this repo" roots for lab-gui processes.
 #[allow(clippy::too_many_arguments)] // every input is injected so tests can fake the whole environment
-fn diagnose(
+fn diagnose_inner(
     registry_dir: &Path,
     home: &Path,
     temp_dir: &Path,
@@ -400,6 +430,8 @@ fn diagnose(
     probe: &dyn Fn(u16) -> bool,
     processes: &[String],
     local_roots: &[PathBuf],
+    fix_hints: bool,
+    skill_source: Option<PathBuf>,
 ) -> Report {
     let old_registry_dir = home.join(OLD_REGISTRY_DIR_NAME);
     let old_temp_registry_dir = temp_dir.join(OLD_TEMP_REGISTRY_DIR_NAME);
@@ -423,6 +455,8 @@ fn diagnose(
         old_temp_registry_dir,
         processes: processes.to_vec(),
         local_roots: local_roots.to_vec(),
+        fix_hints,
+        skill_source,
         h1_on_path: find_on_path(path_dirs, "h1"),
         old_binary_on_path: find_on_path(path_dirs, OLD_BINARY_NAME),
         labctl_on_path: find_on_path(path_dirs, "labctl"),
@@ -435,7 +469,56 @@ fn diagnose(
     assess(&inputs)
 }
 
-pub fn run() -> Result<i32> {
+/// Plain diagnosis (no fix hints), as used by the existing tests.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn diagnose(
+    registry_dir: &Path,
+    home: &Path,
+    temp_dir: &Path,
+    path_dirs: &[PathBuf],
+    gui_ports: &[u16],
+    probe: &dyn Fn(u16) -> bool,
+    processes: &[String],
+    local_roots: &[PathBuf],
+) -> Report {
+    diagnose_inner(
+        registry_dir,
+        home,
+        temp_dir,
+        path_dirs,
+        gui_ports,
+        probe,
+        processes,
+        local_roots,
+        false,
+        None,
+    )
+}
+
+/// First `<root>/skills/lab-commander` directory under the candidate roots.
+fn skill_source_from_roots(roots: &[PathBuf]) -> Option<PathBuf> {
+    roots
+        .iter()
+        .map(|root| root.join("skills").join("lab-commander"))
+        .find(|candidate| candidate.is_dir())
+}
+
+/// This repo's `skills/lab-commander`, derived from the repo roots doctor
+/// already resolves plus the ancestors of the cwd and of this executable
+/// (never a hard-coded home path).
+fn skill_source_dir(local_roots: &[PathBuf]) -> Option<PathBuf> {
+    let mut roots: Vec<PathBuf> = local_roots.to_vec();
+    if let Ok(cwd) = env::current_dir() {
+        roots.extend(cwd.ancestors().map(Path::to_path_buf));
+    }
+    if let Ok(exe) = env::current_exe() {
+        roots.extend(exe.ancestors().map(Path::to_path_buf));
+    }
+    skill_source_from_roots(&roots)
+}
+
+pub fn run(fix_hints: bool) -> Result<i32> {
     let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let path_dirs: Vec<PathBuf> = env::var_os("PATH")
         .map(|path| env::split_paths(&path).collect())
@@ -444,7 +527,9 @@ pub fn run() -> Result<i32> {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(4317);
-    let report = diagnose(
+    let local_roots = local_gui_roots();
+    let skill_source = skill_source_dir(&local_roots);
+    let report = diagnose_inner(
         &crate::session::session_dir(),
         &home,
         &env::temp_dir(),
@@ -452,7 +537,9 @@ pub fn run() -> Result<i32> {
         &[gui_port],
         &probe_port,
         &process_list(),
-        &local_gui_roots(),
+        &local_roots,
+        fix_hints,
+        skill_source,
     );
     for line in &report.lines {
         println!("{line}");
@@ -548,9 +635,109 @@ mod tests {
             .find_subcommand("doctor")
             .expect("doctor subcommand is wired into the CLI");
         let help = doctor.clone().render_long_help().to_string();
-        for needle in ["registry", "PATH", "skill links", "lab-gui"] {
+        for needle in ["registry", "PATH", "skill links", "lab-gui", "--fix-hints"] {
             assert!(help.contains(needle), "help missing {needle:?}: {help}");
         }
+    }
+
+    #[test]
+    fn skill_source_from_roots_finds_repo_skill_dir() {
+        let root = temp_root("skillsrc");
+        let repo = root.join("repo");
+        let skill = repo.join("skills").join("lab-commander");
+        fs::create_dir_all(&skill).expect("skill dir");
+        assert_eq!(
+            skill_source_from_roots(&[root.join("nope"), repo.clone()]),
+            Some(skill)
+        );
+        assert_eq!(skill_source_from_roots(&[root.join("nope")]), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fix_hints_print_kill_ln_rm_and_skip_registries() {
+        let root = temp_root("hints");
+        let registry = root.join("sessions");
+        fs::create_dir_all(&registry).expect("registry");
+        let home = root.join("home");
+        let link_dir = home.join(".codex").join("skills");
+        fs::create_dir_all(&link_dir).expect("link dir");
+        let link = link_dir.join("lab-commander");
+        std::os::unix::fs::symlink(root.join("dead-target"), &link).expect("plant broken link");
+        let tmp = root.join("tmp");
+        let old_temp = tmp.join(OLD_TEMP_REGISTRY_DIR_NAME);
+        fs::create_dir_all(&old_temp).expect("old temp registry");
+        fs::write(old_temp.join("a.json"), "{}").expect("old session");
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("h1"), "fake").expect("fake h1");
+        fs::write(bin.join(OLD_BINARY_NAME), "fake").expect("stale binary");
+        let skill_source = root.join("repo").join("skills").join("lab-commander");
+        let processes: Vec<String> = vec![
+            "81921 /Users/x/.local/bin/agent-cli-lab console".to_string(),
+            "21800 node /Users/x/Downloads/agent-toolkit/packages/lab-gui/server.mjs --open"
+                .to_string(),
+        ];
+        let report = diagnose_inner(
+            &registry,
+            &home,
+            &tmp,
+            std::slice::from_ref(&bin),
+            &[4317],
+            &|_| false,
+            &processes,
+            &[],
+            true,
+            Some(skill_source.clone()),
+        );
+        assert!(report.attention, "lines: {:?}", report.lines);
+        for expected in [
+            "fix hints (print only, not executed):".to_string(),
+            "  kill 81921".to_string(),
+            "  kill 21800".to_string(),
+            format!("  ln -sfn {} {}", skill_source.display(), link.display()),
+            format!("  rm {}", bin.join(OLD_BINARY_NAME).display()),
+        ] {
+            assert!(
+                report.lines.iter().any(|line| line == &expected),
+                "missing {expected:?} in {:?}",
+                report.lines
+            );
+        }
+        let hint_lines: Vec<&String> = report
+            .lines
+            .iter()
+            .filter(|line| line.starts_with("  "))
+            .collect();
+        assert_eq!(hint_lines.len(), 4, "hints: {hint_lines:?}");
+        assert!(
+            hint_lines
+                .iter()
+                .all(|line| !line.contains(&old_temp.display().to_string())),
+            "registry hint in {hint_lines:?}"
+        );
+        let plain = diagnose(
+            &registry,
+            &home,
+            &tmp,
+            &[bin],
+            &[4317],
+            &|_| false,
+            &processes,
+            &[],
+        );
+        assert_eq!(plain.attention, report.attention);
+        assert!(
+            plain
+                .lines
+                .iter()
+                .all(|line| !line.contains("fix hints") && !line.starts_with("  kill")),
+            "plain: {:?}",
+            plain.lines
+        );
+        assert_eq!(report.lines.len(), plain.lines.len() + 5);
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn report_in(root: &Path, processes: &[String], local_roots: &[PathBuf]) -> Report {
