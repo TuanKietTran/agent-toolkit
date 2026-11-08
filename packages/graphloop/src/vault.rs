@@ -163,12 +163,12 @@ pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Dur
     };
     let out = out_reader.join().unwrap_or_default();
     let err = err_reader.join().unwrap_or_default();
+    if out.len() > MAX_OUTPUT_BYTES {
+        return Err(format!("{name} printed more than {MAX_OUTPUT_BYTES} bytes of output"));
+    }
     if !status.success() {
         let first = String::from_utf8_lossy(&err).lines().next().unwrap_or("").trim().chars().take(160).collect::<String>();
         return Err(if first.is_empty() { format!("{name} exited with {status}") } else { format!("{name} exited with {status}: {first}") });
-    }
-    if out.len() > MAX_OUTPUT_BYTES {
-        return Err(format!("{name} printed more than {MAX_OUTPUT_BYTES} bytes of output"));
     }
     let text = String::from_utf8(out).map_err(|_| format!("{name} printed bytes that are not UTF-8"))?;
     Ok(text.trim_end_matches(['\n', '\r']).to_owned())
