@@ -1,6 +1,6 @@
 //! Terraform-style diagnostics with `file:line` (docs/graphspec.md, "Error format").
 //!
-//! SHARED CONTRACT for the types. The `render` body is owned by `gl-resolve`.
+//! The types are a stable interface that the other stages and the console rely on.
 
 use serde::Serialize;
 
@@ -102,7 +102,7 @@ impl Diagnostics {
     }
 
     /// Terraform-style text for every diagnostic. `source` is the file's text, used to print the
-    /// offending line. OWNER: gl-resolve.
+    /// offending line.
     pub fn render(&self, source: &str) -> String {
         if self.0.is_empty() {
             return String::new();

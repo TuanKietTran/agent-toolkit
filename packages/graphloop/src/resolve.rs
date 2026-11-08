@@ -1,4 +1,4 @@
-//! Interpolation and reference resolution over the AST. OWNER: gl-resolve.
+//! Interpolation and reference resolution over the AST.
 //!
 //! Input: `ast::File` from the parser. Output: an `ast::File` where
 //!   * every `variable` block's `default` is replaced by the EFFECTIVE value (the `--var name=value`

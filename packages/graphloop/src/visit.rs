@@ -1,4 +1,4 @@
-//! Generic mutable traversal of the AST. OWNER: gl-ast (S6).
+//! Generic mutable traversal of the AST.
 //!
 //! A [`Visitor`] overrides only the node kinds it cares about; the default methods and the
 //! `walk_*` free functions recurse in source order: a block's statements, an assignment's

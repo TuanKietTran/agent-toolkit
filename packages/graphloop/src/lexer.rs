@@ -1,4 +1,4 @@
-//! Tokens. OWNER: gl-syntax (lexer.rs and parser.rs).
+//! Tokens.
 //!
 //! Rules (docs/graphspec.md): UTF-8; `//` comments to end of line; indentation insignificant;
 //! identifiers `[a-zA-Z_][a-zA-Z0-9_-]*`; double-quoted strings `"[^"]*"` (may contain `${...}`,

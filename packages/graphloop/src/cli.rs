@@ -1,4 +1,4 @@
-//! The `graphloop` command line. OWNER: gl-cli.
+//! The `graphloop` command line.
 //!
 //! check | plan | graph | up | down | runs | trace. Core functions take an already-built
 //! `Plan`/`Resolved` plus a `LabRunner` trait object; the load -> pick -> plan wrappers

@@ -1,4 +1,4 @@
-//! Team -> `h1 open` commands and graph edges. OWNER: gl-plan.
+//! Team -> `h1 open` commands and graph edges.
 //!
 //! Orchestration rules 1 and 3 (docs/graphspec.md): every harness with `kind = "h1"` is
 //! started by `h1 open -n NAME --role ROLE [--parent PARENT] --model <resolved> ...`;

@@ -1,4 +1,4 @@
-//! The one symbol table for a `.yah` file. OWNER: w-ast (S3).
+//! The one symbol table for a `.yah` file.
 //!
 //! [`Scope::build`] is the ONLY place the declared names are derived from the AST:
 //! the declared variables, the vault labels with each vault's declared `secrets`
