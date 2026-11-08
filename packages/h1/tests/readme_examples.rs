@@ -16,6 +16,7 @@
 //!   `H1_DIR=/Users/handlerone/Downloads/h1-rd` (short path, for socket length limits).
 //!   Adaptations versus the README text: `--detached` is added so no visible window opens,
 //!   and the lab is named `readme-cat` running `cat` instead of `ux` running `pi`.
+//!
 //! The lifecycle test always stops its lab and removes `h1-rd`, and no test ever touches the
 //! default/fleet `H1_DIR`.
 
