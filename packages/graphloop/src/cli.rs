@@ -246,6 +246,9 @@ pub struct UpRequest<'a> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpOutcome { pub run: String, pub run_dir: PathBuf, pub manifest_path: PathBuf, pub output: String }
 
+/// One rendered plan step: its argv plus the secret env pairs kept off the command line.
+type RenderedStep = (Vec<String>, Vec<(String, String)>);
+
 pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, String> {
     let models: HashMap<String, String> = req.nodes.iter().map(|n| (n.harness.clone(), n.model.clone())).collect();
     let model_fn = |h: &str| models.get(h).cloned();
@@ -253,7 +256,7 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
     // with no lab opened. An `--env NAME=VALUE` pair whose value holds a `${vault.*}` or `${env.*}`
     // part is not put on the command line (every process can read argv); it is passed to
     // `h1 open` in its process environment, which the hosted program inherits.
-    let mut rendered: Vec<(Vec<String>, Vec<(String, String)>)> = Vec::new();
+    let mut rendered: Vec<RenderedStep> = Vec::new();
     let mut secret_values: Vec<String> = Vec::new();
     for step in &req.plan.steps {
         let ctx = RenderCtx { env: req.env, model: &model_fn, vault: req.vault };
