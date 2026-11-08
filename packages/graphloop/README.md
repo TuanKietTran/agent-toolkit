@@ -32,6 +32,46 @@ graphloop down examples/demo.yah
 - `examples/` — `team.yah` (commander -> builder), `research-team.yah` (planner with researcher / builder / reviewer), `demo.yah` (harmless detached `cat` labs).
 - `tests/fixtures/canonical.yah` — the canonical example the grammar checks run against.
 
+## Secrets
+
+A `.yah` file never contains a secret value. A `vault` block says where a secret lives, and `${vault.NAME.KEY}` references — allowed only inside an `env` map, so a secret never appears in a readable command line — are fetched only at `graphloop up` time, held in memory, passed in the process environment (never argv), and scrubbed from output. A missing secret opens nothing and no value ever lands in a manifest.
+
+The fleet pattern switches backends without editing the block, because keys a provider does not use are ignored:
+
+```yah
+variable "secrets" {
+  type    = "string"
+  default = "dotenv"
+}
+
+vault "fleet" {
+  provider = var.secrets
+  path     = "fleet.env"
+  secrets  = {
+    FLEET_RUN_TOKEN = "FLEET_RUN_TOKEN"
+  }
+}
+
+harness "worker" {
+  kind  = "h1"
+  role  = "worker"
+  model = "haiku"
+  open {
+    command = ["cat"]
+    env = {
+      FLEET_RUN_TOKEN = "${vault.fleet.FLEET_RUN_TOKEN}"
+    }
+  }
+}
+```
+
+```sh
+graphloop up fleet.yah                    # dotenv (default)
+graphloop up fleet.yah --var secrets=env  # same block, from the process environment
+```
+
+Providers: `dotenv`, `env` and `command` now; `1password`, `bitwarden`, `bitwarden-secrets` and `keychain` behind the same block. Full chapter: [docs/graphspec.md](docs/graphspec.md) “Secret vaults”. See also `examples/vault.yah`.
+
 ## Tests
 
 ```sh
