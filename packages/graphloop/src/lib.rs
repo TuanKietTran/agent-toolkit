@@ -31,3 +31,4 @@ pub mod schema;
 pub mod scope;
 pub mod spec;
 pub mod vault;
+pub mod visit;
