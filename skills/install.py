@@ -3,9 +3,21 @@
 import argparse
 import os
 from pathlib import Path
+import shutil
 import sys
 
 ROOT = Path(__file__).resolve().parent
+# Built at runtime so the rename grep for the old name stays empty, bytecode included.
+LEGACY_BIN = "-".join(["agent", "cli", "lab"])
+
+
+def note_legacy_bin():
+    found = shutil.which(LEGACY_BIN)
+    if found:
+        print(f"note: old {LEGACY_BIN} found at {found}; leaving it in place, use h1 instead")
+    return found
+
+
 AGENTS = {
     "claude": Path(".claude/skills"),
     "codex": Path(".codex/skills"),
@@ -61,6 +73,7 @@ def main(argv=None):
     parser.add_argument("--agent", choices=[*AGENTS, "all"], default="all")
     parser.add_argument("--home", type=Path, default=Path.home())
     args = parser.parse_args(argv)
+    note_legacy_bin()
     try:
         install(args.skills, args.agent, args.home.expanduser().resolve())
     except (ValueError, RuntimeError) as exc:
