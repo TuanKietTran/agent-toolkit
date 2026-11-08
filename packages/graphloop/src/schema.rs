@@ -1,9 +1,10 @@
-//! Strict schema validation, cross-reference checks and defaults. OWNER: gl-schema.
+//! Strict schema validation, cross-reference checks and defaults.
 //!
 //! Input: the resolved `ast::File`. Output: `spec::Spec` or all collected `Diagnostics`.
 
 use crate::ast::{Expr, ExprKind, Span, Stmt, StrPart};
 use crate::diag::{suggest, Diagnostic, Diagnostics};
+use crate::refs::{self, Reference};
 use crate::spec::*;
 use std::collections::{HashMap, HashSet};
 
@@ -103,34 +104,43 @@ fn static_string(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<Strin
 }
 
 fn interp_part(cx: &mut Cx, path: &[String], span: Span, harnesses: &[String], key: &str, ctx: &str) -> Option<Part> {
-    if path.len() == 2 && path[0] == "env" && !path[1].is_empty() {
-        Some(Part::Env(path[1].clone()))
-    } else if path.len() == 3 && path[0] == "harnesses" && (path[2] == "model" || path[2] == "model_id") {
-        if !harnesses.contains(&path[1]) {
-            cx.unknown_ref(span, format!("The reference \"harnesses.{}.{}\" names an unknown harness.", path[1], path[2]), &path[1], harnesses, ctx);
-            return None;
+    match Reference::parse(path) {
+        Ok(Reference::Env(name)) => Some(Part::Env(name)),
+        Ok(r @ (Reference::HarnessModel(_) | Reference::HarnessModelId(_))) => {
+            let (harness, as_id) = match r {
+                Reference::HarnessModel(h) => (h, false),
+                Reference::HarnessModelId(h) => (h, true),
+                _ => unreachable!("matched above"),
+            };
+            if !harnesses.contains(&harness) {
+                cx.unknown_ref(span, format!("The reference \"harnesses.{}.{}\" names an unknown harness.", harness, path[2]), &harness, harnesses, ctx);
+                return None;
+            }
+            Some(if as_id { Part::HarnessModelId(harness) } else { Part::HarnessModel(harness) })
         }
-        if path[2] == "model_id" { Some(Part::HarnessModelId(path[1].clone())) } else { Some(Part::HarnessModel(path[1].clone())) }
-    } else if path.len() == 3 && path[0] == "vault" {
-        let Some(keys) = cx.vault_keys.get(&path[1]).cloned() else {
-            let mut names: Vec<String> = cx.vault_keys.keys().cloned().collect();
-            names.sort();
-            cx.unknown_ref(span, format!("The reference \"vault.{}.{}\" names a vault that is not declared in this file.", path[1], path[2]), &path[1], &names, ctx);
-            return None;
-        };
-        if !cx.allow_vault {
-            cx.err(span, "Vault reference not allowed here", format!("\"${{{}}}\" can only be the value of a key in an \"env\" map. A command line is visible to every process on the machine; an environment variable is not.", path.join(".")), Some(ctx), Some("Put it under env = { NAME = \"${vault.NAME.KEY}\" } and read NAME in the program.".to_owned()));
-            return None;
+        Ok(Reference::Vault { vault, key: secret }) => {
+            let Some(keys) = cx.vault_keys.get(&vault).cloned() else {
+                let mut names: Vec<String> = cx.vault_keys.keys().cloned().collect();
+                names.sort();
+                cx.unknown_ref(span, format!("The reference \"vault.{vault}.{secret}\" names a vault that is not declared in this file."), &vault, &names, ctx);
+                return None;
+            };
+            if !cx.allow_vault {
+                cx.err(span, "Vault reference not allowed here", format!("\"${{{}}}\" can only be the value of a key in an \"env\" map. A command line is visible to every process on the machine; an environment variable is not.", path.join(".")), Some(ctx), Some("Put it under env = { NAME = \"${vault.NAME.KEY}\" } and read NAME in the program.".to_owned()));
+                return None;
+            }
+            if !keys.is_empty() && !keys.contains(&secret) {
+                cx.unknown_ref(span, format!("The vault \"{vault}\" does not declare a secret named \"{secret}\"."), &secret, &keys, ctx);
+                return None;
+            }
+            Some(Part::Vault(vault, secret))
         }
-        if !keys.is_empty() && !keys.contains(&path[2]) {
-            cx.unknown_ref(span, format!("The vault \"{}\" does not declare a secret named \"{}\".", path[1], path[2]), &path[2], &keys, ctx);
-            return None;
+        // `var.*` is gone after resolve; anything else is not a reference form this position accepts.
+        Ok(Reference::Var(_)) | Err(_) => {
+            cx.err(span, "Unsupported reference", format!("The reference \"${{{}}}\" is not supported here. {}", path.join("."), refs::valid_forms()), Some(ctx), None);
+            let _ = key;
+            None
         }
-        Some(Part::Vault(path[1].clone(), path[2].clone()))
-    } else {
-        cx.err(span, "Unsupported reference", format!("The reference \"${{{}}}\" is not supported here. Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY>, harnesses.<label>.model and harnesses.<label>.model_id.", path.join(".")), Some(ctx), None);
-        let _ = key;
-        None
     }
 }
 
@@ -265,15 +275,9 @@ fn enum_value(cx: &mut Cx, a: &crate::ast::Assign, allowed: &[&str], ctx: &str) 
     }
 }
 
-pub fn build(file: &crate::ast::File) -> Result<Spec, Diagnostics> {
-    let mut cx = Cx { file: file.name.clone(), diags: Diagnostics::default(), vault_keys: prescan_vaults(file), allow_vault: false };
+pub fn build(file: &crate::ast::File, scope: &crate::scope::Scope) -> Result<Spec, Diagnostics> {
+    let mut cx = Cx { file: file.name.clone(), diags: Diagnostics::default(), vault_keys: scope.vault_keys.clone(), allow_vault: false };
     let mut spec = Spec { version: file.version, file: file.name.clone(), variables: Vec::new(), defaults: Defaults::default(), providers: Vec::new(), vaults: Vec::new(), models: Vec::new(), system_one: None, image: None, apis: Vec::new(), harnesses: Vec::new(), teams: Vec::new(), workflows: Vec::new(), outputs: Vec::new() };
-    let mut declared: HashMap<String, Vec<String>> = HashMap::new();
-    for stmt in &file.stmts {
-        if let Stmt::Block(b) = stmt
-            && let Some(l) = &b.label { declared.entry(b.kind.clone()).or_default().push(l.clone()); }
-    }
-    let harness_labels: Vec<String> = declared.get("harness").cloned().unwrap_or_default();
     let mut seen_labelled: HashSet<(String, String)> = HashSet::new();
     let mut seen_single: HashSet<String> = HashSet::new();
     let mut model_refs: Vec<(String, String, Span)> = Vec::new();
@@ -321,11 +325,11 @@ pub fn build(file: &crate::ast::File) -> Result<Spec, Diagnostics> {
                     "model" => { if let Some(r) = parse_model(&mut cx, block, &mut spec) { model_refs.push(r); } }
                     "system_one" => { if let Some(r) = parse_system_one(&mut cx, block, &mut spec) { system_one_ref = Some(r); } }
                     "image" => { if let Some(r) = parse_image(&mut cx, block, &mut spec) { image_ref = Some(r); } }
-                    "api" => parse_api(&mut cx, block, &mut spec, &harness_labels),
-                    "harness" => { if let Some(r) = parse_harness(&mut cx, block, &mut spec, &harness_labels) { harness_refs.push(r); } }
+                    "api" => parse_api(&mut cx, block, &mut spec, &scope.harnesses),
+                    "harness" => { if let Some(r) = parse_harness(&mut cx, block, &mut spec, &scope.harnesses) { harness_refs.push(r); } }
                     "team" => { if let Some(r) = parse_team(&mut cx, block, &mut spec) { team_refs.push(r); } }
                     "workflow" => { if let Some(r) = parse_workflow(&mut cx, block, &mut spec) { workflow_refs.push(r); } }
-                    "output" => parse_output(&mut cx, block, &mut spec, &harness_labels),
+                    "output" => parse_output(&mut cx, block, &mut spec, &scope.harnesses),
                     // MARKER_DISPATCH
                     _ => {}
                 }
@@ -336,7 +340,7 @@ pub fn build(file: &crate::ast::File) -> Result<Spec, Diagnostics> {
     let provider_labels: Vec<String> = spec.providers.iter().map(|p| p.name.clone()).collect();
     let model_labels: Vec<String> = spec.models.iter().map(|m| m.name.clone()).collect();
     let api_labels: Vec<String> = spec.apis.iter().map(|a| a.name.clone()).collect();
-    let harness_labels2: Vec<String> = spec.harnesses.iter().map(|h| h.name.clone()).collect();
+    let spec_harnesses: Vec<String> = spec.harnesses.iter().map(|h| h.name.clone()).collect();
     let team_labels: Vec<String> = spec.teams.iter().map(|t| t.name.clone()).collect();
     if let Some((v, span)) = &defaults_policy {
         if v != "system-one" && !model_labels.contains(v) {
@@ -356,7 +360,7 @@ pub fn build(file: &crate::ast::File) -> Result<Spec, Diagnostics> {
     for (label, parent_ref, model_raw, tools_refs, span) in &harness_refs {
         let ctx = block_ctx("harness", Some(label));
         if let Some((p, s)) = parent_ref
-            && !harness_labels2.contains(p) { cx.unknown_ref(*s, format!("The harness \"{label}\" refers to an unknown parent harness \"{p}\"."), p, &harness_labels2, &ctx); }
+            && !spec_harnesses.contains(p) { cx.unknown_ref(*s, format!("The harness \"{label}\" refers to an unknown parent harness \"{p}\"."), p, &spec_harnesses, &ctx); }
         if let Some((m, s)) = model_raw
             && m != "system-one" && !model_labels.contains(m) { cx.unknown_ref(*s, format!("The harness \"{label}\" refers to an unknown model \"{m}\"."), m, &model_labels, &ctx); }
         for (t, s) in tools_refs {
@@ -370,9 +374,9 @@ pub fn build(file: &crate::ast::File) -> Result<Spec, Diagnostics> {
     }
     for (label, (root, root_span), members) in &team_refs {
         let ctx = block_ctx("team", Some(label));
-        if !harness_labels2.contains(root) { cx.unknown_ref(*root_span, format!("The team \"{label}\" refers to an unknown root harness \"{root}\"."), root, &harness_labels2, &ctx); }
+        if !spec_harnesses.contains(root) { cx.unknown_ref(*root_span, format!("The team \"{label}\" refers to an unknown root harness \"{root}\"."), root, &spec_harnesses, &ctx); }
         for (m, s) in members {
-            if !harness_labels2.contains(m) { cx.unknown_ref(*s, format!("The team \"{label}\" refers to an unknown member harness \"{m}\"."), m, &harness_labels2, &ctx); }
+            if !spec_harnesses.contains(m) { cx.unknown_ref(*s, format!("The team \"{label}\" refers to an unknown member harness \"{m}\"."), m, &spec_harnesses, &ctx); }
         }
     }
     for (label, (team, span)) in &workflow_refs {
@@ -414,12 +418,20 @@ fn parse_defaults(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Op
     policy
 }
 
+/// The variable name of an `env.NAME` reference path, if that is what the path is.
+fn env_ref(path: &[String]) -> Option<String> {
+    match Reference::parse(path) {
+        Ok(Reference::Env(name)) => Some(name),
+        _ => None,
+    }
+}
+
 fn api_key_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<String> {
     match &a.value.kind {
-        ExprKind::Ref(path) if path.len() == 2 && path[0] == "env" && !path[1].is_empty() => Some(path[1].clone()),
+        ExprKind::Ref(path) if env_ref(path).is_some() => env_ref(path),
         ExprKind::Str(parts) if parts.len() == 1 => {
             match &parts[0] {
-                StrPart::Interp(path, _) if path.len() == 2 && path[0] == "env" && !path[1].is_empty() => Some(path[1].clone()),
+                StrPart::Interp(path, _) if env_ref(path).is_some() => env_ref(path),
                 _ => { cx.err(a.value.span, "Secrets are never stored", "The argument \"api_key\" must be a bare env.NAME reference.".to_string(), Some(ctx), Some("Use env.NAME instead.".to_string())); None }
             }
         }
@@ -443,23 +455,6 @@ fn parse_provider(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
 
 /// Vault label -> the KEYs of its `secrets` map, read straight from the AST so references can be
 /// checked before the vault block itself is validated.
-fn prescan_vaults(file: &crate::ast::File) -> HashMap<String, Vec<String>> {
-    let mut out = HashMap::new();
-    for stmt in &file.stmts {
-        if let Stmt::Block(b) = stmt
-            && b.kind == "vault"
-            && let Some(label) = &b.label
-        {
-            let keys = match b.assign("secrets").map(|a| &a.value.kind) {
-                Some(ExprKind::Map(entries)) => entries.iter().map(|e| e.key.clone()).collect(),
-                _ => Vec::new(),
-            };
-            out.insert(label.clone(), keys);
-        }
-    }
-    out
-}
-
 fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("vault", Some(&label));

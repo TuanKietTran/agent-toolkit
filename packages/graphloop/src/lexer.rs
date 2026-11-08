@@ -1,4 +1,4 @@
-//! Tokens. OWNER: gl-syntax (lexer.rs and parser.rs).
+//! Tokens.
 //!
 //! Rules (docs/graphspec.md): UTF-8; `//` comments to end of line; indentation insignificant;
 //! identifiers `[a-zA-Z_][a-zA-Z0-9_-]*`; double-quoted strings `"[^"]*"` (may contain `${...}`,
@@ -24,6 +24,13 @@ pub enum Tok {
     Comma,
     Dot,
     Eof,
+    /// A `//` comment to end of line, kept as trivia for the parser to attach
+    /// to a statement. The text includes the leading `//`, verbatim.
+    Comment(String),
+    /// A lexical error (unterminated string, unexpected character, invalid
+    /// number). Lexing continued past it; the parser reports this diagnostic
+    /// exactly once when it reaches the token.
+    Error(Diagnostic),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +50,7 @@ fn is_ident_continue(c: char) -> bool {
 struct Lexer {
     chars: Vec<char>,
     pos: usize,
+    byte_pos: u32,
     line: u32,
     col: u32,
     file: String,
@@ -50,7 +58,12 @@ struct Lexer {
 
 impl Lexer {
     fn span(&self) -> Span {
-        Span { line: self.line, col: self.col }
+        Span { line: self.line, col: self.col, offset: self.byte_pos, len: 0 }
+    }
+
+    /// Fill in the byte length of a token that started at `start`, now fully consumed.
+    fn end_span(&self, start: Span) -> Span {
+        Span { len: self.byte_pos.saturating_sub(start.offset), ..start }
     }
 
     fn peek(&self) -> Option<char> {
@@ -64,6 +77,7 @@ impl Lexer {
     fn bump(&mut self) -> Option<char> {
         let c = self.peek()?;
         self.pos += 1;
+        self.byte_pos += c.len_utf8() as u32;
         if c == '\n' {
             self.line += 1;
             self.col = 1;
@@ -77,37 +91,50 @@ impl Lexer {
         Diagnostics::one(Diagnostic::error(&self.file, span, summary, detail))
     }
 
-    fn skip_ws_and_comments(&mut self) {
-        loop {
-            match self.peek() {
-                Some(c) if c.is_whitespace() => {
-                    self.bump();
-                }
-                Some('/') if self.peek_at(1) == Some('/') => {
-                    while let Some(c) = self.peek() {
-                        if c == '\n' {
-                            break;
-                        }
-                        self.bump();
-                    }
-                }
-                _ => break,
-            }
+    fn skip_ws(&mut self) {
+        while matches!(self.peek(), Some(c) if c.is_whitespace()) {
+            self.bump();
         }
     }
 
-    fn lex_string(&mut self, quote: char) -> Result<Token, Diagnostics> {
+    /// Consume a `//` comment starting at the cursor (the caller has checked
+    /// both slashes) up to but not including the newline.
+    fn lex_comment(&mut self) -> Token {
+        let start = self.span();
+        let mut text = String::new();
+        while let Some(c) = self.peek() {
+            if c == '\n' {
+                break;
+            }
+            text.push(c);
+            self.bump();
+        }
+        Token { tok: Tok::Comment(text), span: self.end_span(start) }
+    }
+
+    fn lex_string(&mut self, quote: char) -> Token {
         let start = self.span();
         self.bump(); // opening quote
         let mut text = String::new();
         loop {
             match self.peek() {
                 None => {
-                    return Err(self.err(start, "Unterminated string", "The string starting here is not terminated.".to_string()));
+                    let d = self.err(start, "Unterminated string", "The string starting here is not terminated.".to_string());
+                    return Token { tok: Tok::Error(d.0.into_iter().next().unwrap()), span: self.end_span(start) };
                 }
                 Some(c) if c == quote => {
                     self.bump();
                     break;
+                }
+                Some('\n') if quote == '"' && self.next_line_starts_statement() => {
+                    // A statement starting on the next line means this string
+                    // was never closed (its closing quote is that statement's
+                    // string): report it at the OPENING quote and leave the
+                    // newline unconsumed, so lexing resumes at the statement.
+                    // Strings may span lines, but a continuation line never
+                    // starts a statement.
+                    let d = self.err(start, "Unterminated string", "The string starting here is not terminated.".to_string());
+                    return Token { tok: Tok::Error(d.0.into_iter().next().unwrap()), span: Span { len: 1, ..start } };
                 }
                 Some(c) => {
                     text.push(c);
@@ -116,10 +143,36 @@ impl Lexer {
             }
         }
         let tok = if quote == '`' { Tok::Raw(text) } else { Tok::Str(text) };
-        Ok(Token { tok, span: start })
+        Token { tok, span: self.end_span(start) }
     }
 
-    fn lex_number(&mut self) -> Result<Token, Diagnostics> {
+    /// Recovery lookahead for an unterminated double-quoted string: the
+    /// cursor is on a `\n` inside the string; does the next line start a
+    /// statement (`ident =`, `ident {`, `ident "..." {`)? Char-level, same
+    /// line only; the cursor is not moved.
+    fn next_line_starts_statement(&self) -> bool {
+        let mut i = self.pos + 1; // skip the '\n' the cursor is on
+        while matches!(self.chars.get(i), Some(' ' | '\t')) { i += 1; }
+        let Some(&c0) = self.chars.get(i) else { return false };
+        if !is_ident_start(c0) { return false; }
+        while matches!(self.chars.get(i), Some(&c) if is_ident_continue(c)) { i += 1; }
+        while matches!(self.chars.get(i), Some(' ' | '\t')) { i += 1; }
+        match self.chars.get(i) {
+            Some('=' | '{') => true,
+            Some('"' | '`') => {
+                let q = self.chars[i];
+                i += 1;
+                while matches!(self.chars.get(i), Some(&c) if c != q && c != '\n') { i += 1; }
+                if self.chars.get(i) != Some(&q) { return false; }
+                i += 1;
+                while matches!(self.chars.get(i), Some(' ' | '\t')) { i += 1; }
+                self.chars.get(i) == Some(&'{')
+            }
+            _ => false,
+        }
+    }
+
+    fn lex_number(&mut self) -> Token {
         let start = self.span();
         let mut text = String::new();
         if self.peek() == Some('-') {
@@ -160,11 +213,15 @@ impl Lexer {
                     break;
                 }
             }
-            return Err(self.err(start, "Invalid number", format!("Invalid number '{bad}'.")));
+            let d = self.err(self.end_span(start), "Invalid number", format!("Invalid number '{bad}'."));
+            return Token { tok: Tok::Error(d.0.into_iter().next().unwrap()), span: self.end_span(start) };
         }
         match text.parse::<f64>() {
-            Ok(n) => Ok(Token { tok: Tok::Num(n), span: start }),
-            Err(_) => Err(self.err(start, "Invalid number", format!("Invalid number '{text}'."))),
+            Ok(n) => Token { tok: Tok::Num(n), span: self.end_span(start) },
+            Err(_) => {
+                let d = self.err(self.end_span(start), "Invalid number", format!("Invalid number '{text}'."));
+                Token { tok: Tok::Error(d.0.into_iter().next().unwrap()), span: self.end_span(start) }
+            }
         }
     }
 
@@ -179,40 +236,45 @@ impl Lexer {
                 break;
             }
         }
-        Token { tok: Tok::Ident(text), span: start }
+        Token { tok: Tok::Ident(text), span: self.end_span(start) }
     }
 }
 
-/// Tokenize `src`. Stops at the first error (unterminated string, stray character).
-pub fn lex(file: &str, src: &str) -> Result<Vec<Token>, Diagnostics> {
-    let mut lx = Lexer { chars: src.chars().collect(), pos: 0, line: 1, col: 1, file: file.to_string() };
+/// Tokenize `src`. Never fails: a bad token (unterminated string, stray
+/// character, invalid number) becomes a `Tok::Error` carrying its diagnostic
+/// and lexing continues, so later tokens are still produced.
+pub fn lex(file: &str, src: &str) -> Vec<Token> {
+    let mut lx = Lexer { chars: src.chars().collect(), pos: 0, byte_pos: 0, line: 1, col: 1, file: file.to_string() };
     let mut tokens = Vec::new();
     loop {
-        lx.skip_ws_and_comments();
+        lx.skip_ws();
         let span = lx.span();
         let Some(c) = lx.peek() else {
             tokens.push(Token { tok: Tok::Eof, span });
             break;
         };
         let token = match c {
-            '"' => lx.lex_string('"')?,
-            '`' => lx.lex_string('`')?,
-            '{' => { lx.bump(); Token { tok: Tok::LBrace, span } }
-            '}' => { lx.bump(); Token { tok: Tok::RBrace, span } }
-            '[' => { lx.bump(); Token { tok: Tok::LBracket, span } }
-            ']' => { lx.bump(); Token { tok: Tok::RBracket, span } }
-            '=' => { lx.bump(); Token { tok: Tok::Eq, span } }
-            ',' => { lx.bump(); Token { tok: Tok::Comma, span } }
-            '.' => { lx.bump(); Token { tok: Tok::Dot, span } }
-            _ if c.is_ascii_digit() || (c == '-' && lx.peek_at(1).is_some_and(|n| n.is_ascii_digit())) => lx.lex_number()?,
+            '/' if lx.peek_at(1) == Some('/') => lx.lex_comment(),
+            '"' => lx.lex_string('"'),
+            '`' => lx.lex_string('`'),
+            '{' => { lx.bump(); Token { tok: Tok::LBrace, span: lx.end_span(span) } }
+            '}' => { lx.bump(); Token { tok: Tok::RBrace, span: lx.end_span(span) } }
+            '[' => { lx.bump(); Token { tok: Tok::LBracket, span: lx.end_span(span) } }
+            ']' => { lx.bump(); Token { tok: Tok::RBracket, span: lx.end_span(span) } }
+            '=' => { lx.bump(); Token { tok: Tok::Eq, span: lx.end_span(span) } }
+            ',' => { lx.bump(); Token { tok: Tok::Comma, span: lx.end_span(span) } }
+            '.' => { lx.bump(); Token { tok: Tok::Dot, span: lx.end_span(span) } }
+            _ if c.is_ascii_digit() || (c == '-' && lx.peek_at(1).is_some_and(|n| n.is_ascii_digit())) => lx.lex_number(),
             _ if is_ident_start(c) => lx.lex_ident(),
             _ => {
-                return Err(lx.err(span, "Unexpected character", format!("Unexpected character '{c}'.")));
+                let d = lx.err(Span { len: c.len_utf8() as u32, ..span }, "Unexpected character", format!("Unexpected character '{c}'."));
+                lx.bump();
+                Token { tok: Tok::Error(d.0.into_iter().next().unwrap()), span: lx.end_span(span) }
             }
         };
         tokens.push(token);
     }
-    Ok(tokens)
+    tokens
 }
 
 #[cfg(test)]
@@ -220,13 +282,25 @@ mod tests {
     use super::*;
 
     fn toks(src: &str) -> Vec<Token> {
-        lex("test.yah", src).unwrap()
+        lex("test.yah", src)
     }
 
     fn err(src: &str) -> Diagnostic {
-        let d = lex("test.yah", src).unwrap_err();
-        assert_eq!(d.0.len(), 1);
-        d.0[0].clone()
+        let errs: Vec<Diagnostic> = lex("test.yah", src).iter().filter_map(|t| match &t.tok { Tok::Error(d) => Some(d.clone()), _ => None }).collect();
+        assert_eq!(errs.len(), 1, "{errs:?}");
+        errs[0].clone()
+    }
+
+    #[test]
+    fn token_spans_carry_byte_offset_and_len() {
+        let t = toks("yah 1\nx = \"ab\"");
+        assert_eq!((t[0].span.offset, t[0].span.len), (0, 3));
+        assert_eq!((t[1].span.offset, t[1].span.len), (4, 1));
+        let str_tok = t.iter().find(|t| matches!(t.tok, Tok::Str(_))).unwrap();
+        assert_eq!((str_tok.span.offset, str_tok.span.len), (10, 4));
+        // Byte offsets, not char counts: the two-byte 'é' makes the token 4 bytes.
+        let t2 = toks("\"é\"");
+        assert_eq!((t2[0].span.offset, t2[0].span.len), (0, 4));
     }
 
     #[test]
@@ -265,12 +339,17 @@ mod tests {
     }
 
     #[test]
-    fn comments_are_skipped_everywhere() {
+    fn comments_are_kept_as_tokens_in_place() {
         let t = toks("// lead\nyah // mid\n1 // tail");
-        assert_eq!(t[0].tok, Tok::Ident("yah".into()));
-        assert_eq!((t[0].span.line, t[0].span.col), (2, 1));
-        assert_eq!(t[1].tok, Tok::Num(1.0));
-        assert_eq!((t[1].span.line, t[1].span.col), (3, 1));
+        assert_eq!(t[0].tok, Tok::Comment("// lead".into()));
+        assert_eq!((t[0].span.line, t[0].span.col), (1, 1));
+        assert_eq!(t[1].tok, Tok::Ident("yah".into()));
+        assert_eq!((t[1].span.line, t[1].span.col), (2, 1));
+        assert_eq!(t[2].tok, Tok::Comment("// mid".into()));
+        assert_eq!((t[2].span.line, t[2].span.col), (2, 5));
+        assert_eq!(t[3].tok, Tok::Num(1.0));
+        assert_eq!((t[3].span.line, t[3].span.col), (3, 1));
+        assert_eq!(t[4].tok, Tok::Comment("// tail".into()));
     }
 
     #[test]
@@ -337,6 +416,18 @@ mod tests {
     }
 
     #[test]
+    fn bad_char_becomes_error_token_and_lexing_continues() {
+        // S5b(d): a stray character is an Error token, not an abort — the
+        // tokens after it are still produced.
+        let t = toks("@ x = 1");
+        assert!(matches!(t[0].tok, Tok::Error(_)));
+        assert_eq!(t[1].tok, Tok::Ident("x".into()));
+        assert_eq!(t[2].tok, Tok::Eq);
+        assert_eq!(t[3].tok, Tok::Num(1.0));
+        assert_eq!(t[4].tok, Tok::Eof);
+    }
+
+    #[test]
     fn lone_minus_is_unexpected() {
         let d = err("- x");
         assert_eq!(d.summary, "Unexpected character");
@@ -364,8 +455,11 @@ mod tests {
     #[test]
     fn non_ascii_in_comment_does_not_shift_next_line() {
         let t = toks("// caf\u{e9} \u{2615}\nyah 1");
-        assert_eq!(t[0].span.line, 2);
-        assert_eq!(t[0].span.col, 1);
+        assert_eq!(t[0].tok, Tok::Comment("// caf\u{e9} \u{2615}".into()));
+        assert_eq!((t[0].span.line, t[0].span.col), (1, 1));
+        assert_eq!(t[1].tok, Tok::Ident("yah".into()));
+        assert_eq!(t[1].span.line, 2);
+        assert_eq!(t[1].span.col, 1);
     }
 
     #[test]

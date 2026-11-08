@@ -1,4 +1,4 @@
-//! Team -> `h1 open` commands and graph edges. OWNER: gl-plan.
+//! Team -> `h1 open` commands and graph edges.
 //!
 //! Orchestration rules 1 and 3 (docs/graphspec.md): every harness with `kind = "h1"` is
 //! started by `h1 open -n NAME --role ROLE [--parent PARENT] --model <resolved> ...`;
@@ -78,7 +78,7 @@ fn session_name(label: &str, prefix: Option<&str>) -> String {
 }
 
 fn error(spec: &Spec, line: u32, summary: impl Into<String>, detail: impl Into<String>) -> Diagnostic {
-    Diagnostic::error(&spec.file, Span { line, col: 1 }, summary, detail)
+    Diagnostic::error(&spec.file, Span { line, col: 1, offset: 0, len: 0 }, summary, detail)
 }
 
 /// Why a session name is invalid, or `None` when it is valid: 1..=40 chars of `[A-Za-z0-9._-]`,

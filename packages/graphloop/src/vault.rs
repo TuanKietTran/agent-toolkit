@@ -126,6 +126,24 @@ fn kill_process_group(child: &Child) {
 #[cfg(not(unix))]
 fn kill_process_group(_child: &Child) {}
 
+/// `Command::spawn`, retried while the program file is "busy". ETXTBSY (errno 26 on Linux and macOS) is
+/// transient by definition: it appears when the file was written an instant ago and a handle opened for
+/// writing is still alive, for example in a forked child that has not reached `exec` yet. Any other error,
+/// including a missing program, is returned at once.
+fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
+    #[cfg(unix)]
+    {
+        const ETXTBSY: i32 = 26;
+        for _ in 0..40 {
+            match cmd.spawn() {
+                Err(e) if e.raw_os_error() == Some(ETXTBSY) => std::thread::sleep(Duration::from_millis(25)),
+                other => return other,
+            }
+        }
+    }
+    cmd.spawn()
+}
+
 /// Run `argv` (no shell), return stdout without its trailing newline. This is the ONE shared
 /// failure path for every external vault provider (the `command` arm and the CLI providers
 /// via `run_provider`): on a non-zero exit the error carries the program name and the exit
@@ -145,7 +163,7 @@ pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Dur
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    let mut child = cmd.spawn().map_err(|e| format!("could not run {name}: {e}"))?;
+    let mut child = spawn_retrying(&mut cmd).map_err(|e| format!("could not run {name}: {e}"))?;
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
     let out_reader = std::thread::spawn(move || {

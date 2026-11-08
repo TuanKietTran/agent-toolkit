@@ -1,6 +1,6 @@
 //! Terraform-style diagnostics with `file:line` (docs/graphspec.md, "Error format").
 //!
-//! SHARED CONTRACT for the types. The `render` body is owned by `gl-resolve`.
+//! The types are a stable interface that the other stages and the console rely on.
 
 use serde::Serialize;
 
@@ -35,6 +35,9 @@ pub struct Diagnostic {
     /// 1-based line and column of the offending token or block.
     pub line: u32,
     pub col: u32,
+    /// Byte length of the offending token (from its `Span`); the renderer underlines
+    /// that many characters starting at `col`. `0` renders as a single caret.
+    pub len: u32,
     /// Short title: `Missing required argument`, `Unsupported argument`, `Unknown reference` ...
     pub summary: String,
     /// The sentence under the source line.
@@ -52,6 +55,7 @@ impl Diagnostic {
             file: file.to_owned(),
             line: at.line,
             col: at.col,
+            len: at.len,
             summary: summary.into(),
             detail: detail.into(),
             context: None,
@@ -70,8 +74,8 @@ impl Diagnostic {
     }
 }
 
-/// An ordered list of problems. Lexer and parser stop at the first one; `resolve` and `schema`
-/// collect all of them.
+/// An ordered list of problems. The lexer stops at the first one; the parser recovers and
+/// collects up to 20; `resolve` and `schema` collect all of them.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Diagnostics(pub Vec<Diagnostic>);
 
@@ -98,7 +102,7 @@ impl Diagnostics {
     }
 
     /// Terraform-style text for every diagnostic. `source` is the file's text, used to print the
-    /// offending line. OWNER: gl-resolve.
+    /// offending line.
     pub fn render(&self, source: &str) -> String {
         if self.0.is_empty() {
             return String::new();
@@ -118,7 +122,43 @@ impl Diagnostics {
             }
             block.push(':');
             if let Some(text) = d.line.checked_sub(1).and_then(|i| lines.get(i as usize)) {
-                block.push_str(&format!("\n  {}: {}", d.line, text.trim_end()));
+                let text = text.trim_end();
+                // Caret line under the exact token: the source text starts after
+                // the "  " + line-digits + ": " prefix, then `col - 1` characters in.
+                let col0 = d.col.saturating_sub(1) as usize;
+                let line_chars = text.chars().count();
+                // A stored-secret diagnostic must never echo the secret: replace
+                // the spanned value with `***` (keeping its surrounding quotes,
+                // if any) and underline the masked form instead, so neither the
+                // value nor its length leaks into the rendered output.
+                let (display, caret_len) = if d.summary == "Secrets are never stored" && col0 < line_chars {
+                    let span_len = (d.len.max(1) as usize).min(line_chars - col0);
+                    let chars: Vec<char> = text.chars().collect();
+                    let first = chars[col0];
+                    let last = chars[col0 + span_len - 1];
+                    let masked = if span_len >= 2 && (first == '"' || first == '`') && last == first { format!("{first}***{first}") } else { "***".to_string() };
+                    let masked_len = masked.chars().count();
+                    let mut display: String = chars[..col0].iter().collect();
+                    display.push_str(&masked);
+                    display.extend(&chars[col0 + span_len..]);
+                    (display, Some(masked_len))
+                } else {
+                    (text.to_string(), None)
+                };
+                block.push_str(&format!("\n  {}: {}", d.line, display));
+                if col0 < line_chars {
+                    let carets = caret_len.unwrap_or_else(|| (d.len.max(1) as usize).min(line_chars - col0));
+                    let prefix = 2 + d.line.to_string().len() + 2;
+                    // Copy TABs from the source prefix verbatim (every other
+                    // character becomes a space) so the caret aligns under the
+                    // token on tab-indented lines at any tab width.
+                    let padding: String = text
+                        .chars()
+                        .take(col0)
+                        .map(|c| if c == '\t' { '\t' } else { ' ' })
+                        .collect();
+                    block.push_str(&format!("\n{}{}{}", " ".repeat(prefix), padding, "^".repeat(carets)));
+                }
             }
             block.push_str("\n\n");
             block.push_str(&d.detail);
@@ -209,6 +249,7 @@ mod tests {
             file: "team.yah".to_owned(),
             line,
             col: 3,
+            len: 1,
             summary: summary.to_owned(),
             detail: detail.to_owned(),
             context: None,
@@ -224,7 +265,7 @@ mod tests {
         let d = make_diag(Severity::Error, 31, "Unsupported argument", "An argument named \"modle\" is not expected here.")
             .with_context("harness \"builder\"")
             .with_hint("Did you mean \"model\"?");
-        let expected = "Error: Unsupported argument\n\n  on team.yah line 31, in harness \"builder\":\n  31:   modle = \"sonnet\"\n\nAn argument named \"modle\" is not expected here.\n\nDid you mean \"model\"?\n";
+        let expected = "Error: Unsupported argument\n\n  on team.yah line 31, in harness \"builder\":\n  31:   modle = \"sonnet\"\n        ^\n\nAn argument named \"modle\" is not expected here.\n\nDid you mean \"model\"?\n";
         assert_eq!(Diagnostics(vec![d]).render(&source), expected);
     }
 
@@ -232,8 +273,46 @@ mod tests {
     fn render_warning_without_context_or_hint() {
         let source = "yah 1\nx = 1\n";
         let d = make_diag(Severity::Warning, 2, "Heads up", "Something happened.");
-        let expected = "Warning: Heads up\n\n  on team.yah line 2:\n  2: x = 1\n\nSomething happened.\n";
+        let expected = "Warning: Heads up\n\n  on team.yah line 2:\n  2: x = 1\n       ^\n\nSomething happened.\n";
         assert_eq!(Diagnostics(vec![d]).render(source), expected);
+    }
+
+    #[test]
+    fn render_underlines_exact_token() {
+        let mut source_lines: Vec<String> = (1..=30).map(|i| format!("filler {i}")).collect();
+        source_lines.push("  modle = \"sonnet\"".to_owned());
+        let source = source_lines.join("\n");
+        let mut d = make_diag(Severity::Error, 31, "Unsupported argument", "An argument named \"modle\" is not expected here.");
+        d.len = 5;
+        let out = Diagnostics(vec![d]).render(&source);
+        assert!(out.contains("\n  31:   modle = \"sonnet\"\n        ^^^^^\n"), "got: {out:?}");
+    }
+
+    #[test]
+    fn render_caret_padding_copies_tabs() {
+        let source = "yah 1\n\t\tmodle = \"sonnet\"\n";
+        let mut d = make_diag(Severity::Error, 2, "Unsupported argument", "An argument named \"modle\" is not expected here.");
+        d.col = 3;
+        d.len = 5;
+        let out = Diagnostics(vec![d]).render(source);
+        // Prefix is 5 spaces (\"  2: \"), then the two source TABs verbatim,
+        // then the carets directly under `modle`.
+        assert!(out.contains("\n  2: \t\tmodle = \"sonnet\"\n     \t\t^^^^^\n"), "got: {out:?}");
+    }
+
+    #[test]
+    fn render_masks_stored_secret() {
+        let source = "yah 1\n  api_key = \"MARKERSECRET9981\"\n";
+        let mut d = make_diag(Severity::Error, 2, "Secrets are never stored", "The argument \"api_key\" must be a bare env.NAME reference.");
+        d.col = 13;
+        d.len = 18;
+        let out = Diagnostics(vec![d]).render(source);
+        assert!(out.contains("\"***\""), "got: {out:?}");
+        assert!(!out.contains("MARKERSECRET9981"), "got: {out:?}");
+        let src_line = out.lines().find(|l| l.contains("api_key")).unwrap();
+        let caret_line = out.lines().find(|l| l.contains('^')).unwrap();
+        assert_eq!(src_line.find("\"***\""), caret_line.find('^'));
+        assert_eq!(caret_line.matches('^').count(), 5);
     }
 
     #[test]

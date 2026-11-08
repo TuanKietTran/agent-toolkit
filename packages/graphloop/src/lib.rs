@@ -12,20 +12,24 @@
 //!        --cli------> `graphloop up` opens the labs, writes a manifest the console and lab-gui draw
 //! ```
 //!
-//! Owners are named in each module's header; the types in `ast`, `spec`, `diag`, `pick` (the data
-//! types) and `manifest` are the shared contract and change only by agreement with the commander.
+//! The types in `ast`, `spec`, `diag`, `pick` (the data types) and `manifest` are the stable
+//! interface between the stages; change them deliberately.
 
 pub mod ast;
 pub mod cli;
 pub mod diag;
 pub mod envfile;
+pub mod fmt;
 pub mod lexer;
 pub mod load;
 pub mod manifest;
 pub mod parser;
 pub mod pick;
 pub mod plan;
+pub mod refs;
 pub mod resolve;
 pub mod schema;
+pub mod scope;
 pub mod spec;
 pub mod vault;
+pub mod visit;

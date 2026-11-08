@@ -312,6 +312,10 @@ fn planned_probe(info: &crate::graphspec::NodeInfo) -> Probe {
             role: if info.node.role.is_empty() { None } else { Some(info.node.role.clone()) },
             parent: info.node.parent.clone(),
             model: if info.node.model.is_empty() { None } else { Some(info.node.model.clone()) },
+            brief: None,
+            resume_log: None,
+            new_cmd: None,
+            ready_regex: None,
         },
         state: "planned".into(),
         screen: String::new(),
@@ -359,18 +363,17 @@ fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, over
     }
     let mut ordered: Vec<Lab> = Vec::new();
     let mut seen: HashSet<usize> = HashSet::new();
-    #[allow(clippy::too_many_arguments)]
-    fn walk(
-        index: usize,
-        depth: usize,
-        trail: &str,
-        last: bool,
-        probes: &[Probe],
-        kids: &HashMap<String, Vec<usize>>,
-        history: &HashMap<String, VecDeque<u64>>,
-        seen: &mut HashSet<usize>,
-        out: &mut Vec<Lab>,
-    ) {
+    // Shared read-only indexes for the recursive forest walk, grouped so
+    // `walk` needs no clippy::too_many_arguments suppression.
+    struct Forest<'a> {
+        probes: &'a [Probe],
+        kids: &'a HashMap<String, Vec<usize>>,
+        history: &'a HashMap<String, VecDeque<u64>>,
+    }
+    fn walk(index: usize, depth: usize, trail: &str, last: bool, forest: &Forest, seen: &mut HashSet<usize>, out: &mut Vec<Lab>) {
+        let probes = forest.probes;
+        let kids = forest.kids;
+        let history = forest.history;
         if !seen.insert(index) {
             return;
         }
@@ -396,15 +399,16 @@ fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, over
         });
         let next_trail = if depth == 0 { String::new() } else { format!("{trail}{}", if last { "   " } else { "│  " }) };
         for (n, child) in children.iter().enumerate() {
-            walk(*child, depth + 1, &next_trail, n + 1 == children.len(), probes, kids, history, seen, out);
+            walk(*child, depth + 1, &next_trail, n + 1 == children.len(), forest, seen, out);
         }
     }
+    let forest = Forest { probes, kids: &kids, history };
     for root in roots {
-        walk(root, 0, "", true, probes, &kids, history, &mut seen, &mut ordered);
+        walk(root, 0, "", true, &forest, &mut seen, &mut ordered);
     }
     // cycles: nothing above reached them
     for index in 0..probes.len() {
-        walk(index, 0, "", true, probes, &kids, history, &mut seen, &mut ordered);
+        walk(index, 0, "", true, &forest, &mut seen, &mut ordered);
     }
     ordered
 }
@@ -1686,6 +1690,17 @@ fn draw_peek(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(text).block(block), rect);
 }
 
+/// True only for env-NAME-shaped strings (`[A-Za-z_][A-Za-z0-9_]*`); anything value-shaped
+/// (contains `=`, `-`, spaces, starts with a digit, ...) is dropped, never printed.
+fn is_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
     let Some(lab) = app.selected_lab() else { return };
     let rect = Rect { x: area.x, y: area.y + 6, width: area.width, height: area.height.saturating_sub(7) };
@@ -1719,17 +1734,19 @@ fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
             None => pick.via.clone(),
         };
         let pick_text = if pick.reason.is_empty() { via } else { format!("{via} · {}", pick.reason) };
-        lines.splice(
-            5..5,
-            [
-                line("Team:", info.team.clone()),
-                line("Run:", info.run.clone()),
-                line("Harness:", info.node.harness.clone()),
-                line("Requested:", info.node.requested_model.clone()),
-                line("Pick:", pick_text),
-                line("Trace:", info.trace_dir.clone().unwrap_or_else(|| "-".into())),
-            ],
-        );
+        let mut extra = vec![
+            line("Team:", info.team.clone()),
+            line("Run:", info.run.clone()),
+            line("Harness:", info.node.harness.clone()),
+            line("Requested:", info.node.requested_model.clone()),
+            line("Pick:", pick_text),
+            line("Trace:", info.trace_dir.clone().unwrap_or_else(|| "-".into())),
+        ];
+        let secrets: Vec<String> = info.node.vault_env.iter().filter(|name| is_env_name(name)).cloned().collect();
+        if !secrets.is_empty() {
+            extra.push(line("Secrets (names only):", format!(" {}", secrets.join(", "))));
+        }
+        lines.splice(5..5, extra);
     }
     let mut screen: Vec<&str> = lab.probe.screen.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
     let keep = 14;
@@ -1910,6 +1927,10 @@ mod tests {
                 role: role.map(Into::into),
                 parent: parent.map(Into::into),
                 model: None,
+                brief: None,
+                resume_log: None,
+                new_cmd: None,
+                ready_regex: None,
             },
             state: state.into(),
             screen: format!("{name} screen line\n"),
@@ -2135,6 +2156,33 @@ mod tests {
         app.mode = Mode::Describe;
         let text = render_text(&mut app, 120, 30).unwrap();
         assert!(text.contains("Children:") && text.contains("w1, w2"), "{text}");
+    }
+
+    #[test]
+    fn describe_shows_vault_env_names_only_and_omits_section_when_absent() {
+        let manifest_with: crate::graphspec::Manifest = serde_json::from_str(
+            r#"{"version":1,"run":"run-1","team":"default","source":"/tmp/x.yah","root":"mgr1","created_ms":1,"nodes":[{"name":"mgr1","harness":"mgr","role":"manager","parent":null,"requested_model":"system-one","model":"anthropic/claude-sonnet-5-5","model_label":"sonnet","pick":{"via":"system-one","rule":"R3","reason":"","degraded_level":0},"tools":[],"vault_env":["FLEET_TOKEN","OTHER_TOKEN","FLEET_TOKEN=abc123xyz","sk-abc123xyz"]}],"edges":[]}"#,
+        )
+        .unwrap();
+        let mut app = App::new(View::Labs, 1000);
+        app.apply(fleet());
+        app.overlay = crate::graphspec::overlay(&["mgr1"], &[manifest_with]);
+        app.mode = Mode::Describe;
+        let text = render_text(&mut app, 150, 36).unwrap();
+        assert!(text.contains("Secrets (names only):"), "{text}");
+        assert!(text.contains("FLEET_TOKEN") && text.contains("OTHER_TOKEN"), "{text}");
+        assert!(!text.contains("abc123xyz"), "value-shaped entry leaked in\n{text}");
+        let manifest_without: crate::graphspec::Manifest = serde_json::from_str(
+            r#"{"version":1,"run":"run-1","team":"default","source":"/tmp/x.yah","root":"mgr1","created_ms":1,"nodes":[{"name":"mgr1","harness":"mgr","role":"manager","parent":null,"requested_model":"system-one","model":"anthropic/claude-sonnet-5-5","model_label":"sonnet","pick":{"via":"system-one","rule":"R3","reason":"","degraded_level":0},"tools":[]}],"edges":[]}"#,
+        )
+        .unwrap();
+        let mut app = App::new(View::Labs, 1000);
+        app.apply(fleet());
+        app.overlay = crate::graphspec::overlay(&["mgr1"], &[manifest_without]);
+        app.mode = Mode::Describe;
+        let text = render_text(&mut app, 150, 36).unwrap();
+        assert!(text.contains("Team:") && text.contains("Children:"), "{text}");
+        assert!(!text.contains("Secrets"), "no vault_env must render unchanged in\n{text}");
     }
 
     #[test]

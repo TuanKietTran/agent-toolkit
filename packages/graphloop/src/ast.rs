@@ -19,6 +19,10 @@ use serde::Serialize;
 pub struct Span {
     pub line: u32,
     pub col: u32,
+    /// 0-based byte offset of the first character into the source.
+    pub offset: u32,
+    /// Byte length of the token (0 for synthetic spans with no source token).
+    pub len: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -28,6 +32,10 @@ pub struct File {
     /// The integer after `yah` in the header.
     pub version: u32,
     pub stmts: Vec<Stmt>,
+    /// Comments not attached to any statement: everything after the last
+    /// statement, or all comments in a file with no statements. Full `//...`
+    /// text in source order, no trailing newline.
+    pub tail_comments: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,6 +51,10 @@ pub struct Block {
     pub label: Option<String>,
     pub body: Vec<Stmt>,
     pub span: Span,
+    /// `//` comments on the lines immediately above this block, full text, source order.
+    pub leading: Vec<String>,
+    /// `//` comment on the same line as this block's closing `}`, if any.
+    pub trailing: Option<String>,
 }
 
 /// `key = value`. Also the entries of a map value.
@@ -52,6 +64,10 @@ pub struct Assign {
     pub value: Expr,
     /// Position of the key.
     pub span: Span,
+    /// `//` comments on the lines immediately above this assignment, full text, source order.
+    pub leading: Vec<String>,
+    /// `//` comment on the same line after this assignment's value, if any.
+    pub trailing: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -77,6 +93,11 @@ pub enum ExprKind {
 pub enum StrPart {
     Lit(String),
     /// `${env.NAME}` -> `["env","NAME"]`. v1 expressions are reference paths only.
+    ///
+    /// EXTENSION POINT: this is the ONLY expression form today — `.yah` is a declarative
+    /// language and no interpreter is wanted. A future `Expr::Call` or conditional form
+    /// would go here, as a new expression form alongside this one, resolved by the same
+    /// resolver pass; until then, `Interp` (a reference path) is the only form.
     Interp(Vec<String>, Span),
 }
 
