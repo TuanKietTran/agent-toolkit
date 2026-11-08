@@ -135,11 +135,21 @@ fn a_literal_secret_in_the_secrets_map_is_rejected() {
 }
 
 #[test]
-fn command_provider_requires_a_command_and_dotenv_rejects_one() {
+fn command_provider_requires_a_command_and_other_providers_ignore_one() {
     let e = errors(&GOOD.replace("provider = \"env\"", "provider = \"command\""));
     assert!(e.contains("command") && e.contains("required"), "{e}");
-    let e = errors(&GOOD.replace("provider = \"env\"", "provider = \"env\"\n  command = [\"x\"]"));
-    assert!(e.contains("not used by"), "{e}");
+    // Keys another backend uses are accepted and ignored, so provider = var.x can switch backends.
+    let spec = load(&GOOD.replace("provider = \"env\"", "provider = \"env\"\n  command = [\"x\"]\n  path = \"other.env\"")).unwrap();
+    assert_eq!(spec.vault("any").unwrap().command, vec!["x".to_owned()]);
+}
+
+#[test]
+fn one_block_can_switch_backend_with_a_variable() {
+    let src = GOOD.replace("vault \"any\" {\n  provider = \"env\"\n}", "variable \"backend\" {\n  default = \"dotenv\"\n}\n\nvault \"any\" {\n  provider = var.backend\n  path = \"x.env\"\n  command = [\"op\", \"read\", \"{ref}\"]\n}");
+    assert_eq!(load(&src).unwrap().vault("any").unwrap().provider, "dotenv");
+    let mut over = BTreeMap::new();
+    over.insert("backend".to_owned(), "command".to_owned());
+    assert_eq!(load_str("t.yah", &src, &over).unwrap().vault("any").unwrap().provider, "command");
 }
 
 #[test]

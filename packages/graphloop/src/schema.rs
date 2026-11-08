@@ -480,14 +480,8 @@ fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
         }
     }
     if let Some(info) = info {
-        for key in ["path", "account", "command"] {
-            if let Some(a) = assigns.get(key)
-                && !info.keys.contains(&key)
-            {
-                let accepted = if info.keys.is_empty() { "no extra arguments".to_owned() } else { info.keys.join(", ") };
-                cx.err(a.span, "Unsupported argument", format!("The argument \"{key}\" is not used by the \"{}\" provider, which accepts {accepted}.", info.name), Some(&ctx), None);
-            }
-        }
+        // Keys the selected provider does not use are accepted and ignored on purpose, so one block can
+        // carry the settings of every backend and `provider = var.backend` can switch between them.
         for key in info.required {
             if !assigns.contains_key(*key) { cx.missing(block.span, key, &ctx); }
         }
