@@ -107,6 +107,9 @@ struct Parser {
     file: String,
     /// Syntax errors recovered from so far (capped at `MAX_ERRORS`).
     errors: Diagnostics,
+    /// Comment trivia collected but not yet attached to a statement (S4),
+    /// in source order.
+    pending: Vec<(String, Span)>,
 }
 
 impl Parser {
@@ -138,6 +141,26 @@ impl Parser {
             }
             self.errors.push(d);
         }
+    }
+
+    /// Move any comment tokens at the cursor into `pending`, in source order.
+    fn collect_comments(&mut self) {
+        while let Tok::Comment(text) = self.peek().clone() {
+            let span = self.peek_span();
+            self.pending.push((text, span));
+            self.bump();
+        }
+    }
+
+    /// Drain `pending`, returning just the comment texts in source order.
+    fn take_pending(&mut self) -> Vec<String> {
+        self.pending.drain(..).map(|(text, _)| text).collect()
+    }
+
+    /// Line of the most recently consumed non-comment token (1 if none).
+    fn last_consumed_line(&self) -> u32 {
+        let upto = self.pos.min(self.tokens.len());
+        self.tokens[..upto].iter().rev().find(|t| !matches!(t.tok, Tok::Comment(_))).map(|t| t.span.line).unwrap_or(1)
     }
 
     fn peek_at(&self, offset: usize) -> &Tok {
@@ -240,6 +263,7 @@ impl Parser {
     fn parse_statements_until_brace(&mut self, opener: Span) -> Vec<ast::Stmt> {
         let mut body = Vec::new();
         loop {
+            self.collect_comments();
             match self.peek() {
                 Tok::RBrace => {
                     self.bump();
@@ -288,7 +312,39 @@ impl Parser {
         self.parse_statements_until_brace(opener)
     }
 
+    /// Parse one statement and attach comment trivia to it (S4). Comments
+    /// collected before the statement are its `leading`; comments collected
+    /// while parsing it (inside a list/map, or in a block body after its last
+    /// inner statement) are hoisted onto its `leading` too, in source order;
+    /// the last comment on the line the statement ends on is its `trailing`;
+    /// comments on later lines stay pending for the next statement, or become
+    /// the file's `tail_comments` at EOF.
     fn parse_statement(&mut self) -> Result<ast::Stmt, Diagnostics> {
+        self.collect_comments();
+        let mut leading: Vec<String> = self.take_pending();
+        let mut stmt = self.parse_statement_bare()?;
+        let end_line = self.last_consumed_line();
+        self.collect_comments();
+        let pending = std::mem::take(&mut self.pending);
+        let trail_idx = pending.iter().rposition(|(_, s)| s.line == end_line);
+        let mut trailing = None;
+        for (i, (text, span)) in pending.into_iter().enumerate() {
+            if Some(i) == trail_idx {
+                trailing = Some(text);
+            } else if span.line <= end_line {
+                leading.push(text);
+            } else {
+                self.pending.push((text, span));
+            }
+        }
+        match &mut stmt {
+            ast::Stmt::Assign(a) => { a.leading = leading; a.trailing = trailing; }
+            ast::Stmt::Block(b) => { b.leading = leading; b.trailing = trailing; }
+        }
+        Ok(stmt)
+    }
+
+    fn parse_statement_bare(&mut self) -> Result<ast::Stmt, Diagnostics> {
         let start_span = self.peek_span();
         if let Tok::Error(d) = self.peek().clone() {
             // A lexical error standing where a statement starts: report it
@@ -301,24 +357,26 @@ impl Parser {
         };
         let ident_span = start_span;
         self.bump();
+        self.collect_comments();
         match self.peek().clone() {
             Tok::Eq => {
                 self.bump();
                 let value = self.parse_value()?;
-                Ok(ast::Stmt::Assign(ast::Assign { key: kind, value, span: ident_span }))
+                Ok(ast::Stmt::Assign(ast::Assign { key: kind, value, span: ident_span, leading: Vec::new(), trailing: None }))
             }
             Tok::LBrace => {
                 let body = self.parse_block_body();
-                Ok(ast::Stmt::Block(ast::Block { kind, label: None, body, span: ident_span }))
+                Ok(ast::Stmt::Block(ast::Block { kind, label: None, body, span: ident_span, leading: Vec::new(), trailing: None }))
             }
             Tok::Str(label) => {
                 self.bump();
+                self.collect_comments();
                 if *self.peek() != Tok::LBrace {
                     let span = self.peek_span();
                     return Err(self.error(span, "Expected \"=\" or \"{\"", "Expected \"{\" after a block label."));
                 }
                 let body = self.parse_block_body();
-                Ok(ast::Stmt::Block(ast::Block { kind, label: Some(label), body, span: ident_span }))
+                Ok(ast::Stmt::Block(ast::Block { kind, label: Some(label), body, span: ident_span, leading: Vec::new(), trailing: None }))
             }
             _ => {
                 let span = self.peek_span();
@@ -328,6 +386,7 @@ impl Parser {
     }
 
     fn parse_value(&mut self) -> Result<Expr, Diagnostics> {
+        self.collect_comments();
         let span = self.peek_span();
         match self.peek().clone() {
             Tok::Error(d) => {
@@ -373,6 +432,7 @@ impl Parser {
                 self.bump();
                 let mut items = Vec::new();
                 loop {
+                    self.collect_comments();
                     match self.peek() {
                         Tok::RBracket => {
                             self.bump();
@@ -384,6 +444,7 @@ impl Parser {
                         _ => {}
                     }
                     items.push(self.parse_value()?);
+                    self.collect_comments();
                     match self.peek() {
                         Tok::Comma => {
                             self.bump();
@@ -404,6 +465,7 @@ impl Parser {
                 self.bump();
                 let mut entries = Vec::new();
                 loop {
+                    self.collect_comments();
                     match self.peek() {
                         Tok::RBrace => {
                             self.bump();
@@ -425,7 +487,8 @@ impl Parser {
                     }
                     self.bump();
                     let value = self.parse_value()?;
-                    entries.push(ast::Assign { key, value, span: key_span });
+                    entries.push(ast::Assign { key, value, span: key_span, leading: Vec::new(), trailing: None });
+                    self.collect_comments();
                     if *self.peek() == Tok::Comma {
                         self.bump();
                     }
@@ -444,14 +507,31 @@ impl Parser {
 pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
     let tokens = lexer::lex(file, src);
     // Header: Ident("yah") then Num(1).
-    let first = tokens.first().cloned().unwrap_or(Token { tok: Tok::Eof, span: Span { line: 1, col: 1, offset: 0, len: 0 } });
+    // Comments before the header, or between `yah` and the version, are
+    // trivia: skip them for the header check, keep them as pending.
+    let mut idx = 0;
+    let mut initial_pending: Vec<(String, Span)> = Vec::new();
+    while let Some(t) = tokens.get(idx) {
+        match &t.tok {
+            Tok::Comment(text) => { initial_pending.push((text.clone(), t.span)); idx += 1; }
+            _ => break,
+        }
+    }
+    let first = tokens.get(idx).cloned().unwrap_or(Token { tok: Tok::Eof, span: Span { line: 1, col: 1, offset: 0, len: 0 } });
     if let Tok::Error(d) = &first.tok {
         return Err(Diagnostics::one(d.clone()));
     }
     if first.tok != Tok::Ident("yah".to_string()) {
         return Err(err(file, first.span, "Missing or unsupported header", HEADER_DETAIL));
     }
-    let second = tokens.get(1).cloned().unwrap_or(Token { tok: Tok::Eof, span: first.span });
+    let mut vidx = idx + 1;
+    while let Some(t) = tokens.get(vidx) {
+        match &t.tok {
+            Tok::Comment(text) => { initial_pending.push((text.clone(), t.span)); vidx += 1; }
+            _ => break,
+        }
+    }
+    let second = tokens.get(vidx).cloned().unwrap_or(Token { tok: Tok::Eof, span: first.span });
     let Tok::Num(version_num) = second.tok else {
         return Err(err(file, second.span, "Missing or unsupported header", HEADER_DETAIL));
     };
@@ -461,9 +541,13 @@ pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
     if version_num != 1.0 {
         return Err(err(file, second.span, "Unsupported version", format!("Unsupported version {}; only version 1 is supported.", version_num as i64)));
     }
-    let mut parser = Parser { tokens, pos: 2, file: file.to_string(), errors: Diagnostics::default() };
+    let mut parser = Parser { tokens, pos: vidx + 1, file: file.to_string(), errors: Diagnostics::default(), pending: initial_pending };
     let mut stmts = Vec::new();
-    while *parser.peek() != Tok::Eof {
+    loop {
+        parser.collect_comments();
+        if *parser.peek() == Tok::Eof {
+            break;
+        }
         if parser.errors.0.len() >= MAX_ERRORS {
             break;
         }
@@ -481,8 +565,9 @@ pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
             }
         }
     }
+    let tail_comments = parser.take_pending();
     let errors = std::mem::take(&mut parser.errors);
-    errors.into_result(ast::File { name: file.to_string(), version: 1, stmts })
+    errors.into_result(ast::File { name: file.to_string(), version: 1, stmts, tail_comments })
 }
 
 #[cfg(test)]
@@ -708,6 +793,39 @@ mod tests {
         let f = ok("// a\nyah 1 // b\n// c\nx = [ // d\n 1, // e\n 2, // f\n] // g");
         let ExprKind::List(items) = &first_assign(&f).value.kind else { panic!() };
         assert_eq!(items.len(), 2);
+        // Defined place for out-of-statement comments (S4): everything before
+        // or inside the statement, in source order, hoists to its `leading`
+        // (pre-header // a and header-line // b included); the comment on the
+        // line the statement ends on is its `trailing`.
+        let a = first_assign(&f);
+        assert_eq!(a.leading.join("\n"), "// a\n// b\n// c\n// d\n// e\n// f");
+        assert_eq!(a.trailing.as_deref(), Some("// g"));
+        assert!(f.tail_comments.is_empty());
+    }
+
+    #[test]
+    fn trivia_leading_trailing_block_and_tail() {
+        let f = ok("yah 1\n// lead1\n// lead2\nx = 1 // trail\nblk \"b\" { // open note\n// inner lead\ny = 2\n// inner tail\n} // block trail\n// tail1\n// tail2\n");
+        let x = first_assign(&f);
+        assert_eq!(x.leading.join("\n"), "// lead1\n// lead2");
+        assert_eq!(x.trailing.as_deref(), Some("// trail"));
+        let blk = match &f.stmts[1] { Stmt::Block(b) => b, other => panic!("expected block at stmts[1], got {other:?}") };
+        // Comment after the last inner statement hoists to the block's leading.
+        assert_eq!(blk.leading.join("\n"), "// inner tail");
+        assert_eq!(blk.trailing.as_deref(), Some("// block trail"));
+        let y = blk.assign("y").unwrap();
+        assert_eq!(y.leading.join("\n"), "// open note\n// inner lead");
+        assert_eq!(y.trailing, None);
+        assert_eq!(f.tail_comments.join("\n"), "// tail1\n// tail2");
+    }
+
+    #[test]
+    fn trivia_comments_only_file_and_empty_block() {
+        let f = ok("yah 1\n// only\n");
+        assert!(f.stmts.is_empty());
+        assert_eq!(f.tail_comments.join("\n"), "// only");
+        let f2 = ok("yah 1\nblk {\n// in empty\n}\n");
+        assert_eq!(first_block(&f2).leading.join("\n"), "// in empty");
     }
 
     #[test]
