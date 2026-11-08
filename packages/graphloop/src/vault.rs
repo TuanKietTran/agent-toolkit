@@ -60,7 +60,10 @@ pub fn scrub(text: &str, secrets: &[String]) -> String {
 
 /// Parse `KEY=VALUE` lines: `#` comments, optional `export `, single quotes (raw), double quotes
 /// (`\n`, `\"`, `\\` escapes), an unquoted value ends at ` #`. No interpolation, no multi-line values.
+/// A leading UTF-8 BOM is stripped and CRLF line endings are accepted. Duplicate keys: the LAST
+/// occurrence wins.
 pub fn parse_dotenv(text: &str) -> HashMap<String, String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut out = HashMap::new();
     for line in text.lines() {
         let line = line.trim();
