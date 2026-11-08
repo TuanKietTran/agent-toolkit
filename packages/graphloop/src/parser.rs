@@ -156,19 +156,30 @@ impl Parser {
         }
     }
 
-    /// Net unclosed nesting (`{`/`[` minus `}`/`]`, floored at 0) among the
-    /// tokens consumed since `start_pos` — i.e. how far inside maps/lists the
-    /// statement that started at `start_pos` was when it failed.
-    fn unclosed_depth_since(&self, start_pos: usize) -> i32 {
-        let mut depth: i32 = 0;
+    /// Stack of still-unclosed openers (`{`/`[`) among the tokens consumed
+    /// since `start_pos` — i.e. which maps/lists the statement that started
+    /// at `start_pos` was inside when it failed. A closer pops only its
+    /// matching opener (and anything opened after it); a mismatched closer
+    /// pops nothing, so a block's `}` is never counted as closing a list.
+    fn unclosed_stack_since(&self, start_pos: usize) -> Vec<Tok> {
+        let mut stack: Vec<Tok> = Vec::new();
         for t in &self.tokens[start_pos..self.pos.min(self.tokens.len())] {
             match t.tok {
-                Tok::LBrace | Tok::LBracket => depth += 1,
-                Tok::RBrace | Tok::RBracket => depth -= 1,
+                Tok::LBrace | Tok::LBracket => stack.push(t.tok.clone()),
+                Tok::RBrace => {
+                    if let Some(pos) = stack.iter().rposition(|o| *o == Tok::LBrace) {
+                        stack.truncate(pos);
+                    }
+                }
+                Tok::RBracket => {
+                    if let Some(pos) = stack.iter().rposition(|o| *o == Tok::LBracket) {
+                        stack.truncate(pos);
+                    }
+                }
                 _ => {}
             }
         }
-        depth.max(0)
+        stack
     }
 
     /// Recovery (depth-aware): skip tokens until the nesting depth is back
@@ -183,21 +194,39 @@ impl Parser {
     /// `err_line = u32::MAX` skips to `}`/EOF only. Every non-sync token is
     /// consumed, so this always terminates; callers handle the sync token
     /// (`}`/EOF) themselves.
-    fn synchronise(&mut self, err_line: u32, in_block: bool, mut depth: i32) {
+    fn synchronise(&mut self, err_line: u32, in_block: bool, mut stack: Vec<Tok>) {
         loop {
             if *self.peek() == Tok::Eof {
                 break;
             }
-            if depth <= 0 {
+            if stack.is_empty() {
                 match self.peek() {
                     Tok::RBrace if in_block => break,
                     Tok::Ident(_) if self.peek_span().line > err_line && self.at_statement_start() => break,
                     _ => {}
                 }
+            } else if *self.peek() == Tok::RBrace
+                && in_block
+                && !stack.contains(&Tok::LBrace)
+            {
+                // A `}` cannot close an unclosed list: with no `{` on the
+                // stack this is the enclosing block's `}` — leave it for
+                // the block parser instead of consuming it as the list's.
+                break;
             }
             match self.bump().tok {
-                Tok::LBrace | Tok::LBracket => depth += 1,
-                Tok::RBrace | Tok::RBracket if depth > 0 => depth -= 1,
+                Tok::LBrace => stack.push(Tok::LBrace),
+                Tok::LBracket => stack.push(Tok::LBracket),
+                Tok::RBrace => {
+                    if let Some(pos) = stack.iter().rposition(|o| *o == Tok::LBrace) {
+                        stack.truncate(pos);
+                    }
+                }
+                Tok::RBracket => {
+                    if let Some(pos) = stack.iter().rposition(|o| *o == Tok::LBracket) {
+                        stack.truncate(pos);
+                    }
+                }
                 _ => {}
             }
         }
@@ -224,7 +253,7 @@ impl Parser {
                 _ => {
                     if self.errors.0.len() >= MAX_ERRORS {
                         // Cap reached: skip the rest of this block.
-                        self.synchronise(u32::MAX, true, 0);
+                        self.synchronise(u32::MAX, true, Vec::new());
                         if matches!(self.peek(), Tok::RBrace) {
                             self.bump();
                         }
@@ -235,7 +264,7 @@ impl Parser {
                         Ok(stmt) => body.push(stmt),
                         Err(diags) => {
                             let err_line = diags.0.first().map(|d| d.line).unwrap_or_else(|| self.peek_span().line);
-                            let depth = self.unclosed_depth_since(start_pos);
+                            let depth = self.unclosed_stack_since(start_pos);
                             self.record(diags);
                             if *self.peek() == Tok::Eof {
                                 break;
@@ -430,7 +459,7 @@ pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
             Ok(stmt) => stmts.push(stmt),
             Err(diags) => {
                 let err_line = diags.0.first().map(|d| d.line).unwrap_or_else(|| parser.peek_span().line);
-                let depth = parser.unclosed_depth_since(start_pos);
+                let depth = parser.unclosed_stack_since(start_pos);
                 parser.record(diags);
                 if *parser.peek() == Tok::Eof {
                     break;
@@ -817,6 +846,18 @@ mod tests {
             let _ = parse("test.yah", &src[..i]);
         }
         let _ = parse("test.yah", src);
+    }
+
+    #[test]
+    fn list_missing_bracket_before_block_braces_reports_exactly_once() {
+        // Commander's S5b(c) case: the list in `open` is never closed and
+        // the next tokens are the `}` of `open` and the `}` of `harness`.
+        // Exactly 1 error — the list error — and no false `Unclosed block`
+        // for either enclosing block: both braces close their blocks.
+        let src = "yah 1\nprovider \"anthropic\" {\n  type = \"anthropic\"\n}\nharness \"commander\" {\n  open {\n    command = [\"cat\"\n  }\n}\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 1, "{d:?}");
+        assert_eq!(d.0[0].summary, "Expected \",\" or \"]\"");
     }
 
     #[test]
