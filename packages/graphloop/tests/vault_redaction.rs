@@ -20,9 +20,13 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use graphloop::cli::{ProcessRunner, UpOutcome, UpRequest, up_core};
+use std::collections::BTreeMap;
+
+use graphloop::cli::{ProcessRunner, UpOutcome, UpRequest, check_line, graph_output, plan_json, plan_output, render_diags, up_core};
+use graphloop::load::load_str;
 use graphloop::manifest::{Edge, Node, PickInfo};
-use graphloop::plan::{OpenStep, Plan};
+use graphloop::pick::{Resolved, Via};
+use graphloop::plan::{OpenStep, Plan, PlanOpts};
 use graphloop::spec::{Part, Templ, Vault};
 use graphloop::vault::Vaults;
 
@@ -31,6 +35,8 @@ const SECRET_B: &str = "H2-FAKE-SECRET-framing-5b2d8e";
 const SECRET_C: &str = "H2-FAKE-SECRET-hang-91c4f0";
 /// The Claude commander's H2b reproduction marker, printed as `value was: <marker>`.
 const SECRET_CMD: &str = "LEAKME-s3cr3t-9981";
+/// H9: a credential embedded as an inline argument in a provider `command` override.
+const MARKER_CMD: &str = "MARKERCMD9981";
 
 /// (provider, real program name the fake is named after)
 const CLI_PROVIDERS: [(&str, &str); 4] = [("1password", "op"), ("bitwarden", "bw"), ("bitwarden-secrets", "bws"), ("keychain", "security")];
@@ -226,4 +232,83 @@ fn c_hanging_provider_times_out_cleanly() {
     let run = run_up(dir.path(), &[cli_vault("1password", &bin, reference("1password"))], Duration::from_millis(300));
     assert!(started.elapsed() < Duration::from_secs(3), "up hung past the timeout: {:?}", started.elapsed());
     assert_up_clean(&run, "1password", SECRET_C);
+}
+
+#[test]
+fn d_provider_command_string_is_never_rendered() {
+    // H9: a provider `command` override is config that can embed a credential as an
+    // inline argument (`--token MARKERCMD9981`); it must be rendered like a secret
+    // everywhere — program name only, never the full command string. This branch has
+    // no `vault status` or `up --dry-run` subcommand (see the H2b note above): the
+    // check/plan/graph functions below ARE those surfaces, and the failing fetch is
+    // the path `vault status --fetch` uses on the merged tree.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "cmdprog", "echo 'provider blew up' >&2; exit 1");
+    let bin_str = bin.to_string_lossy().into_owned();
+    let marker_vault = Vault { name: "v".into(), provider: "command".into(), path: None, account: None, command: vec![bin_str.clone(), "--token".into(), MARKER_CMD.into(), "{ref}".into()], secrets: vec![("TOKEN".into(), "cmd-ref".into())], line: 1 };
+    // Failing fetch (Vaults::get): names provider + program + exit status only.
+    let err = fetch(&marker_vault, Duration::from_secs(5)).unwrap_err();
+    assert!(err.contains("command"), "command: fetch error does not name the provider: {err}");
+    assert!(err.contains("cmdprog") && err.contains("exit status: 1"), "command: fetch error must name program + exit status only: {err}");
+    assert!(!err.contains(MARKER_CMD), "command: MARKER LEAKED into fetch error: {err}");
+    assert!(!err.contains("--token"), "command: command string leaked into fetch error: {err}");
+    // `graphloop up` via the fake h1: same clean failure, no lab opened, no file written.
+    let run = run_up(dir.path(), &[marker_vault], Duration::from_secs(5));
+    let up_err = assert_up_clean(&run, "command", MARKER_CMD);
+    assert!(up_err.contains("cmdprog") && up_err.contains("exit status: 1"), "command: up error must name program + exit status only: {up_err}");
+    assert!(!up_err.contains("--token"), "command: command string leaked into up error: {up_err}");
+    // check / plan / graph from a real .yah whose vault command carries the marker.
+    let src = r#"yah 1
+
+vault "v" {
+  provider = "command"
+  command  = ["__BIN__", "--token", "MARKERCMD9981", "{ref}"]
+  secrets  = {
+    TOKEN = "cmd-ref"
+  }
+}
+
+provider "anthropic" {
+  type = "anthropic"
+}
+
+model "haiku" {
+  provider = "anthropic"
+  id       = "claude-haiku-5-5"
+}
+
+system_one {
+  fallback = "haiku"
+}
+
+harness "alpha" {
+  kind  = "h1"
+  role  = "worker"
+  model = "haiku"
+  open {
+    command = ["cat"]
+    env = {
+      FLEET_TOKEN = "${vault.v.TOKEN}"
+    }
+  }
+}
+
+team "t" {
+  root    = "alpha"
+  members = []
+}
+"#.replace("__BIN__", &bin_str);
+    let spec = load_str("t.yah", &src, &BTreeMap::new()).map_err(|d| render_diags(&d)).unwrap();
+    // Sanity: the marker really is in the loaded config, so the checks below are not vacuous.
+    assert!(spec.vault("v").unwrap().command.iter().any(|a| a == MARKER_CMD), "marker missing from the loaded vault command");
+    let checked = check_line(spec.harnesses.len(), spec.teams.len());
+    assert!(!checked.contains(MARKER_CMD), "check LEAKED the marker: {checked}");
+    let resolved = vec![Resolved { harness: "alpha".into(), requested: "haiku".into(), label: "haiku".into(), id: "claude-haiku-5-5".into(), provider_type: "anthropic".into(), via: Via::Pinned, rule: None, reason: "pinned".into(), degraded_level: 0 }];
+    let opts = PlanOpts { prefix: None, run: "t-1-aaaa".into(), trace_dir: None, detached: false };
+    let built = graphloop::plan::build(&spec, "t", &resolved, &opts).map_err(|d| render_diags(&d)).unwrap();
+    let surfaces = [("plan", plan_output(&built, &resolved)), ("plan --json", plan_json(&built, &resolved).to_string()), ("graph", graph_output(spec.team("t").unwrap(), &built, &resolved))];
+    for (name, out) in surfaces {
+        assert!(!out.contains(MARKER_CMD), "{name} LEAKED the marker:\n{out}");
+        assert!(!out.contains("--token"), "{name} LEAKED the provider command string:\n{out}");
+    }
 }
