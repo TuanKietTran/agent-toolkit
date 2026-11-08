@@ -42,6 +42,18 @@ pub struct Entry {
     /// Model the program runs, as `provider/id`. Left out, the console reads it from `command`.
     #[serde(default)]
     pub model: Option<String>,
+    /// Brief file for renew-with-context (absolute path only; contents are never stored).
+    #[serde(default)]
+    pub brief: Option<String>,
+    /// Resume/status log file for renew-with-context (absolute path only).
+    #[serde(default)]
+    pub resume_log: Option<String>,
+    /// Command that starts a fresh session in the hosted program, for renew. Left out, renew uses `/new`.
+    #[serde(default)]
+    pub new_cmd: Option<String>,
+    /// Regex the screen must match before renew re-arms the session.
+    #[serde(default)]
+    pub ready_regex: Option<String>,
 }
 
 impl Entry {
@@ -202,6 +214,10 @@ mod tests {
             role: None,
             parent: None,
             model: None,
+            brief: None,
+            resume_log: None,
+            new_cmd: None,
+            ready_regex: None,
         }
     }
 
@@ -315,6 +331,24 @@ mod tests {
         let old = r#"{"name":"o","pid":1,"socket":"/s/o.sock","command":["pi"],"cols":80,"rows":24,"started_ms":1}"#;
         let item: Entry = serde_json::from_str(old).unwrap();
         assert!(item.role.is_none() && item.parent.is_none() && item.model.is_none());
+        assert!(
+            item.brief.is_none()
+                && item.resume_log.is_none()
+                && item.new_cmd.is_none()
+                && item.ready_regex.is_none()
+        );
+    }
+
+    #[test]
+    fn registry_entry_round_trips_renew_fields() {
+        let mut item = entry("renewable", 7);
+        item.brief = Some("/work/brief.md".into());
+        item.resume_log = Some("/work/status.log".into());
+        item.new_cmd = Some("/new".into());
+        item.ready_regex = Some("ready|idle".into());
+        let json = serde_json::to_string(&item).unwrap();
+        let back: Entry = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, item);
     }
 
     #[test]

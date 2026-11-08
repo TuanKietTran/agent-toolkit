@@ -788,6 +788,10 @@ pub(crate) fn open(args: OpenArgs) -> Result<i32> {
         ("--role", &args.graph.role),
         ("--parent", &args.graph.parent),
         ("--model", &args.graph.model),
+        ("--brief", &args.renew.brief),
+        ("--resume-log", &args.renew.resume_log),
+        ("--new-cmd", &args.renew.new_cmd),
+        ("--ready-regex", &args.renew.ready_regex),
     ] {
         if let Some(value) = value {
             host.extend([flag.into(), value.clone().into()]);

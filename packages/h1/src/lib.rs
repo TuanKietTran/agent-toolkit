@@ -139,6 +139,8 @@ struct HostArgs {
     quick_edit: bool,
     #[command(flatten)]
     graph: GraphArgs,
+    #[command(flatten)]
+    renew: RenewArgs,
     /// Command and arguments. Place these after `--`.
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<OsString>,
@@ -157,6 +159,24 @@ struct GraphArgs {
     /// Model shown by `console` (`provider/id`). Left out, it is read from `--model` in the command.
     #[arg(long = "model", value_name = "PROVIDER/ID")]
     model: Option<String>,
+}
+
+/// Renew-with-context settings stored in the session registry by `open`/`host`.
+/// Paths and settings only: file contents and secret values are never stored.
+#[derive(Debug, Args, Clone, Default)]
+struct RenewArgs {
+    /// Brief file stored in the registry for renew (absolute path).
+    #[arg(long, value_name = "FILE")]
+    brief: Option<String>,
+    /// Resume/status log file stored in the registry for renew (absolute path).
+    #[arg(long = "resume-log", value_name = "FILE")]
+    resume_log: Option<String>,
+    /// Command that starts a fresh session in the hosted program, for renew. Defaults to `/new`.
+    #[arg(long = "new-cmd", value_name = "TEXT")]
+    new_cmd: Option<String>,
+    /// Regex the screen must match before renew re-arms the session.
+    #[arg(long = "ready-regex", value_name = "RE")]
+    ready_regex: Option<String>,
 }
 
 #[derive(Debug, Args)]
@@ -532,6 +552,8 @@ struct OpenArgs {
     json: bool,
     #[command(flatten)]
     graph: GraphArgs,
+    #[command(flatten)]
+    renew: RenewArgs,
     /// Program and arguments. Place these after `--`.
     #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
     command: Vec<OsString>,
@@ -834,6 +856,10 @@ fn host(mut args: HostArgs) -> Result<i32> {
                 .or_else(|| env::var("H1_SELF").ok())
                 .filter(|parent| !parent.is_empty() && Some(parent) != args.target.name.as_ref()),
             model: args.graph.model.clone(),
+            brief: args.renew.brief.clone(),
+            resume_log: args.renew.resume_log.clone(),
+            new_cmd: args.renew.new_cmd.clone(),
+            ready_regex: args.renew.ready_regex.clone(),
         })?),
         None => None,
     };
