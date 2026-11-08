@@ -123,13 +123,31 @@ impl Diagnostics {
             block.push(':');
             if let Some(text) = d.line.checked_sub(1).and_then(|i| lines.get(i as usize)) {
                 let text = text.trim_end();
-                block.push_str(&format!("\n  {}: {}", d.line, text));
                 // Caret line under the exact token: the source text starts after
                 // the "  " + line-digits + ": " prefix, then `col - 1` characters in.
                 let col0 = d.col.saturating_sub(1) as usize;
                 let line_chars = text.chars().count();
+                // A stored-secret diagnostic must never echo the secret: replace
+                // the spanned value with `***` (keeping its surrounding quotes,
+                // if any) and underline the masked form instead, so neither the
+                // value nor its length leaks into the rendered output.
+                let (display, caret_len) = if d.summary == "Secrets are never stored" && col0 < line_chars {
+                    let span_len = (d.len.max(1) as usize).min(line_chars - col0);
+                    let chars: Vec<char> = text.chars().collect();
+                    let first = chars[col0];
+                    let last = chars[col0 + span_len - 1];
+                    let masked = if span_len >= 2 && (first == '"' || first == '`') && last == first { format!("{first}***{first}") } else { "***".to_string() };
+                    let masked_len = masked.chars().count();
+                    let mut display: String = chars[..col0].iter().collect();
+                    display.push_str(&masked);
+                    display.extend(&chars[col0 + span_len..]);
+                    (display, Some(masked_len))
+                } else {
+                    (text.to_string(), None)
+                };
+                block.push_str(&format!("\n  {}: {}", d.line, display));
                 if col0 < line_chars {
-                    let carets = (d.len.max(1) as usize).min(line_chars - col0);
+                    let carets = caret_len.unwrap_or_else(|| (d.len.max(1) as usize).min(line_chars - col0));
                     let prefix = 2 + d.line.to_string().len() + 2;
                     // Copy TABs from the source prefix verbatim (every other
                     // character becomes a space) so the caret aligns under the
@@ -280,6 +298,21 @@ mod tests {
         // Prefix is 5 spaces (\"  2: \"), then the two source TABs verbatim,
         // then the carets directly under `modle`.
         assert!(out.contains("\n  2: \t\tmodle = \"sonnet\"\n     \t\t^^^^^\n"), "got: {out:?}");
+    }
+
+    #[test]
+    fn render_masks_stored_secret() {
+        let source = "yah 1\n  api_key = \"MARKERSECRET9981\"\n";
+        let mut d = make_diag(Severity::Error, 2, "Secrets are never stored", "The argument \"api_key\" must be a bare env.NAME reference.");
+        d.col = 13;
+        d.len = 18;
+        let out = Diagnostics(vec![d]).render(source);
+        assert!(out.contains("\"***\""), "got: {out:?}");
+        assert!(!out.contains("MARKERSECRET9981"), "got: {out:?}");
+        let src_line = out.lines().find(|l| l.contains("api_key")).unwrap();
+        let caret_line = out.lines().find(|l| l.contains('^')).unwrap();
+        assert_eq!(src_line.find("\"***\""), caret_line.find('^'));
+        assert_eq!(caret_line.matches('^').count(), 5);
     }
 
     #[test]
