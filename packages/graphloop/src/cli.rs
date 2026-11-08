@@ -507,6 +507,24 @@ pub fn vault_status_json_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -
     (crate::vault::scrub(&out, &values), all_ok)
 }
 
+/// Pure declaration inventory for `graphloop vault list`: one line per declared
+/// secret key, `<vault>\t<provider>\t<key>`, sorted by vault then key; a vault
+/// with no `secrets` map prints one line with key `-`. Reads only the validated
+/// `Spec` — never fetches, never spawns a provider program, never reads env values.
+pub fn vault_list_core(spec: &Spec) -> String {
+    let mut vaults: Vec<&Vault> = spec.vaults.iter().collect();
+    vaults.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.provider.cmp(&b.provider)));
+    let mut out = String::new();
+    for vault in vaults {
+        if vault.secrets.is_empty() { out.push_str(&format!("{}\t{}\t-\n", vault.name, vault.provider)); continue; }
+        let mut keys: Vec<&str> = vault.secrets.iter().map(|(k, _)| k.as_str()).collect();
+        keys.sort_unstable();
+        keys.dedup();
+        for key in keys { out.push_str(&format!("{}\t{}\t{}\n", vault.name, vault.provider, key)); }
+    }
+    out
+}
+
 pub fn format_age(age_ms: u64) -> String {
     let s = age_ms / 1000;
     if s < 60 { format!("{s}s") } else if s < 3600 { format!("{}m", s / 60) } else if s < 86_400 { format!("{}h", s / 3600) } else { format!("{}d", s / 86_400) }
@@ -676,6 +694,11 @@ enum Cmd {
 
 #[derive(Subcommand, Debug)]
 enum VaultCmd {
+    /// One line per declared secret key: vault, provider, key name; never fetches, never spawns a provider
+    List {
+        /// Path to a .yah (Graphspec) file
+        file: PathBuf,
+    },
     /// One line per vault and per declared secret key; values are never printed.
     /// Exit code is 0 only when every vault is ready (and, with --fetch, every key fetches)
     Status {
@@ -736,6 +759,10 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             if dry_run { up_dry_run_core(&req).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values()))) } else { up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values()))) }
         }
         Cmd::Vault { action } => match action {
+            VaultCmd::List { file } => {
+                let spec = load_spec(&file, &[])?;
+                Ok(vault_list_core(&spec))
+            }
             VaultCmd::Status { file, fetch, json, var, env_file, no_env_file } => {
                 let spec = load_spec(&file, &var)?;
                 let env_files = crate::envfile::EnvFiles::load(&file, &env_file, !no_env_file).map_err(|e| err(&e))?;
