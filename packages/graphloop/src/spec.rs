@@ -18,6 +18,8 @@ pub enum Part {
     Env(String),
     /// `${harnesses.NAME.model}`: the model `pick` resolved for harness NAME (`provider/id`).
     HarnessModel(String),
+    /// `${harnesses.NAME.model_id}`: the bare model id `pick` resolved for harness NAME (no provider prefix).
+    HarnessModelId(String),
     /// `${vault.NAME.KEY}`: a secret fetched from the `vault "NAME"` block's provider only when a lab
     /// is opened. Allowed only in `env` maps, so the value reaches the program through its
     /// environment and never through a command line.
@@ -55,6 +57,7 @@ impl Templ {
                 Part::Lit(s) => s.clone(),
                 Part::Env(n) => format!("${{env.{n}}}"),
                 Part::HarnessModel(h) => format!("${{harnesses.{h}.model}}"),
+                Part::HarnessModelId(h) => format!("${{harnesses.{h}.model_id}}"),
                 Part::Vault(v, k) => format!("${{vault.{v}.{k}}}"),
             })
             .collect()
@@ -69,6 +72,10 @@ impl Templ {
                 Part::Env(n) => out.push_str(&(ctx.env)(n).ok_or_else(|| format!("environment variable {n} is not set"))?),
                 Part::HarnessModel(h) => {
                     out.push_str(&(ctx.model)(h).ok_or_else(|| format!("no model resolved for harness {h:?}"))?)
+                }
+                Part::HarnessModelId(h) => {
+                    let full = (ctx.model)(h).ok_or_else(|| format!("no model resolved for harness {h:?}"))?;
+                    out.push_str(full.split_once('/').map(|(_, id)| id).unwrap_or(&full))
                 }
                 Part::Vault(v, k) => out.push_str(&(ctx.vault)(v, k)?),
             }

@@ -226,38 +226,89 @@ impl Picker for SystemOnePicker {
     }
 }
 
-/// Find `packages/system-one`: `$GRAPHLOOP_SYSTEM_ONE_DIR`, then walking up from the executable and
-/// the current directory looking for `packages/system-one/src/system_one`. OWNER: gl-s1.
+/// Find `packages/system-one`: `$GRAPHLOOP_SYSTEM_ONE_DIR`, then walking up from the `.yah`
+/// file, then walking up from the executable and the current directory, looking for
+/// `packages/system-one/src/system_one`. OWNER: gl-s1.
 fn is_system_one_dir(path: &Path) -> bool {
     path.join("src").join("system_one").is_dir()
 }
 
-pub fn locate_system_one() -> Option<PathBuf> {
-    if let Ok(dir) = std::env::var("GRAPHLOOP_SYSTEM_ONE_DIR") {
-        let candidate = PathBuf::from(dir);
+fn search_ancestors(start: &Path) -> Option<PathBuf> {
+    for ancestor in start.ancestors() {
+        if is_system_one_dir(ancestor) && ancestor.ends_with("system-one") {
+            return Some(ancestor.to_path_buf());
+        }
+        let candidate = ancestor.join("packages").join("system-one");
         if is_system_one_dir(&candidate) {
             return Some(candidate);
         }
     }
-    let mut starts: Vec<PathBuf> = Vec::new();
-    if let Ok(exe) = std::env::current_exe() {
-        starts.push(exe);
+    None
+}
+
+/// Outcome of a system-one search: the directory found (if any), the raw
+/// `GRAPHLOOP_SYSTEM_ONE_DIR` value when it was set but invalid, and a short
+/// label for every place that was looked, in search order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemOneLocation {
+    pub dir: Option<PathBuf>,
+    pub env_invalid: Option<String>,
+    pub looked: Vec<String>,
+}
+
+/// Pure search core (no process env / exe / cwd reads) so tests do not race on env vars.
+/// Order: env override, upward from the `.yah` file, then `extra_starts` (exe, cwd).
+pub fn locate_system_one_from(env_val: Option<&str>, yah_file: Option<&Path>, extra_starts: &[PathBuf]) -> SystemOneLocation {
+    let mut looked: Vec<String> = Vec::new();
+    let mut env_invalid: Option<String> = None;
+    if let Some(raw) = env_val.filter(|v| !v.is_empty()) {
+        looked.push(format!("GRAPHLOOP_SYSTEM_ONE_DIR={raw}"));
+        let candidate = PathBuf::from(raw);
+        if is_system_one_dir(&candidate) {
+            return SystemOneLocation { dir: Some(candidate), env_invalid: None, looked };
+        }
+        env_invalid = Some(raw.to_string());
+    } else {
+        looked.push("GRAPHLOOP_SYSTEM_ONE_DIR (unset)".to_string());
     }
-    if let Ok(cwd) = std::env::current_dir() {
-        starts.push(cwd);
-    }
-    for start in &starts {
-        for ancestor in start.ancestors() {
-            if is_system_one_dir(ancestor) && ancestor.ends_with("system-one") {
-                return Some(ancestor.to_path_buf());
-            }
-            let candidate = ancestor.join("packages").join("system-one");
-            if is_system_one_dir(&candidate) {
-                return Some(candidate);
+    if let Some(yah) = yah_file {
+        let start = if yah.is_dir() { yah.to_path_buf() } else { yah.parent().map(|p| p.to_path_buf()).unwrap_or_default() };
+        if !start.as_os_str().is_empty() {
+            looked.push(format!("upward from {}", start.display()));
+            if let Some(found) = search_ancestors(&start) {
+                return SystemOneLocation { dir: Some(found), env_invalid, looked };
             }
         }
     }
-    None
+    for start in extra_starts {
+        looked.push(format!("upward from {}", start.display()));
+        if let Some(found) = search_ancestors(start) {
+            return SystemOneLocation { dir: Some(found), env_invalid, looked };
+        }
+    }
+    SystemOneLocation { dir: None, env_invalid, looked }
+}
+
+pub fn locate_system_one_detailed(yah_file: Option<&Path>) -> SystemOneLocation {
+    let env_val = std::env::var("GRAPHLOOP_SYSTEM_ONE_DIR").ok();
+    let mut starts: Vec<PathBuf> = Vec::new();
+    if let Ok(exe) = std::env::current_exe() { starts.push(exe); }
+    if let Ok(cwd) = std::env::current_dir() { starts.push(cwd); }
+    let abs_yah: Option<PathBuf> = yah_file.map(|p| if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|cwd| cwd.join(p)).unwrap_or_else(|_| p.to_path_buf()) });
+    locate_system_one_from(env_val.as_deref(), abs_yah.as_deref(), &starts)
+}
+
+pub fn locate_system_one() -> Option<PathBuf> {
+    locate_system_one_detailed(None).dir
+}
+
+/// Exactly one line, used as the fallback reason when system-one cannot be located.
+pub fn system_one_not_found_reason(location: &SystemOneLocation) -> String {
+    let looked = location.looked.join(", ");
+    match &location.env_invalid {
+        Some(raw) => format!("system-one not found: GRAPHLOOP_SYSTEM_ONE_DIR={raw:?} is not a system-one package directory (no src/system_one); looked in {looked}; set GRAPHLOOP_SYSTEM_ONE_DIR to a valid system-one package directory"),
+        None => format!("system-one not found: looked in {looked} for packages/system-one; set GRAPHLOOP_SYSTEM_ONE_DIR to the system-one package directory"),
+    }
 }
 
 fn complexity_for_role(role: &str) -> Complexity {
@@ -866,6 +917,71 @@ mod tests {
         assert_eq!(err.0.len(), 2);
         assert_eq!(err.0[0].line, 10);
         assert_eq!(err.0[1].line, 20);
+    }
+
+    fn make_system_one_tree(root: &Path) -> PathBuf {
+        let dir = root.join("packages").join("system-one");
+        std::fs::create_dir_all(dir.join("src").join("system_one")).expect("create system-one tree");
+        dir
+    }
+
+    #[test]
+    fn locate_upward_from_yah_finds_packages_system_one() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let want = make_system_one_tree(&tmp.path().join("proj"));
+        let yah = tmp.path().join("proj").join("a").join("b").join("team.yah");
+        std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
+        std::fs::write(&yah, "yah 1\n").expect("yah file");
+        let loc = locate_system_one_from(None, Some(&yah), &[]);
+        assert_eq!(loc.dir, Some(want));
+        assert_eq!(loc.env_invalid, None);
+    }
+
+    #[test]
+    fn locate_env_override_wins_over_upward_from_yah() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env_dir = make_system_one_tree(&tmp.path().join("envtree"));
+        let _yah_dir = make_system_one_tree(&tmp.path().join("proj"));
+        let yah = tmp.path().join("proj").join("nested").join("team.yah");
+        std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
+        std::fs::write(&yah, "yah 1\n").expect("yah file");
+        let loc = locate_system_one_from(Some(&env_dir.to_string_lossy()), Some(&yah), &[]);
+        assert_eq!(loc.dir, Some(env_dir));
+        assert_eq!(loc.env_invalid, None);
+    }
+
+    #[test]
+    fn locate_env_invalid_is_reported_and_upward_still_applies() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let want = make_system_one_tree(&tmp.path().join("proj"));
+        let yah = tmp.path().join("proj").join("nested").join("team.yah");
+        std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
+        std::fs::write(&yah, "yah 1\n").expect("yah file");
+        let bogus = tmp.path().join("no-such-system-one");
+        let loc = locate_system_one_from(Some(&bogus.to_string_lossy()), Some(&yah), &[]);
+        assert_eq!(loc.dir, Some(want));
+        assert_eq!(loc.env_invalid, Some(bogus.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn not_found_reason_is_one_line_names_env_var_and_where_looked() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let yah = tmp.path().join("bare").join("team.yah");
+        std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
+        std::fs::write(&yah, "yah 1\n").expect("yah file");
+        let loc = locate_system_one_from(None, Some(&yah), &[]);
+        assert_eq!(loc.dir, None);
+        let reason = system_one_not_found_reason(&loc);
+        assert!(!reason.contains('\n'), "reason must be one line: {reason}");
+        assert!(reason.contains("system-one not found"), "{reason}");
+        assert!(reason.contains("GRAPHLOOP_SYSTEM_ONE_DIR"), "{reason}");
+        assert!(reason.contains(&yah.parent().unwrap().to_string_lossy().to_string()), "reason must say where it looked: {reason}");
+        let bogus = tmp.path().join("bogus");
+        let loc2 = locate_system_one_from(Some(&bogus.to_string_lossy()), Some(&yah), &[]);
+        assert_eq!(loc2.dir, None);
+        let reason2 = system_one_not_found_reason(&loc2);
+        assert!(!reason2.contains('\n'), "{reason2}");
+        assert!(reason2.contains("GRAPHLOOP_SYSTEM_ONE_DIR") && reason2.contains("bogus"), "invalid env must be named in fallback reason: {reason2}");
     }
 
     #[test]

@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// One adapter: its name, the optional keys a `vault` block may carry for it, and the required ones.
@@ -29,6 +29,10 @@ pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo { name: "dotenv", keys: &["path"], required: &[], summary: "KEY=VALUE file; path is relative to the .yah file (default .env)" },
     ProviderInfo { name: "env", keys: &[], required: &[], summary: "the process environment" },
     ProviderInfo { name: "command", keys: &["command"], required: &["command"], summary: "any CLI: an argv list where {ref} and {key} are substituted; the value is its stdout" },
+    ProviderInfo { name: "1password", keys: &["account"], required: &[], summary: "1Password CLI: op read <ref> (ref is an op://vault/item/field URI)" },
+    ProviderInfo { name: "bitwarden", keys: &[], required: &[], summary: "Bitwarden CLI: bw get password|username|notes|uri|totp <item>, or <item>#<field> for a custom field (needs BW_SESSION / bw unlock)" },
+    ProviderInfo { name: "bitwarden-secrets", keys: &[], required: &[], summary: "Bitwarden Secrets Manager CLI: bws secret get <id>; the value is the JSON field value" },
+    ProviderInfo { name: "keychain", keys: &["account"], required: &[], summary: "macOS keychain: security find-generic-password -s <ref> -w" },
 ];
 
 pub fn provider(name: &str) -> Option<&'static ProviderInfo> {
@@ -43,6 +47,10 @@ pub fn provider_names() -> Vec<&'static str> {
 /// would mangle every message.
 const MIN_SCRUB_LEN: usize = 3;
 
+/// Provider/command output larger than this is rejected, so a broken or hostile CLI cannot make
+/// graphloop buffer unbounded output in memory.
+const MAX_OUTPUT_BYTES: usize = 1 << 20;
+
 /// Replace every known secret value in `text` with `***`.
 pub fn scrub(text: &str, secrets: &[String]) -> String {
     let mut out = text.to_owned();
@@ -56,7 +64,10 @@ pub fn scrub(text: &str, secrets: &[String]) -> String {
 
 /// Parse `KEY=VALUE` lines: `#` comments, optional `export `, single quotes (raw), double quotes
 /// (`\n`, `\"`, `\\` escapes), an unquoted value ends at ` #`. No interpolation, no multi-line values.
+/// A leading UTF-8 BOM is stripped and CRLF line endings are accepted. Duplicate keys: the LAST
+/// occurrence wins.
 pub fn parse_dotenv(text: &str) -> HashMap<String, String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut out = HashMap::new();
     for line in text.lines() {
         let line = line.trim();
@@ -99,29 +110,41 @@ pub fn parse_dotenv(text: &str) -> HashMap<String, String> {
     out
 }
 
+/// Kill the child's whole process group (Unix): the child was spawned with `process_group(0)`,
+/// so its pid is the group id and `kill -KILL -<pid>` takes down children it spawned too.
+/// A no-op elsewhere, where the caller also kills the child directly.
+#[cfg(unix)]
+fn kill_process_group(child: &Child) {
+    let _ = Command::new("kill").arg("-KILL").arg(format!("-{}", child.id())).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(_child: &Child) {}
+
 /// Run `argv` (no shell), return stdout without its trailing newline. Errors carry the program
 /// name and the first line of stderr (scrubbed by the caller), never the arguments.
 pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Duration) -> Result<String, String> {
     let (program, args) = argv.split_first().ok_or_else(|| "empty command".to_owned())?;
     let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or(program).to_owned();
-    let mut child = Command::new(program)
-        .args(args)
-        .envs(extra_env.iter().cloned())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not run {name}: {e}"))?;
+    let mut cmd = Command::new(program);
+    cmd.args(args).envs(extra_env.iter().cloned()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Own process group, so a timeout can kill the whole tree and leave no orphan children.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("could not run {name}: {e}"))?;
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
     let out_reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
+        let _ = Read::take(&mut stdout, (MAX_OUTPUT_BYTES + 1) as u64).read_to_end(&mut buf);
         buf
     });
     let err_reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
-        let _ = stderr.read_to_end(&mut buf);
+        let _ = Read::take(&mut stderr, (MAX_OUTPUT_BYTES + 1) as u64).read_to_end(&mut buf);
         buf
     });
     let deadline = Instant::now() + timeout;
@@ -129,6 +152,7 @@ pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Dur
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() >= deadline => {
+                kill_process_group(&child);
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("{name} did not finish within {}s", timeout.as_secs()));
@@ -139,6 +163,9 @@ pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Dur
     };
     let out = out_reader.join().unwrap_or_default();
     let err = err_reader.join().unwrap_or_default();
+    if out.len() > MAX_OUTPUT_BYTES {
+        return Err(format!("{name} printed more than {MAX_OUTPUT_BYTES} bytes of output"));
+    }
     if !status.success() {
         let first = String::from_utf8_lossy(&err).lines().next().unwrap_or("").trim().chars().take(160).collect::<String>();
         return Err(if first.is_empty() { format!("{name} exited with {status}") } else { format!("{name} exited with {status}: {first}") });
@@ -205,8 +232,76 @@ impl<'a> Vaults<'a> {
                 let argv: Vec<String> = vault.command.iter().map(|a| a.replace("{ref}", reference).replace("{key}", key)).collect();
                 run_command(&argv, &self.command_env, self.timeout).map_err(|e| scrub(&e, &self.values()))
             }
+            "1password" => self.fetch_1password(vault, reference),
+            "bitwarden" => self.fetch_bitwarden(vault, reference),
+            "bitwarden-secrets" => self.fetch_bitwarden_secrets(vault, reference),
+            "keychain" => self.fetch_keychain(vault, reference),
             other => Err(format!("provider {other:?} is not available in this build")),
         }
+    }
+
+    /// The program for a CLI provider: `command = ["<path>"]` in the vault block overrides the
+    /// program name (tests point it at a fake CLI; users can pin an absolute path).
+    fn provider_bin(&self, vault: &Vault, default: &str) -> String {
+        vault.command.first().cloned().unwrap_or_else(|| default.to_owned())
+    }
+
+    /// Run a provider CLI. A program that cannot be started at all becomes the one-line install
+    /// hint; any other failure is scrubbed and never carries a fetched value.
+    fn run_provider(&self, argv: &[String], install_hint: &str) -> Result<String, String> {
+        run_command(argv, &self.command_env, self.timeout).map_err(|e| {
+            if e.starts_with("could not run ") { install_hint.to_owned() } else { scrub(&e, &self.values()) }
+        })
+    }
+
+    fn fetch_1password(&self, vault: &Vault, reference: &str) -> Result<String, String> {
+        let mut argv = vec![self.provider_bin(vault, "op"), "read".to_owned(), reference.to_owned()];
+        if let Some(account) = &vault.account {
+            argv.push("--account".to_owned());
+            argv.push(account.clone());
+        }
+        self.run_provider(&argv, "op is not installed: install the 1Password CLI (https://developer.1password.com/docs/cli/get-started) and run `op signin`")
+    }
+
+    fn fetch_bitwarden(&self, vault: &Vault, reference: &str) -> Result<String, String> {
+        let bin = self.provider_bin(vault, "bw");
+        if let Some((item, field)) = reference.split_once('#') {
+            let argv = vec![bin, "get".to_owned(), "item".to_owned(), item.to_owned(), "--nointeraction".to_owned(), "--raw".to_owned()];
+            let out = self.run_bitwarden(&argv)?;
+            let json: serde_json::Value = serde_json::from_str(&out).map_err(|_| "bw returned invalid JSON for the item".to_owned())?;
+            let fields = json.get("fields").and_then(|f| f.as_array()).ok_or_else(|| format!("item {item:?} has no custom fields"))?;
+            return fields.iter().find(|f| f.get("name").and_then(|n| n.as_str()) == Some(field)).and_then(|f| f.get("value")).and_then(|v| v.as_str()).map(str::to_owned).ok_or_else(|| format!("item {item:?} has no custom field {field:?}"));
+        }
+        let (kind, item) = match reference.rsplit_once('/') {
+            Some((item, kind @ ("username" | "password" | "notes" | "uri" | "totp"))) => (kind, item),
+            _ => ("password", reference),
+        };
+        let argv = vec![bin, "get".to_owned(), kind.to_owned(), item.to_owned(), "--nointeraction".to_owned(), "--raw".to_owned()];
+        self.run_bitwarden(&argv)
+    }
+
+    /// `bw` with the locked-vault translation: its error must tell the user to unlock.
+    fn run_bitwarden(&self, argv: &[String]) -> Result<String, String> {
+        self.run_provider(argv, "bw is not installed: install the Bitwarden CLI (https://bitwarden.com/help/cli) and run `bw unlock`").map_err(|e| {
+            if e.to_lowercase().contains("lock") && !e.contains("bw unlock") { format!("Bitwarden vault is locked: run: bw unlock ({e})") } else { e }
+        })
+    }
+
+    fn fetch_bitwarden_secrets(&self, vault: &Vault, reference: &str) -> Result<String, String> {
+        let argv = vec![self.provider_bin(vault, "bws"), "secret".to_owned(), "get".to_owned(), reference.to_owned(), "--output".to_owned(), "json".to_owned()];
+        let out = self.run_provider(&argv, "bws is not installed: install the Bitwarden Secrets Manager CLI (https://bitwarden.com/help/secrets-manager-cli)")?;
+        let json: serde_json::Value = serde_json::from_str(&out).map_err(|_| "bws returned invalid JSON for the secret".to_owned())?;
+        json.get("value").and_then(|v| v.as_str()).map(str::to_owned).ok_or_else(|| "bws response has no string field \"value\"".to_owned())
+    }
+
+    fn fetch_keychain(&self, vault: &Vault, reference: &str) -> Result<String, String> {
+        let mut argv = vec![self.provider_bin(vault, "security"), "find-generic-password".to_owned(), "-s".to_owned(), reference.to_owned()];
+        if let Some(account) = &vault.account {
+            argv.push("-a".to_owned());
+            argv.push(account.clone());
+        }
+        argv.push("-w".to_owned());
+        self.run_provider(&argv, "security is not available: the macOS keychain CLI ships with macOS")
     }
 
     fn fetch_dotenv(&self, vault: &Vault, reference: &str) -> Result<String, String> {

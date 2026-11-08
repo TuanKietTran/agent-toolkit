@@ -102,6 +102,14 @@ By default `host`, `send` and `screen` use `$H1_SOCKET`, or `h1.sock` under `$XD
 
 On Windows, `run` ends a piped stdin with Ctrl-Z and Enter, because a console ignores Ctrl-D.
 
+## Doctor
+
+```sh
+h1 doctor   # diagnose rename/migration problems; exit 1 if anything needs attention
+```
+
+`h1 doctor` prints names and paths only, never registry values: the registry dir in use (`$H1_DIR` if set, else the resolved temp default) and whether it exists, whether the pre-rename registries still hold sessions — the one under the home dir and the one under the temp dir that the pre-rename tool actually used (a single warning line each if so, because those labs will not show in the TUI/GUI), which `h1` and old-named binaries and the `labctl` compatibility shim are on `PATH`, whether the lab-commander skill links resolve, whether the lab-gui port (`$LAB_GUI_PORT`, default 4317) is reachable, and whether any running process is an old-named binary or a lab-gui server started from outside this repo (one warning line per such process, naming its pid and, for lab-gui, its port). The lab-gui port check is informational only (it is started on demand), as are a not-yet-created registry dir, an empty pre-rename registry, and a lab-gui server running from this repo. Exit is 1 when a pre-rename registry still holds sessions, an old-named binary is still on `PATH`, `h1` is missing from `PATH`, a skill link is broken, an old-named process is still running, or a lab-gui server runs from outside this repo; otherwise 0.
+
 ## Migration
 
 The binary was renamed from `agent-cli-lab` to `h1`; `labctl` remains as a compatibility shim that execs `h1`. Every environment variable was renamed with it:

@@ -85,6 +85,7 @@ const EXPECTED: &[&str] = &[
     "h1 agents --json",
     "h1 agents --publish --watch 5",
     "h1 console --view agents",
+    "h1 doctor",
 ];
 
 /// Extracted commands executed exactly as written (against a private `H1_DIR`).
@@ -181,12 +182,16 @@ const SKIPPED: &[(&str, &str)] = &[
         "h1 console --view agents",
         "opens the interactive console TUI in a new terminal window",
     ),
+    (
+        "h1 doctor",
+        "its exit code depends on the real machine state it diagnoses (real HOME, PATH binaries, skill links, lab-gui port probe), so it cannot be asserted successful verbatim; its checks are exercised by the doctor unit tests against temp dirs",
+    ),
 ];
 
 /// Subcommands named by the extracted commands; each one's `--help` is run.
 const HELP_SUBCOMMANDS: &[&str] = &[
     "run", "host", "send", "screen", "attach", "open", "list", "key", "wait", "watch", "status",
-    "stop", "console", "agents",
+    "stop", "console", "agents", "doctor",
 ];
 
 fn run_in(dir: &Path, args: &[&str]) -> Output {

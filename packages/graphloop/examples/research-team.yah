@@ -4,6 +4,9 @@ yah 1
 // reviewer all under the planner. The planner is pinned to a model
 // label; every other harness uses system-one, with complexity as a
 // hint for the pick. All harnesses share the MCP filesystem tool.
+// Commands pass the model as ${harnesses.<label>.model_id}: pi with
+// --provider claude-cli expects the bare id (claude-sonnet-5-5), not
+// the provider/id form that ${harnesses.<label>.model} yields.
 
 variable "work_dir" {
   type = "string"
@@ -49,7 +52,7 @@ harness "planner" {
   complexity = "high"
   tools = ["fs"]
   open {
-    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.planner.model}", "--no-session"]
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.planner.model_id}", "--no-session"]
     cols = 140
     rows = 40
   }
@@ -63,7 +66,7 @@ harness "researcher" {
   complexity = "medium"
   tools = ["fs"]
   open {
-    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.researcher.model}", "--no-session"]
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.researcher.model_id}", "--no-session"]
     cwd = var.work_dir
   }
 }
@@ -76,7 +79,7 @@ harness "builder" {
   complexity = "high"
   tools = ["fs"]
   open {
-    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.builder.model}", "--no-session"]
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.builder.model_id}", "--no-session"]
     cwd = var.work_dir
   }
 }
@@ -89,7 +92,7 @@ harness "reviewer" {
   complexity = "low"
   tools = ["fs"]
   open {
-    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.reviewer.model}", "--no-session"]
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.reviewer.model_id}", "--no-session"]
     cwd = var.work_dir
   }
 }

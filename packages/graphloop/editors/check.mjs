@@ -47,6 +47,16 @@ ok(samples.length > 0, `found ${samples.length} sample .yah file(s)`);
 
 const repo = grammar.repository;
 const rx = (entry) => new RegExp(entry.match || entry.begin);
+// Vault sample lines: the vault block kind and ${vault.NAME.KEY} references.
+const vaultLine = 'vault "local" {';
+ok(rx(repo['block-label']).test(vaultLine), 'vault sample: block-label pattern hits vault "local"');
+ok(rx(repo.keyword).test(vaultLine), 'vault sample: block keyword pattern hits vault');
+const vaultRef = '"${vault.local.FLEET_TOKEN}"';
+ok(rx(repo.interpolation).test(vaultRef), 'vault sample: interpolation begin pattern hits ${vault...}');
+ok(rx(repo.reference).test(vaultRef), 'vault sample: reference pattern hits vault.local.FLEET_TOKEN');
+const vaultHead = repo.interpolation.patterns[0];
+ok(new RegExp(vaultHead.match).test('vault'), 'vault sample: interpolation support.variable pattern hits vault');
+
 for (const path of samples) {
   const text = readFileSync(path, 'utf8');
   const name = path.split('/').slice(-2).join('/');
@@ -55,7 +65,7 @@ for (const path of samples) {
   ok(rx(repo.keyword).test(text), `${name}: block keyword pattern hits`);
   ok(rx(repo.comment).test('// x') && (text.includes('//') ? rx(repo.comment).test(text) : true), `${name}: comment pattern ok`);
   if (text.includes('${')) ok(rx(repo.interpolation).test(text), `${name}: interpolation begin pattern hits`);
-  if (/(env|var|harnesses)\./.test(text)) ok(rx(repo.reference).test(text), `${name}: reference pattern hits`);
+  if (/(env|var|harnesses|vault)\./.test(text)) ok(rx(repo.reference).test(text), `${name}: reference pattern hits`);
 }
 console.log(failures === 0 ? 'check.mjs: PASS' : `check.mjs: ${failures} FAILURE(S)`);
 process.exit(failures === 0 ? 0 : 1);
