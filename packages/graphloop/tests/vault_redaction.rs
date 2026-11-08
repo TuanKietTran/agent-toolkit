@@ -4,6 +4,16 @@
 //! calls) and `graphloop up` (`up_core` against a fake h1). Every failure must be clean:
 //! an error naming the provider, no secret anywhere in the error / argv / written files,
 //! and no lab opened.
+//!
+//! H2b: the `command` arm originally had its own failure path (`run_command` quoted the
+//! first line of stderr, scrubbed only against already-cached values), so a command
+//! provider leaked while the CLI providers were clean. `run_command` is now the ONE
+//! shared failure path for every external arm. The command-arm tests below use the
+//! commander's reproduction marker (`value was: LEAKME-s3cr3t-9981` on stderr, exit 1)
+//! through both surfaces on this branch — `Vaults::get` and `up_core`; `cli.rs` here has
+//! no `vault status` or `--dry-run` subcommand, those surfaces on the merged tree call
+//! the same `Vaults::get` / render path. dotenv/env run no program, so they have no
+//! provider output to quote.
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -19,6 +29,8 @@ use graphloop::vault::Vaults;
 const SECRET_A: &str = "H2-FAKE-SECRET-stderr-7f3a9c";
 const SECRET_B: &str = "H2-FAKE-SECRET-framing-5b2d8e";
 const SECRET_C: &str = "H2-FAKE-SECRET-hang-91c4f0";
+/// The Claude commander's H2b reproduction marker, printed as `value was: <marker>`.
+const SECRET_CMD: &str = "LEAKME-s3cr3t-9981";
 
 /// (provider, real program name the fake is named after)
 const CLI_PROVIDERS: [(&str, &str); 4] = [("1password", "op"), ("bitwarden", "bw"), ("bitwarden-secrets", "bws"), ("keychain", "security")];
@@ -29,6 +41,7 @@ fn reference(provider: &str) -> &'static str {
         "bitwarden" => "myitem",
         "bitwarden-secrets" => "secret-id-123",
         "keychain" => "myservice",
+        "command" => "cmd-ref",
         other => panic!("no reference for {other}"),
     }
 }
@@ -131,10 +144,32 @@ fn a_stderr_secret_is_never_echoed() {
         let bin = write_script(dir.path(), prog, &format!("echo '{SECRET_A}' >&2; exit 1"));
         let err = fetch(&cli_vault(provider, &bin, reference(provider)), Duration::from_secs(5)).unwrap_err();
         assert!(err.contains(provider), "{provider}: fetch error does not name the provider: {err}");
+        assert!(err.contains("exit status: 1"), "{provider}: fetch error does not name the exit status: {err}");
         assert!(!err.contains(SECRET_A), "{provider}: SECRET LEAKED into fetch error: {err}");
         let run = run_up(dir.path(), &[cli_vault(provider, &bin, reference(provider))], Duration::from_secs(5));
         assert_up_clean(&run, provider, SECRET_A);
     }
+    // H2b: the `command` arm — the commander's reproduction. Same leaky fake shape,
+    // marker framed as `value was: <marker>` on stderr, exit 1. Fetch first:
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "leaky-cmd", &format!("echo 'value was: {SECRET_CMD}' >&2; exit 1"));
+    let err = fetch(&cli_vault("command", &bin, reference("command")), Duration::from_secs(5)).unwrap_err();
+    assert!(err.contains("command"), "command: fetch error does not name the provider: {err}");
+    assert!(err.contains("leaky-cmd") && err.contains("exit status: 1"), "command: fetch error must name program + exit status only: {err}");
+    assert!(!err.contains(SECRET_CMD), "command: SECRET LEAKED into fetch error: {err}");
+    assert!(!err.contains("value was"), "command: provider stderr was quoted in fetch error: {err}");
+    // Then the up surface:
+    let run = run_up(dir.path(), &[cli_vault("command", &bin, reference("command"))], Duration::from_secs(5));
+    let up_err = assert_up_clean(&run, "command", SECRET_CMD);
+    assert!(up_err.contains("exit status: 1"), "command: up error must carry the exit status: {up_err}");
+    assert!(!up_err.contains("value was"), "command: provider stderr was quoted in up error: {up_err}");
+    // The same fake printing the marker on STDOUT and exiting 1: a non-zero exit never
+    // quotes stdout either.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "leaky-cmd", &format!("echo 'value was: {SECRET_CMD}'; exit 1"));
+    let err = fetch(&cli_vault("command", &bin, reference("command")), Duration::from_secs(5)).unwrap_err();
+    assert!(err.contains("exit status: 1"), "command: fetch error must name the exit status: {err}");
+    assert!(!err.contains(SECRET_CMD) && !err.contains("value was"), "command: SECRET LEAKED via stdout into fetch error: {err}");
 }
 
 #[test]
@@ -176,6 +211,14 @@ fn c_hanging_provider_times_out_cleanly() {
         assert!(err.contains("did not finish"), "{provider}: {err}");
         assert!(!err.contains(SECRET_C), "{provider}: SECRET LEAKED into fetch error: {err}");
     }
+    // H2b: the `command` arm hangs the same way — clean timeout, no marker.
+    let dir = tempfile::tempdir().unwrap();
+    let bin = write_script(dir.path(), "leaky-cmd", &format!("echo '{SECRET_CMD}' >&2; sleep 5"));
+    let started = Instant::now();
+    let err = fetch(&cli_vault("command", &bin, reference("command")), Duration::from_millis(300)).unwrap_err();
+    assert!(started.elapsed() < Duration::from_secs(3), "command: fetch hung past the timeout: {:?}", started.elapsed());
+    assert!(err.contains("did not finish"), "command: {err}");
+    assert!(!err.contains(SECRET_CMD), "command: SECRET LEAKED into fetch error: {err}");
     // up surface, one provider: render must fail at the timeout, no lab opened, no leak.
     let dir = tempfile::tempdir().unwrap();
     let bin = write_script(dir.path(), "op", &format!("echo '{SECRET_C}' >&2; sleep 5"));

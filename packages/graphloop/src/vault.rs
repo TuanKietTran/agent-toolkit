@@ -121,8 +121,14 @@ fn kill_process_group(child: &Child) {
 #[cfg(not(unix))]
 fn kill_process_group(_child: &Child) {}
 
-/// Run `argv` (no shell), return stdout without its trailing newline. Errors carry the program
-/// name and the first line of stderr (scrubbed by the caller), never the arguments.
+/// Run `argv` (no shell), return stdout without its trailing newline. This is the ONE shared
+/// failure path for every external vault provider (the `command` arm and the CLI providers
+/// via `run_provider`): on a non-zero exit the error carries the program name and the exit
+/// status ONLY — never the arguments and never anything the program printed, because stdout
+/// or stderr can hold the very secret being fetched, which is not yet cached and so cannot
+/// be scrubbed by the caller. The one piece of stderr that survives is synthesized, not
+/// quoted: stderr mentioning locking becomes the marker `vault is locked`, so callers can
+/// still offer an unlock hint.
 pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Duration) -> Result<String, String> {
     let (program, args) = argv.split_first().ok_or_else(|| "empty command".to_owned())?;
     let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or(program).to_owned();
@@ -167,8 +173,8 @@ pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Dur
         return Err(format!("{name} printed more than {MAX_OUTPUT_BYTES} bytes of output"));
     }
     if !status.success() {
-        let first = String::from_utf8_lossy(&err).lines().next().unwrap_or("").trim().chars().take(160).collect::<String>();
-        return Err(if first.is_empty() { format!("{name} exited with {status}") } else { format!("{name} exited with {status}: {first}") });
+        let locked = String::from_utf8_lossy(&err).to_lowercase().contains("lock");
+        return Err(if locked { format!("{name} exited with {status}: vault is locked") } else { format!("{name} exited with {status}") });
     }
     let text = String::from_utf8(out).map_err(|_| format!("{name} printed bytes that are not UTF-8"))?;
     Ok(text.trim_end_matches(['\n', '\r']).to_owned())
@@ -230,7 +236,8 @@ impl<'a> Vaults<'a> {
             "env" => (self.env)(reference).ok_or_else(|| format!("environment variable {reference} is not set")),
             "command" => {
                 let argv: Vec<String> = vault.command.iter().map(|a| a.replace("{ref}", reference).replace("{key}", key)).collect();
-                run_command(&argv, &self.command_env, self.timeout).map_err(|e| scrub(&e, &self.values()))
+                let prog = argv.first().map(|p| Path::new(p).file_name().and_then(|n| n.to_str()).unwrap_or(p).to_owned()).unwrap_or_default();
+                self.run_provider(&argv, &format!("could not run {prog}: the vault's command program is not runnable"))
             }
             "1password" => self.fetch_1password(vault, reference),
             "bitwarden" => self.fetch_bitwarden(vault, reference),
@@ -246,31 +253,15 @@ impl<'a> Vaults<'a> {
         vault.command.first().cloned().unwrap_or_else(|| default.to_owned())
     }
 
-    /// Run a provider CLI. A program that cannot be started at all becomes the one-line install
-    /// hint. A non-zero exit NEVER quotes the provider's stderr: a provider CLI handles the
-    /// secret itself and can echo it there while failing, and that value is not yet cached,
-    /// so scrubbing against fetched values cannot catch it (H2). Only the program name and
-    /// exit status survive, plus a synthesized `vault is locked` marker when stderr mentioned
-    /// locking, so the `bw` unlock translation still fires without quoting stderr. Other
-    /// failures (timeout, oversized or non-UTF-8 output) carry no provider text and are
-    /// scrubbed against fetched values as before.
+    /// Run an external provider (a CLI provider, or the `command` arm's program) through the
+    /// shared failure path in [`run_command`]: a non-zero exit NEVER quotes anything the
+    /// program printed — only the program name and exit status survive, plus the synthesized
+    /// `vault is locked` marker, so the `bw` unlock translation still fires. A program that
+    /// cannot be started at all becomes the one-line install hint. Remaining failures
+    /// (timeout, oversized or non-UTF-8 output) carry no provider text by construction and
+    /// are scrubbed against already-fetched values as defence in depth.
     fn run_provider(&self, argv: &[String], install_hint: &str) -> Result<String, String> {
-        run_command(argv, &self.command_env, self.timeout).map_err(|e| {
-            if e.starts_with("could not run ") {
-                install_hint.to_owned()
-            } else if let Some((name, rest)) = e.split_once(" exited with ") {
-                // `rest` is "<status>: <first stderr line>" or just "<status>"; the status
-                // itself contains one ": " ("exit status: 1"), stderr starts after the second.
-                let status_end = rest.find(": ").and_then(|first| rest[first + 2..].find(": ").map(|second| first + 2 + second)).unwrap_or(rest.len());
-                let mut out = format!("{name} exited with {}", &rest[..status_end]);
-                if e.to_lowercase().contains("lock") {
-                    out.push_str(": vault is locked");
-                }
-                out
-            } else {
-                scrub(&e, &self.values())
-            }
-        })
+        run_command(argv, &self.command_env, self.timeout).map_err(|e| if e.starts_with("could not run ") { install_hint.to_owned() } else { scrub(&e, &self.values()) })
     }
 
     fn fetch_1password(&self, vault: &Vault, reference: &str) -> Result<String, String> {
@@ -430,13 +421,14 @@ mod tests {
     }
 
     #[test]
-    fn command_vault_failure_reports_stderr_but_not_the_arguments() {
+    fn command_vault_failure_reports_status_but_not_stderr_or_the_arguments() {
         let mut v = vault("command");
-        v.command = vec!["sh".into(), "-c".into(), "echo 'item not found' >&2; exit 3".into(), "SECRET-REF-ARG".into()];
+        v.command = vec!["sh".into(), "-c".into(), "echo 'item not found: SECRET-VALUE' >&2; exit 3".into(), "SECRET-REF-ARG".into()];
         let vs = [v];
         let env = |_: &str| None;
         let err = Vaults::new(&vs, PathBuf::from("."), &env).get("v", "K").unwrap_err();
-        assert!(err.contains("item not found") && err.contains("exited"), "{err}");
+        assert!(err.contains("exited") && err.contains("exit status: 3"), "{err}");
+        assert!(!err.contains("item not found") && !err.contains("SECRET-VALUE"), "{err}");
         assert!(!err.contains("SECRET-REF-ARG"), "{err}");
     }
 
