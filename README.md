@@ -2,6 +2,8 @@
 
 A collection of tools for working with coding agents (Pi, Claude Code, Codex). See each package family and the root skill collection for details.
 
+Note: `packages/h1` is the renamed PTY harness — see the migration table in [`packages/h1/README.md`](packages/h1/README.md#migration) for the new binary name, environment variables, and data directory.
+
 | Package | What it is |
 |---|---|
 | [`packages/system-one`](packages/system-one) | Local-first model-pick decision model (never permission decisions) |

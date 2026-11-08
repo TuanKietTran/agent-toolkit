@@ -102,6 +102,26 @@ By default `host`, `send` and `screen` use `$H1_SOCKET`, or `h1.sock` under `$XD
 
 On Windows, `run` ends a piped stdin with Ctrl-Z and Enter, because a console ignores Ctrl-D.
 
+## Migration
+
+The binary was renamed from `agent-cli-lab` to `h1`; `labctl` remains as a compatibility shim that execs `h1`. Every environment variable was renamed with it:
+
+| Before | After |
+|---|---|
+| `AGENT_CLI_LAB_AGENTS` | `H1_AGENTS` |
+| `AGENT_CLI_LAB_BIN` | `H1_BIN` |
+| `AGENT_CLI_LAB_DIR` | `H1_DIR` |
+| `AGENT_CLI_LAB_NAME` | `H1_NAME` |
+| `AGENT_CLI_LAB_SELF` | `H1_SELF` |
+| `AGENT_CLI_LAB_SOCKET` | `H1_SOCKET` |
+| `AGENT_CLI_LAB_TERMINAL` | `H1_TERMINAL` |
+
+Move the data directory to its new location:
+
+```sh
+mv ~/.agent-cli-lab ~/.h1
+```
+
 ## Build and test
 
 ```sh
