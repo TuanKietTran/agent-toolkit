@@ -104,13 +104,13 @@ pub(crate) fn parse_etime(text: &str) -> Option<u64> {
     Some(days * 86_400 + seconds)
 }
 
-/// Lines of `ps -axww -o pid=,ppid=,etime=,pcpu=,command=`.
+/// Lines of `ps -axww -o pid=,ppid=,etime=,pcpu=,tty=,command=`.
 pub(crate) fn parse_ps(text: &str) -> Vec<Proc> {
     text.lines()
         .filter_map(|line| {
             let mut rest = line.trim_start();
             let mut fields = [""; 4];
-            // A fifth field is the tty when the ps output carries one (`ttys001`, `??`, `pts/0`);
+            // A fifth field is the tty when the ps output carries one (`ttys001`, `??`, `?`, `pts/0`);
             // older callers and test fixtures without it leave the command untouched.
             for field in fields.iter_mut() {
                 let (head, tail) = rest.split_once(char::is_whitespace)?;
@@ -118,7 +118,7 @@ pub(crate) fn parse_ps(text: &str) -> Vec<Proc> {
                 rest = tail.trim_start();
             }
             let (tty, command) = match rest.split_once(char::is_whitespace) {
-                Some(("??", tail)) => (None, tail.trim_start()),
+                Some(("??" | "?", tail)) => (None, tail.trim_start()),
                 Some((head, tail))
                     if head == "console" || head.starts_with("tty") || head.starts_with("pts/") =>
                 {
@@ -1536,6 +1536,16 @@ mod tests {
             host.command.ends_with("--no-session")
                 && host.command.contains("--title cmdr-expense (muse)")
         );
+    }
+
+    #[test]
+    fn ps_lines_parse_linux_tty_forms() {
+        let procs = parse_ps("9301 1 00:10 0.5 pts/0 pi\n9302 1 00:10 0.5 ? pi --flag\n");
+        assert_eq!(procs.len(), 2);
+        assert_eq!(procs[0].tty.as_deref(), Some("pts/0"));
+        assert_eq!(procs[0].command, "pi");
+        assert_eq!(procs[1].tty, None);
+        assert_eq!(procs[1].command, "pi --flag");
     }
 
     #[test]
