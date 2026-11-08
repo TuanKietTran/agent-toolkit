@@ -359,18 +359,17 @@ fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, over
     }
     let mut ordered: Vec<Lab> = Vec::new();
     let mut seen: HashSet<usize> = HashSet::new();
-    #[allow(clippy::too_many_arguments)]
-    fn walk(
-        index: usize,
-        depth: usize,
-        trail: &str,
-        last: bool,
-        probes: &[Probe],
-        kids: &HashMap<String, Vec<usize>>,
-        history: &HashMap<String, VecDeque<u64>>,
-        seen: &mut HashSet<usize>,
-        out: &mut Vec<Lab>,
-    ) {
+    // Shared read-only indexes for the recursive forest walk, grouped so
+    // `walk` needs no clippy::too_many_arguments suppression.
+    struct Forest<'a> {
+        probes: &'a [Probe],
+        kids: &'a HashMap<String, Vec<usize>>,
+        history: &'a HashMap<String, VecDeque<u64>>,
+    }
+    fn walk(index: usize, depth: usize, trail: &str, last: bool, forest: &Forest, seen: &mut HashSet<usize>, out: &mut Vec<Lab>) {
+        let probes = forest.probes;
+        let kids = forest.kids;
+        let history = forest.history;
         if !seen.insert(index) {
             return;
         }
@@ -396,15 +395,16 @@ fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, over
         });
         let next_trail = if depth == 0 { String::new() } else { format!("{trail}{}", if last { "   " } else { "│  " }) };
         for (n, child) in children.iter().enumerate() {
-            walk(*child, depth + 1, &next_trail, n + 1 == children.len(), probes, kids, history, seen, out);
+            walk(*child, depth + 1, &next_trail, n + 1 == children.len(), forest, seen, out);
         }
     }
+    let forest = Forest { probes, kids: &kids, history };
     for root in roots {
-        walk(root, 0, "", true, probes, &kids, history, &mut seen, &mut ordered);
+        walk(root, 0, "", true, &forest, &mut seen, &mut ordered);
     }
     // cycles: nothing above reached them
     for index in 0..probes.len() {
-        walk(index, 0, "", true, probes, &kids, history, &mut seen, &mut ordered);
+        walk(index, 0, "", true, &forest, &mut seen, &mut ordered);
     }
     ordered
 }
