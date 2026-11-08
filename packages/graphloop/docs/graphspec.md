@@ -377,7 +377,7 @@ vault "local" {
 | --- | --- | --- | --- |
 | `provider` | string | yes | Which adapter fetches the values (see the provider table below). May be a variable reference, for example `provider = var.secrets`, so the backend can be switched from the command line. |
 | `path` | string | no | File for the `dotenv` provider: a `KEY=VALUE` file, relative to the `.yah` file (a leading `~/` is expanded against `$HOME`). Default `.env`. |
-| `account` | string | no | Provider account or server, for example a 1Password account. Used by the service providers; ignored by `dotenv`, `env` and `command`. |
+| `account` | string | no | Provider account or server. Used by `1password` (as the `op --account` value) and by `keychain` (to distinguish entries that share a service); ignored by the other providers. |
 | `command` | list of strings | for `command` only | Argv template for the `command` provider. `{ref}` and `{key}` are substituted in each element; the value is the command's stdout. |
 | `secrets` | map of string to string | no | Maps each KEY used in `${vault.NAME.KEY}` to the provider-side reference for that key. If `secrets` is absent or a key is not listed, any KEY is allowed and the KEY itself is the reference. Duplicate keys are an error. |
 
@@ -408,12 +408,12 @@ harness "worker" {
 | `dotenv` | available | The variable name in the file named by `path` (default `.env` beside the `.yah`). The file is `KEY=VALUE` lines, with `#` comments, optional `export ` prefixes and single- or double-quoted values. |
 | `env` | available | The name of a variable in graphloop's process environment. |
 | `command` | available | Passed to the `command` argv template as `{ref}` (`{key}` is the KEY). Any CLI that prints a secret to stdout can be a backend. |
-| `1password` | being added | An `op://vault/item/field` reference, read with the 1Password CLI; `account` selects the account. |
-| `bitwarden` | being added | A Bitwarden item, in one of the forms `item`, `item/field` or `item#custom` (a custom field). |
-| `bitwarden-secrets` | being added | A Bitwarden Secrets Manager secret id. |
-| `keychain` | being added | A macOS Keychain service name; `account` distinguishes entries that share a service. |
+| `1password` | available | An `op://vault/item/field` reference, read with the 1Password CLI (`op read`); `account` selects the account. |
+| `bitwarden` | available | A Bitwarden item, read with `bw get`, in one of the forms `item` (its password), `item/username`, `item/password`, `item/notes`, `item/uri` or `item/totp`, or `item#custom` (a custom field). |
+| `bitwarden-secrets` | available | A Bitwarden Secrets Manager secret id, read with `bws secret get`; the value is the `value` field of its JSON output. |
+| `keychain` | available | A macOS Keychain service name, read with `security find-generic-password -w`; `account` distinguishes entries that share a service. |
 
-The first three are the adapters in this build. The last four are being added behind the same block and the same `${vault.NAME.KEY}` references, so a file changes backends by changing `provider` (and the reference forms in `secrets`), never by changing the places that use the secret.
+All seven are adapters in this build, behind the same block and the same `${vault.NAME.KEY}` references, so a file changes backends by changing `provider` (and the reference forms in `secrets`), never by changing the places that use the secret.
 
 ## Security model
 
@@ -421,6 +421,8 @@ The first three are the adapters in this build. The last four are being added be
 - **Memory only.** Fetched values are held in memory for that run (and cached so a provider is not called twice for the same key). They are never written to disk by graphloop.
 - **Environment, never argv.** A secret reaches the lab through the `h1 open` process environment, as described above, never as a command-line argument.
 - **Scrubbed.** Known secret values are replaced with `***` in every message, error and provider output graphloop prints. Errors name the vault, the key and the provider, never a value.
+- **Names only in output.** `plan`, `graph`, `up --dry-run`, `runs`, `trace` and `vault status` print environment variable NAMES only — entries that come from a vault are marked as vault-sourced — and never print values.
+- **Provider failures.** The CLI providers (`1password`, `bitwarden`, `bitwarden-secrets`, `keychain`) share one failure path: the error names the program and its exit status only, and never quotes the provider's stdout or stderr. A locked Bitwarden vault is reported as locked — `Bitwarden vault is locked: run: bw unlock` — instead of any provider output. The `command` provider's error likewise names its program and exit status; it may quote the first line of its stderr, scrubbed of any fetched values.
 - **Never in manifests.** The run manifest records vault *names* and configuration only; no fetched value and no expanded `${env.*}` value ever appears in a manifest or any other run file.
 
 ## Switching backends with `--var`
@@ -447,7 +449,7 @@ vault "fleet" {
 ```sh
 graphloop up fleet.yah                            # dotenv: read fleet.env (the default)
 graphloop up fleet.yah --var secrets=env          # the same block, read the process environment
-graphloop up fleet.yah --var secrets=1password    # the same block, once that provider lands
+graphloop up fleet.yah --var secrets=1password    # the same block, read with the 1Password CLI
 ```
 
 This is the pattern `fleet.yah` uses: the graph, the harness `env` maps and the secret names stay identical; only the backend changes.
@@ -460,6 +462,7 @@ This is the pattern `fleet.yah` uses: the graph, the harness `env` maps and the 
 - Unless `--no-env-file` is passed, a `.env` file in the directory of the `.yah` file is used implicitly when it exists.
 - Lookup order for `${env.NAME}`: the real process environment first, then the files, with an earlier `--env-file` winning over a later one.
 - The same merged view is the bootstrap environment for provider CLIs: it is passed to them so a token such as `OP_SERVICE_ACCOUNT_TOKEN`, `BW_SESSION` or `BWS_ACCESS_TOKEN` can live in an env file instead of being exported in the shell.
+- Values loaded from these files never appear in graphloop output; they are passed only to the processes graphloop opens and to the provider CLIs.
 
 ## Worked examples
 

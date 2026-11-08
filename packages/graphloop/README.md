@@ -70,7 +70,7 @@ graphloop up fleet.yah                    # dotenv (default)
 graphloop up fleet.yah --var secrets=env  # same block, from the process environment
 ```
 
-Providers: `dotenv`, `env` and `command` now; `1password`, `bitwarden`, `bitwarden-secrets` and `keychain` behind the same block. Full chapter: [docs/graphspec.md](docs/graphspec.md) “Secret vaults”. See also `examples/vault.yah`.
+Providers: all seven — `dotenv`, `env`, `command`, `1password`, `bitwarden`, `bitwarden-secrets` and `keychain` — behind the same block. Full chapter: [docs/graphspec.md](docs/graphspec.md) “Secret vaults”. See also `examples/vault.yah`.
 
 ## Vault & secrets
 
@@ -82,14 +82,14 @@ A `vault` block names a provider and which keys to fetch; `${vault.NAME.KEY}` re
 | `env` | none | the value from graphloop's own process environment under the referenced key |
 | `command` | the first element of the `command` list | runs that command with `{ref}` and `{key}` substituted into its arguments; the value is its stdout |
 | `1password` | `op` | the referenced 1Password item field, read with `op read` (an account can be named in the block) |
-| `bitwarden` | `bw` | a Bitwarden item field with `bw get` — the password by default, or username, notes, uri or totp when the reference names one |
+| `bitwarden` | `bw` | a Bitwarden item field with `bw get` — the password by default, or username, notes, uri or totp when the reference names one, or a custom field when the reference is in the form `item#field` |
 | `bitwarden-secrets` | `bws` | a Bitwarden Secrets Manager secret by id, with `bws secret get`; the value is the `value` field of its JSON output |
-| `keychain` | `security` | a macOS Keychain generic password, with `security find-generic-password` |
+| `keychain` | `security` | a macOS Keychain generic password, with `security find-generic-password` (an account can be named to distinguish entries that share a service) |
 
 Three rules hold for every provider:
 
 - **Names only in output.** `plan`, `graph`, `up --dry-run`, `runs`, `trace` and `vault status` print environment variable NAMES only — entries that come from a vault are marked as vault-sourced — and never print values. The run manifest likewise records only the `vault_env` names, never a value.
-- **Failures name the program and its exit status only.** All providers share one failure path: when a provider fails, the error reports the program name and the exit status, and never quotes the provider's stdout or stderr, so nothing a provider prints can leak into an error message. A locked Bitwarden vault is reported with the synthesized `vault-is-locked` indicator instead of any provider output.
+- **Failures name the program and its exit status only.** The four CLI providers (`1password`, `bitwarden`, `bitwarden-secrets`, `keychain`) share one failure path: when one fails, the error reports the program name and the exit status, and never quotes the provider's stdout or stderr, so nothing a provider prints can leak into an error message. A locked Bitwarden vault is reported as locked — `Bitwarden vault is locked: run: bw unlock` — instead of any provider output. The `command` provider's error likewise names its program and exit status; it may quote the first line of its stderr, scrubbed of any fetched secret values.
 - **`--env-file` values stay out of output.** Values loaded with `--env-file` go into the environment of the processes graphloop opens, and into nothing else: they never appear in any command output.
 
 ## Tests
