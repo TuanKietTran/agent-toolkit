@@ -491,18 +491,8 @@ With `FLEET_TOKEN=...` in `fleet.env` beside the `.yah` file, `graphloop up` fet
 
 Example 1 with `provider = var.secrets` and a `variable "secrets"` defaulting to `"dotenv"` (the full form is in "Switching backends" above): locally the token comes from `fleet.env`; in CI, `--var secrets=env` reads the same name from the CI environment, where the CI system injects it. No other line changes.
 
-### 3. AliasVault through the `command` provider (example)
+### 3. AliasVault (not a graphloop backend)
 
-Any secret store with a CLI can be a backend before a dedicated provider exists. Sketch for AliasVault:
+AliasVault cannot be read from graphloop. Its vault is end-to-end encrypted: no CLI or plain HTTP API returns a plaintext credential or creates an item, and the in-container `aliasvault` CLI is admin-only (`reset-admin-password`, `hash-password`). Decryption is client-side after unlock, so no `command` provider can fetch from it.
 
-```yah
-vault "av" {
-  provider = "command"
-  command  = ["aliasvault", "read", "{ref}"]
-  secrets  = {
-    FLEET_RUN_TOKEN = "fleet/run-token"
-  }
-}
-```
-
-This is an **example**: the AliasVault CLI syntax shown here is **not verified**. Adapt the `command` argv to the real AliasVault CLI; graphloop substitutes `{ref}` with the `secrets` value (`fleet/run-token` above) and `{key}` with the KEY, runs the command at `up` time, and takes its stdout as the secret, with the security model above applying unchanged.
+The only interop is the other direction: importing into AliasVault via its web UI, Settings -> Import / Export, Generic CSV with columns `service_name,url,username,password,totp_secret,notes,folder`.
