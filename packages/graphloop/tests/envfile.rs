@@ -70,3 +70,82 @@ fn from_entries_is_first_wins_and_command_env_is_sorted() {
     assert_eq!(files.get("ZED").as_deref(), Some("z"));
     assert_eq!(files.command_env(), vec![("ALPHA".to_string(), "a".to_string()), ("ZED".to_string(), "z".to_string())]);
 }
+
+// --- H11: real-world env-file edges. Each case loads through `EnvFiles::load` (the
+// `--env-file` path) with a fixed fake value, asserted here only — never printed.
+
+#[test]
+fn crlf_line_endings_leave_no_carriage_return_in_values() {
+    let dir = tempfile::tempdir().unwrap();
+    let yah = write(dir.path(), "fleet.yah", "yah 1\n");
+    let env = write(dir.path(), "crlf.env", "ALPHA=one\r\nBETA=two words\r\n");
+    let files = EnvFiles::load(&yah, &[env], false).unwrap();
+    assert_eq!(files.get("ALPHA").as_deref(), Some("one"));
+    assert_eq!(files.get("BETA").as_deref(), Some("two words"));
+    assert!(files.command_env().iter().all(|(_, v)| !v.contains('\r')));
+}
+
+#[test]
+fn utf8_bom_at_file_start_first_key_parses_cleanly() {
+    let dir = tempfile::tempdir().unwrap();
+    let yah = write(dir.path(), "fleet.yah", "yah 1\n");
+    let env = write(dir.path(), "bom.env", "\u{feff}TOKEN=abc\nOTHER=two\n");
+    let files = EnvFiles::load(&yah, &[env], false).unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files.get("TOKEN").as_deref(), Some("abc"));
+    assert_eq!(files.get("OTHER").as_deref(), Some("two"));
+}
+
+#[test]
+fn duplicate_keys_last_occurrence_wins() {
+    use graphloop::spec::Vault;
+    use graphloop::vault::Vaults;
+    let dir = tempfile::tempdir().unwrap();
+    let yah = write(dir.path(), "fleet.yah", "yah 1\n");
+    let env = write(dir.path(), "dup.env", "DUP=first\nDUP=second\nDUP=third\n");
+    let files = EnvFiles::load(&yah, std::slice::from_ref(&env), false).unwrap();
+    // Effective value at the env-file layer: one entry, the last occurrence.
+    assert_eq!(files.len(), 1);
+    assert_eq!(files.get("DUP").as_deref(), Some("third"));
+    assert_eq!(files.lookup("DUP", &no_real).as_deref(), Some("third"));
+    assert_eq!(files.command_env(), vec![("DUP".to_string(), "third".to_string())]);
+    // Fetch-path assertion: the same file read as a dotenv vault returns the last value.
+    let v = Vault { name: "v".into(), provider: "dotenv".into(), path: Some(env.to_string_lossy().into_owned()), account: None, command: Vec::new(), secrets: Vec::new(), line: 1 };
+    let vs = [v];
+    let no_env = |_: &str| -> Option<String> { None };
+    assert_eq!(Vaults::new(&vs, PathBuf::from("."), &no_env).get("v", "DUP").unwrap(), "third");
+}
+
+#[test]
+fn value_containing_equals_signs_is_kept_intact() {
+    let dir = tempfile::tempdir().unwrap();
+    let yah = write(dir.path(), "fleet.yah", "yah 1\n");
+    let env = write(dir.path(), "eq.env", "TOKEN=abc=def==\nOTHER=plain\n");
+    let files = EnvFiles::load(&yah, &[env], false).unwrap();
+    assert_eq!(files.get("TOKEN").as_deref(), Some("abc=def=="));
+    assert_eq!(files.get("OTHER").as_deref(), Some("plain"));
+}
+
+#[test]
+fn empty_value_is_present_and_empty_not_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    let yah = write(dir.path(), "fleet.yah", "yah 1\n");
+    let env = write(dir.path(), "empty.env", "EMPTY=\nSET=x\n");
+    let files = EnvFiles::load(&yah, &[env], false).unwrap();
+    assert_eq!(files.get("EMPTY").as_deref(), Some(""));
+    assert_eq!(files.lookup("EMPTY", &no_real).as_deref(), Some(""));
+    assert!(files.command_env().contains(&("EMPTY".to_string(), String::new())));
+    assert_eq!(files.get("SET").as_deref(), Some("x"));
+    assert_eq!(files.get("MISSING"), None);
+}
+
+#[test]
+fn final_line_without_trailing_newline_is_parsed() {
+    let dir = tempfile::tempdir().unwrap();
+    let yah = write(dir.path(), "fleet.yah", "yah 1\n");
+    let env = write(dir.path(), "nonl.env", "FIRST=1\nLAST=2");
+    let files = EnvFiles::load(&yah, &[env], false).unwrap();
+    assert_eq!(files.len(), 2);
+    assert_eq!(files.get("FIRST").as_deref(), Some("1"));
+    assert_eq!(files.get("LAST").as_deref(), Some("2"));
+}
