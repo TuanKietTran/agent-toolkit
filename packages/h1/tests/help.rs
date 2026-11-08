@@ -32,6 +32,7 @@ const SUBCOMMANDS: &[&str] = &[
     "ledger",
     "close",
     "resume",
+    "renew",
 ];
 
 fn binary() -> &'static str {
@@ -90,8 +91,7 @@ fn top_level_help_lists_every_subcommand() {
     let text = help(&[]);
     for name in SUBCOMMANDS {
         assert!(
-            text.lines()
-                .any(|line| line.trim_start().starts_with(name)),
+            text.lines().any(|line| line.trim_start().starts_with(name)),
             "top-level help does not list {name}:\n{text}"
         );
     }
