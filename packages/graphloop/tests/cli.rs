@@ -36,8 +36,8 @@ fn sample_resolved() -> Vec<Resolved> {
 
 fn sample_nodes() -> Vec<Node> {
     vec![
-        Node { name: "commander".into(), harness: "commander".into(), role: "commander".into(), parent: None, requested_model: "system-one".into(), model: "anthropic/claude-sonnet-5-5".into(), model_label: "sonnet".into(), pick: PickInfo { via: "system-one".into(), rule: Some("R3".into()), reason: "strict constraints".into(), degraded_level: 0 }, tools: vec!["fs".into()] },
-        Node { name: "builder".into(), harness: "builder".into(), role: "builder".into(), parent: Some("commander".into()), requested_model: "system-one".into(), model: "anthropic/claude-sonnet-5-5".into(), model_label: "sonnet".into(), pick: PickInfo { via: "fallback".into(), rule: None, reason: "system-one unavailable".into(), degraded_level: 1 }, tools: vec![] },
+        Node { name: "commander".into(), harness: "commander".into(), role: "commander".into(), parent: None, requested_model: "system-one".into(), model: "anthropic/claude-sonnet-5-5".into(), model_label: "sonnet".into(), pick: PickInfo { via: "system-one".into(), rule: Some("R3".into()), reason: "strict constraints".into(), degraded_level: 0 }, tools: vec!["fs".into()], vault_env: vec![] },
+        Node { name: "builder".into(), harness: "builder".into(), role: "builder".into(), parent: Some("commander".into()), requested_model: "system-one".into(), model: "anthropic/claude-sonnet-5-5".into(), model_label: "sonnet".into(), pick: PickInfo { via: "fallback".into(), rule: None, reason: "system-one unavailable".into(), degraded_level: 1 }, tools: vec![], vault_env: vec![] },
     ]
 }
 
@@ -75,6 +75,20 @@ fn open_calls(log: &Path) -> Vec<String> {
 
 fn up_req<'a>(plan: &'a Plan, home: &Path, manifest_dir: &Path, env: &'a dyn Fn(&str) -> Option<String>) -> UpRequest<'a> {
     UpRequest { plan, nodes: sample_nodes(), source: "/tmp/team.yah".into(), home: home.to_path_buf(), manifest_dir: manifest_dir.to_path_buf(), run: RUN.into(), now_ms: NOW_MS, env, vault: &no_vault }
+}
+
+fn up_req_full<'a>(plan: &'a Plan, home: &Path, manifest_dir: &Path, env: &'a dyn Fn(&str) -> Option<String>, vault: &'a dyn Fn(&str, &str) -> Result<String, String>) -> UpRequest<'a> {
+    UpRequest { plan, nodes: sample_nodes(), source: "/tmp/team.yah".into(), home: home.to_path_buf(), manifest_dir: manifest_dir.to_path_buf(), run: RUN.into(), now_ms: NOW_MS, env, vault }
+}
+
+fn good_vault(vault: &str, key: &str) -> Result<String, String> {
+    if vault == "local" && key == "FLEET_TOKEN" { Ok("s3cr3t-token-9f2a".into()) } else { Err(format!("unknown vault key {vault}.{key}")) }
+}
+
+fn dry_plan() -> Plan {
+    let mut plan = sample_plan();
+    plan.steps[1].argv = vec![t("open"), t("-n"), t("builder"), t("--role"), t("builder"), t("--parent"), t("commander"), t("--model"), t("anthropic/claude-sonnet-5-5"), t("--env"), Templ(vec![Part::Lit("FLEET_TOKEN=".into()), Part::Vault("local".into(), "FLEET_TOKEN".into())]), t("--env"), Templ(vec![Part::Lit("API_KEY=".into()), Part::Env("GL_TEST_KEY".into())]), t("--"), t("cat")];
+    plan
 }
 
 fn no_vault(_: &str, _: &str) -> Result<String, String> {
@@ -263,6 +277,45 @@ fn up_missing_env_refused_before_opening() {
     assert!(open_calls(&log).is_empty(), "nothing opened");
     assert!(!mdir.join(format!("{RUN}.json")).exists(), "no manifest");
     assert!(!home.join("runs").join(RUN).exists(), "no run dir");
+}
+
+#[test]
+fn dry_run_prints_env_names_only_and_creates_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dry_plan();
+    let home = dir.path().join("home");
+    let mdir = dir.path().join("graphs");
+    let out = up_dry_run_core(&up_req_full(&plan, &home, &mdir, &good_env, &good_vault)).unwrap();
+    assert!(out.contains("dry-run: 2 labs"), "{out}");
+    assert!(out.contains("commander: model anthropic/claude-sonnet-5-5 via system-one, env -\n"), "{out}");
+    assert!(out.contains("builder: model anthropic/claude-sonnet-5-5 via fallback, env API_KEY, FLEET_TOKEN (vault)\n"), "{out}");
+    assert!(!out.contains("s3cr3t-token-9f2a"), "{out}");
+    assert!(!out.contains("test-value"), "{out}");
+    assert!(!home.exists(), "no run dir");
+    assert!(!mdir.exists(), "no manifest dir");
+}
+
+#[test]
+fn dry_run_missing_secret_fails_like_up_and_creates_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let plan = dry_plan();
+    let home = dir.path().join("home");
+    let mdir = dir.path().join("graphs");
+    let e = up_dry_run_core(&up_req_full(&plan, &home, &mdir, &good_env, &no_vault)).unwrap_err();
+    assert!(e.contains("builder"), "{e}");
+    assert!(!home.exists());
+    assert!(!mdir.exists());
+    let no_env = |_: &str| None;
+    let e = up_dry_run_core(&up_req_full(&plan, &home, &mdir, &no_env, &good_vault)).unwrap_err();
+    assert!(e.contains("GL_TEST_KEY"), "{e}");
+}
+
+#[test]
+fn process_up_help_lists_dry_run() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["up", "--help"]).output().unwrap();
+    assert!(out.status.success());
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("--dry-run"), "{text}");
 }
 
 #[cfg(unix)]

@@ -362,7 +362,7 @@ pub fn manifest(spec: &Spec, plan: &Plan, resolved: &[Resolved], source: &str, o
                 ),
                 None => (step.model.clone(), step.model.clone(), String::new(), PickInfo { via: String::new(), rule: None, reason: String::new(), degraded_level: 0 }),
             };
-            Node { name: step.name.clone(), harness: step.harness.clone(), role: step.role.clone(), parent: step.parent.clone(), requested_model, model, model_label, pick, tools }
+            Node { name: step.name.clone(), harness: step.harness.clone(), role: step.role.clone(), parent: step.parent.clone(), requested_model, model, model_label, pick, tools, vault_env: Vec::new() }
         })
         .collect();
     Manifest {
