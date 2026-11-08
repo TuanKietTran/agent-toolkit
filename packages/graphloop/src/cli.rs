@@ -459,15 +459,16 @@ fn load_spec(file: &Path, vars: &[String]) -> Result<Spec, String> {
     crate::load::load_file(file, &overrides).map_err(|e| format!("{e:#}"))
 }
 
-struct FailPicker;
+struct FailPicker { reason: String }
 impl Picker for FailPicker {
-    fn pick(&self, _request: &PickRequest) -> anyhow::Result<PickDecision> { anyhow::bail!("system-one is not available") }
+    fn pick(&self, _request: &PickRequest) -> anyhow::Result<PickDecision> { anyhow::bail!(self.reason.clone()) }
 }
 
-fn build_picker(spec: &Spec) -> Box<dyn Picker> {
-    match crate::pick::locate_system_one() {
+fn build_picker(spec: &Spec, yah_file: &Path) -> Box<dyn Picker> {
+    let location = crate::pick::locate_system_one_detailed(Some(yah_file));
+    match location.dir.clone() {
         Some(dir) => Box::new(crate::pick::SystemOnePicker { python: std::env::var("GRAPHLOOP_PYTHON").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "python3".to_string()), system_one_dir: dir, student: spec.system_one.as_ref().and_then(|s| s.student.as_ref()).map(PathBuf::from), timeout_ms: 10_000 }),
-        None => Box::new(FailPicker),
+        None => Box::new(FailPicker { reason: crate::pick::system_one_not_found_reason(&location) }),
     }
 }
 
@@ -478,7 +479,7 @@ fn load_env_files(args: &FileArgs) -> Result<crate::envfile::EnvFiles, String> {
 fn load_and_resolve(args: &FileArgs) -> Result<(Spec, Team, Vec<Resolved>), String> {
     let spec = load_spec(&args.file, &args.var)?;
     let team = select_team(&spec.teams, args.team.as_deref()).map_err(|e| err(&e))?.clone();
-    let picker = build_picker(&spec);
+    let picker = build_picker(&spec, &args.file);
     let resolved = crate::pick::resolve_all(&spec, picker.as_ref()).map_err(|d| render_diags(&d))?;
     Ok((spec, team, resolved))
 }
