@@ -194,11 +194,8 @@ fn probe_all(stalled_ms: u64) -> Vec<Probe> {
             .collect();
         handles.into_iter().filter_map(|handle| handle.join().ok()).collect()
     });
-    for probe in &found {
-        if probe.state == "gone" {
-            session::forget(&probe.entry.name);
-        }
-    }
+    // A host that no longer answers is hidden, never forgotten: its record is what `h1 recover` reopens from.
+    found.retain(|probe| probe.state != "gone");
     found.sort_by_key(|probe| (probe.entry.started_ms, probe.entry.name.clone()));
     found
 }

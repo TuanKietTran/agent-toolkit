@@ -812,8 +812,8 @@ pub(crate) fn list(args: ListArgs) -> Result<i32> {
             }
             Err(_) => "dead",
         };
+        // A dead host is hidden, never forgotten: its record is what `h1 recover` reopens from.
         if state == "dead" && !args.all {
-            session::forget(&entry.name);
             continue;
         }
         rows.push((entry, state));
@@ -893,6 +893,14 @@ pub(crate) fn stop(args: StopArgs) -> Result<i32> {
             }
         }
         Err(error) => {
+            // A named session whose host is gone still has its record: stopping it drops that record.
+            if let Some(name) = &args.connection.name
+                && session::entries().iter().any(|entry| &entry.name == name)
+            {
+                session::forget(name);
+                println!("forgot {name}: no host was running");
+                return Ok(0);
+            }
             return Err(error.context(format!("no session answers on {}", socket.display())));
         }
     }

@@ -196,7 +196,7 @@ pub(crate) fn entries_in(directory: &Path) -> Vec<Entry> {
     found
 }
 
-/// Deletes the registry file of `name` (used for a host that no longer answers).
+/// Deletes the registry file of `name`. Only `stop` calls it: a record whose host died is kept so `h1 recover` can reopen it.
 pub fn forget(name: &str) {
     if validate_name(name).is_ok() {
         let _ = fs::remove_file(entry_path(&session_dir(), name));

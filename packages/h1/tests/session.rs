@@ -471,22 +471,27 @@ fn bad_names_and_missing_sessions_fail_clearly() {
 }
 
 #[test]
-fn a_stale_registry_entry_is_pruned_by_list() {
+fn a_stale_registry_entry_is_hidden_by_list_and_dropped_by_stop() {
     let lab = Lab::new();
     let stale = serde_json::json!({
         "name": "ghost", "pid": 1, "socket": lab.directory.path().join("ghost.sock").display().to_string(),
         "command": ["nothing"], "cols": 80, "rows": 24, "started_ms": 1,
     });
-    fs::write(lab.directory.path().join("ghost.json"), stale.to_string()).unwrap();
+    let record = lab.directory.path().join("ghost.json");
+    fs::write(&record, stale.to_string()).unwrap();
     let shown = lab.json(&["list", "--json", "--all"]);
     assert_eq!(shown[0]["name"], "ghost");
     assert_eq!(shown[0]["state"], "dead");
-    let pruned = lab.json(&["list", "--json"]);
-    assert!(pruned.as_array().unwrap().is_empty(), "{pruned}");
+    let hidden = lab.json(&["list", "--json"]);
+    assert!(hidden.as_array().unwrap().is_empty(), "{hidden}");
+    assert!(record.exists(), "listing must keep the record of a dead host");
+    let out = lab.cli(&["stop", "-n", "ghost"]);
     assert!(
-        !Path::new(&lab.directory.path().join("ghost.json")).exists(),
-        "the dead entry is removed"
+        out.status.success(),
+        "stop drops a dead record: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
+    assert!(!record.exists(), "stop removes the record of a dead host");
 }
 
 #[test]
@@ -903,6 +908,40 @@ fn recover_missing_env_name_reports_name_only() {
         !lab.cli(&["status", "-n", "m"]).status.success(),
         "session must not be reopened"
     );
+}
+
+#[test]
+fn listing_never_deletes_the_record_of_a_dead_host() {
+    let mut lab = Lab::new();
+    lab.host("d", &[], os::TWO_LINES);
+    kill_only_host(&mut lab);
+    let plain = lab.cli(&["list"]);
+    assert!(
+        !text(&plain).contains(" d "),
+        "a dead host is hidden from a plain list: {}",
+        text(&plain)
+    );
+    let all = lab.cli(&["list", "--all"]);
+    assert!(
+        text(&all).lines().any(|line| line.starts_with('d')),
+        "list --all still shows the dead record: {}",
+        text(&all)
+    );
+    let json = lab.cli(&["list", "--json"]);
+    assert!(
+        text(&json).trim() == "[]",
+        "a dead host is hidden from json list: {}",
+        text(&json)
+    );
+    let out = lab.cli(&["recover", "-n", "d", "-t", "30"]);
+    assert!(
+        out.status.success(),
+        "recover after list must still find the record: {} {}",
+        text(&out),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(lab.cli(&["status", "-n", "d"]).status.success());
+    assert!(lab.cli(&["stop", "-n", "d"]).status.success());
 }
 
 #[test]
