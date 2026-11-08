@@ -152,21 +152,49 @@ impl Parser {
         }
     }
 
-    /// Recovery: skip tokens until a synchronisation point — EOF, the enclosing
-    /// block's `}` (left unconsumed when `in_block`; a stray `}` at top level is
-    /// skipped like other garbage), or an identifier on a later line than the
-    /// error that starts a statement. Passing `err_line = u32::MAX` skips to
-    /// `}`/EOF only. Every non-sync token is consumed, so this always
-    /// terminates; callers handle the sync token (`}`/EOF) themselves.
-    fn synchronise(&mut self, err_line: u32, in_block: bool) {
+    /// Net unclosed nesting (`{`/`[` minus `}`/`]`, floored at 0) among the
+    /// tokens consumed since `start_pos` — i.e. how far inside maps/lists the
+    /// statement that started at `start_pos` was when it failed.
+    fn unclosed_depth_since(&self, start_pos: usize) -> i32 {
+        let mut depth: i32 = 0;
+        for t in &self.tokens[start_pos..self.pos.min(self.tokens.len())] {
+            match t.tok {
+                Tok::LBrace | Tok::LBracket => depth += 1,
+                Tok::RBrace | Tok::RBracket => depth -= 1,
+                _ => {}
+            }
+        }
+        depth.max(0)
+    }
+
+    /// Recovery (depth-aware): skip tokens until the nesting depth is back
+    /// to the failing statement's starting depth AND a synchronisation point
+    /// is reached — EOF, the enclosing block's `}` (left unconsumed when
+    /// `in_block`; a stray `}` at top level is skipped like other garbage),
+    /// or an identifier on a later line than the error that starts a
+    /// statement. While `depth > 0` every token is consumed and counted:
+    /// a `}` that closes a map/list opened by the failing statement must
+    /// never be mistaken for the enclosing block's `}`, and a block's real
+    /// `}` must never be reported as a statement. Passing
+    /// `err_line = u32::MAX` skips to `}`/EOF only. Every non-sync token is
+    /// consumed, so this always terminates; callers handle the sync token
+    /// (`}`/EOF) themselves.
+    fn synchronise(&mut self, err_line: u32, in_block: bool, mut depth: i32) {
         loop {
-            match self.peek() {
-                Tok::Eof => break,
-                Tok::RBrace if in_block => break,
-                Tok::Ident(_) if self.peek_span().line > err_line && self.at_statement_start() => break,
-                _ => {
-                    self.bump();
+            if *self.peek() == Tok::Eof {
+                break;
+            }
+            if depth <= 0 {
+                match self.peek() {
+                    Tok::RBrace if in_block => break,
+                    Tok::Ident(_) if self.peek_span().line > err_line && self.at_statement_start() => break,
+                    _ => {}
                 }
+            }
+            match self.bump().tok {
+                Tok::LBrace | Tok::LBracket => depth += 1,
+                Tok::RBrace | Tok::RBracket if depth > 0 => depth -= 1,
+                _ => {}
             }
         }
     }
@@ -192,21 +220,23 @@ impl Parser {
                 _ => {
                     if self.errors.0.len() >= MAX_ERRORS {
                         // Cap reached: skip the rest of this block.
-                        self.synchronise(u32::MAX, true);
+                        self.synchronise(u32::MAX, true, 0);
                         if matches!(self.peek(), Tok::RBrace) {
                             self.bump();
                         }
                         break;
                     }
+                    let start_pos = self.pos;
                     match self.parse_statement() {
                         Ok(stmt) => body.push(stmt),
                         Err(diags) => {
                             let err_line = diags.0.first().map(|d| d.line).unwrap_or_else(|| self.peek_span().line);
+                            let depth = self.unclosed_depth_since(start_pos);
                             self.record(diags);
                             if *self.peek() == Tok::Eof {
                                 break;
                             }
-                            self.synchronise(err_line, true);
+                            self.synchronise(err_line, true, depth);
                             if *self.peek() == Tok::Eof {
                                 break;
                             }
@@ -391,15 +421,17 @@ pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
         if parser.errors.0.len() >= MAX_ERRORS {
             break;
         }
+        let start_pos = parser.pos;
         match parser.parse_statement() {
             Ok(stmt) => stmts.push(stmt),
             Err(diags) => {
                 let err_line = diags.0.first().map(|d| d.line).unwrap_or_else(|| parser.peek_span().line);
+                let depth = parser.unclosed_depth_since(start_pos);
                 parser.record(diags);
                 if *parser.peek() == Tok::Eof {
                     break;
                 }
-                parser.synchronise(err_line, false);
+                parser.synchronise(err_line, false, depth);
             }
         }
     }
@@ -714,6 +746,54 @@ mod tests {
         assert_eq!(d.0.len(), 3, "{d:?}");
         assert!(d.0.iter().all(|x| x.summary == "Expected value"), "{d:?}");
         assert_eq!(d.0.iter().map(|x| x.line).collect::<Vec<_>>(), vec![2, 4, 7]);
+    }
+
+    #[test]
+    fn error_inside_nested_env_map_reports_exactly_once_and_recovers() {
+        // The bad entry is inside a map inside a block: the map's `}` must be
+        // consumed as the map's, the block's `}` must close the block, and the
+        // following statement in the block must still parse — exactly 1 error.
+        let src = "yah 1\nblk {\n  env = {\n    BAD = = 1\n  }\n  ok = 3\n}\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 1, "{d:?}");
+        assert_eq!(d.0[0].summary, "Expected value");
+        assert_eq!(d.0[0].line, 4);
+    }
+
+    #[test]
+    fn unterminated_interpolation_in_map_in_block_reports_exactly_one() {
+        // Mini A-39: the interpolation error is inside a map inside two nested
+        // blocks. Exactly the primary diagnostic — no cascade `Expected
+        // statement` on either real closing brace, no `Unclosed block`.
+        let src = "yah 1\nharness \"commander\" {\n  open {\n    env = {\n      FLEET_TOKEN = \"${vault.local.FLEET_TOKEN\"\n    }\n  }\n}\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 1, "{d:?}");
+        assert_eq!(d.0[0].summary, "Invalid interpolation");
+    }
+
+    #[test]
+    fn missing_value_after_equals_reports_exactly_once_and_recovers() {
+        // `a =` immediately before the block's `}`: exactly 1 `Expected value`,
+        // the `}` still closes the block, the next block still parses.
+        let src = "yah 1\nblk {\n  a =\n}\nnext {\n  b = 2\n}\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 1, "{d:?}");
+        assert_eq!(d.0[0].summary, "Expected value");
+        assert_eq!(d.0[0].line, 4);
+    }
+
+    #[test]
+    fn truncations_of_flat_source_never_exceed_broken_statements_plus_one() {
+        // Every prefix of this flat source breaks at most one distinct
+        // statement, so a parse may report at most 1 + 1 diagnostics — and
+        // must never panic.
+        let src = "yah 1\na = 1\nb = [1, 2]\nc = \"x\"\nd = { k = 1 }\ne = true\n";
+        for (i, _) in src.char_indices() {
+            if let Err(d) = parse("test.yah", &src[..i]) {
+                assert!(d.0.len() <= 2, "prefix {i}: {} diagnostics: {d:?}", d.0.len());
+            }
+        }
+        let _ = parse("test.yah", src).unwrap();
     }
 
     #[test]
