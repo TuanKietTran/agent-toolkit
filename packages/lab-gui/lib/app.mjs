@@ -18,7 +18,7 @@ import { dirname, extname, join, normalize, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ALLOWED_KEYS, CliError, isValidName } from "./cli.mjs";
 import { loadThemes } from "./themes.mjs";
-import { loadGraphs, mergeGraphs } from "./graphs.mjs";
+import { loadGraphs, mergeGraphs, pageBanner } from "./graphs.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(here, "..", "public");
@@ -60,7 +60,7 @@ async function readJson(req) {
  * @param {{cli: ReturnType<import('./cli.mjs').createCli>, monitor: ReturnType<import('./monitor.mjs').createMonitor>,
  *          key: string, token: string, port: () => number, pollMs?: number, idleMs?: number}} options
  */
-export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleMs = 20000, themesDir = THEMES_DIR, graphsDir = undefined, remote = null, now = Date.now }) {
+export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleMs = 20000, themesDir = THEMES_DIR, graphsDir = undefined, registryDir = undefined, oldRegistryDir = undefined, remote = null, now = Date.now }) {
   const failures = new Map(); // address -> {count, since, until}
   const throttled = (addr) => (failures.get(addr)?.until ?? 0) > now();
   const failed = (addr) => {
@@ -119,7 +119,12 @@ export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleM
     } catch {
       return sendJson(res, 404, { error: "not found" });
     }
-    if (rel === "index.html") body = body.replace("__LAB_GUI_TOKEN__", token);
+    if (rel === "index.html") {
+      body = body.replace("__LAB_GUI_TOKEN__", token);
+      const banner = await pageBanner({ dir: registryDir, oldDir: oldRegistryDir }).catch(() => null);
+      const bannerHtml = banner ? `<div class="registry-banner" role="alert">${banner.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>` : "";
+      body = body.replace("__REGISTRY_BANNER__", bannerHtml);
+    }
     res.writeHead(200, { "content-type": TYPES[extname(file)], "cache-control": "no-store", "content-security-policy": CSP, "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "x-frame-options": "DENY" });
     res.end(body);
   }

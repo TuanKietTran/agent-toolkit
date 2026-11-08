@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { graphsDir, graphspecOf, loadGraphs, mergeGraphs, oldSessionDir, registryBanner, sessionDir, vaultEnvOf } from "../lib/graphs.mjs";
+import { graphsDir, graphspecOf, loadGraphs, mergeGraphs, oldSessionDir, pageBanner, registryBanner, sessionDir, vaultEnvOf } from "../lib/graphs.mjs";
 
 const node = (name, extra = {}) => ({ name, harness: "pi", role: null, parent: null, requested_model: null, model: null, model_label: null, pick: { via: null, rule: null, reason: null }, tools: [], ...extra });
 const manifest = (extra = {}) => ({ version: 1, run: "run-1", team: "team.yah", source: null, root: "lead", created_ms: 100, nodes: [node("lead")], edges: [], ...extra });
@@ -66,6 +66,37 @@ test("registryBanner tolerates a missing registry dir (0 sessions, still named)"
   const base = await mkdtemp(join(tmpdir(), "lab-gui-banner-missing-"));
   const registry = join(base, "nope");
   assert.deepEqual(await registryBanner({ dir: registry, oldDir: join(base, "also-nope") }), [`lab-gui: registry ${registry} (0 sessions)`]);
+});
+
+test("pageBanner shows when the current registry is empty and the old registry has sessions, with the exact .json count", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-page-banner-show-"));
+  const registry = join(base, "h1");
+  const old = join(base, "agent-cli-lab");
+  await mkdir(registry, { recursive: true });
+  await mkdir(old, { recursive: true });
+  await writeFile(join(registry, "notes.txt"), "not a session");
+  await writeFile(join(old, "a.json"), "{}");
+  await writeFile(join(old, "b.json"), "{}");
+  await writeFile(join(old, "notes.txt"), "not a session");
+  assert.equal(await pageBanner({ dir: registry, oldDir: old }), `This GUI reads ${registry}, which is empty; 2 session(s) exist in the old registry ${old}; those sessions belong to the pre-rename install and are not shown here; no automatic migration happens.`);
+});
+
+test("pageBanner is null when the current registry is non-empty, the old registry has 0 sessions, or the old registry is absent", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-page-banner-hide-"));
+  const registry = join(base, "h1");
+  const old = join(base, "agent-cli-lab");
+  await mkdir(registry, { recursive: true });
+  await mkdir(old, { recursive: true });
+  await writeFile(join(old, "a.json"), "{}");
+  await writeFile(join(registry, "live.json"), "{}");
+  assert.equal(await pageBanner({ dir: registry, oldDir: old }), null);
+  const emptyRegistry = join(base, "h1-empty");
+  const emptyOld = join(base, "old-empty");
+  await mkdir(emptyRegistry, { recursive: true });
+  await mkdir(emptyOld, { recursive: true });
+  await writeFile(join(emptyOld, "notes.txt"), "not a session");
+  assert.equal(await pageBanner({ dir: emptyRegistry, oldDir: emptyOld }), null);
+  assert.equal(await pageBanner({ dir: emptyRegistry, oldDir: join(base, "no-such-dir") }), null);
 });
 
 test("loadGraphs reads a graphs folder directly, oldest first, skipping junk", async () => {

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
+import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { createApp } from "../lib/app.mjs";
 import { createMonitor } from "../lib/monitor.mjs";
@@ -9,11 +12,11 @@ const TOKEN = "t0ken";
 const KEY = "launch-key";
 const COOKIE = `lab_gui=${KEY}`;
 
-async function boot(initial = TEAM) {
+async function boot(initial = TEAM, appOpts = {}) {
   const cli = createFakeCli(initial);
   const monitor = createMonitor({ cli });
   let port = 0;
-  const app = createApp({ cli, monitor, key: KEY, token: TOKEN, port: () => port, pollMs: 20, idleMs: 200 });
+  const app = createApp({ cli, monitor, key: KEY, token: TOKEN, port: () => port, pollMs: 20, idleMs: 200, ...appOpts });
   const server = createServer(app.handler);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   port = server.address().port;
@@ -217,6 +220,32 @@ test("the launch URL key becomes an HttpOnly SameSite=Strict cookie and a redire
     assert.equal(page.status, 200);
   } finally {
     await s.close();
+  }
+});
+
+test("page serves the empty-registry banner only when the old registry has sessions", async () => {
+  const base = await mkdtemp(join(tmpdir(), "lab-gui-page-banner-"));
+  const registryDir = join(base, "h1");
+  const oldRegistryDir = join(base, "agent-cli-lab");
+  await mkdir(registryDir, { recursive: true });
+  await mkdir(oldRegistryDir, { recursive: true });
+  await writeFile(join(oldRegistryDir, "fake.json"), "{}");
+  const s = await boot(TEAM, { registryDir, oldRegistryDir });
+  try {
+    const page = await (await s.request("/")).text();
+    assert.match(page, /class="registry-banner"/);
+    assert.ok(page.includes(`This GUI reads ${registryDir}, which is empty; 1 session(s) exist in the old registry ${oldRegistryDir}; those sessions belong to the pre-rename install and are not shown here; no automatic migration happens.`));
+    assert.ok(!page.includes("__REGISTRY_BANNER__"));
+  } finally {
+    await s.close();
+  }
+  const s2 = await boot(TEAM, { registryDir, oldRegistryDir: join(base, "absent") });
+  try {
+    const page = await (await s2.request("/")).text();
+    assert.ok(!page.includes("registry-banner"));
+    assert.ok(!page.includes("__REGISTRY_BANNER__"));
+  } finally {
+    await s2.close();
   }
 });
 
