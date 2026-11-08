@@ -15,7 +15,7 @@ use crate::diag::{Diagnostics, Severity};
 use crate::manifest::{EdgeKind, Manifest, Node, PickInfo};
 use crate::pick::{PickDecision, PickRequest, Picker, Resolved, Via};
 use crate::plan::{OpenStep, Plan, PlanOpts};
-use crate::spec::{Harness, RenderCtx, Spec, Team};
+use crate::spec::{Harness, RenderCtx, Spec, Team, Vault};
 
 pub fn check_line(harnesses: usize, teams: usize) -> String {
     format!("ok: {harnesses} harnesses, {teams} teams")
@@ -208,7 +208,7 @@ pub fn build_nodes(harnesses: &[Harness], plan: &Plan, resolved: &[Resolved]) ->
     plan.steps.iter().map(|step| {
         let r = resolved_for(resolved, &step.harness).ok_or_else(|| format!("no model resolved for harness {}", step.harness))?;
         let tools = harnesses.iter().find(|h| h.name == step.harness).map(|h| h.tools.clone()).unwrap_or_default();
-        Ok(Node { name: step.name.clone(), harness: step.harness.clone(), role: step.role.clone(), parent: step.parent.clone(), requested_model: r.requested.clone(), model: r.display_model(), model_label: r.label.clone(), pick: PickInfo { via: r.via.as_str().to_string(), rule: r.rule.clone(), reason: r.reason.clone(), degraded_level: r.degraded_level }, tools })
+        Ok(Node { name: step.name.clone(), harness: step.harness.clone(), role: step.role.clone(), parent: step.parent.clone(), requested_model: r.requested.clone(), model: r.display_model(), model_label: r.label.clone(), pick: PickInfo { via: r.via.as_str().to_string(), rule: r.rule.clone(), reason: r.reason.clone(), degraded_level: r.degraded_level }, tools, vault_env: Vec::new() })
     }).collect()
 }
 
@@ -253,20 +253,23 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
     // with no lab opened. An `--env NAME=VALUE` pair whose value holds a `${vault.*}` or `${env.*}`
     // part is not put on the command line (every process can read argv); it is passed to
     // `h1 open` in its process environment, which the hosted program inherits.
-    let mut rendered: Vec<(Vec<String>, Vec<(String, String)>)> = Vec::new();
+    let mut rendered: Vec<(Vec<String>, Vec<(String, String)>, Vec<String>)> = Vec::new();
     let mut secret_values: Vec<String> = Vec::new();
     for step in &req.plan.steps {
         let ctx = RenderCtx { env: req.env, model: &model_fn, vault: req.vault };
         let mut argv = Vec::new();
         let mut secret_env: Vec<(String, String)> = Vec::new();
+        let mut vault_env: Vec<String> = Vec::new();
         let mut i = 0;
         while i < step.argv.len() {
             let t = &step.argv[i];
             let secret_pair = t.display() == "--env" && step.argv.get(i + 1).is_some_and(|n| n.has_vault() || n.0.iter().any(|p| matches!(p, crate::spec::Part::Env(_))));
             if secret_pair {
+                let from_vault = step.argv[i + 1].has_vault();
                 let pair = step.argv[i + 1].render(&ctx).map_err(|e| format!("harness {}: {}", step.harness, crate::vault::scrub(&e, &secret_values)))?;
                 let (name, value) = pair.split_once('=').ok_or_else(|| format!("harness {}: malformed env entry", step.harness))?;
                 secret_values.push(value.to_owned());
+                if from_vault { vault_env.push(name.to_owned()); }
                 secret_env.push((name.to_owned(), value.to_owned()));
                 i += 2;
                 continue;
@@ -274,7 +277,7 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
             argv.push(t.render(&ctx).map_err(|e| format!("harness {}: {}", step.harness, crate::vault::scrub(&e, &secret_values)))?);
             i += 1;
         }
-        rendered.push((argv, secret_env));
+        rendered.push((argv, secret_env, vault_env));
     }
     let live = runner.list_names()?;
     for step in &req.plan.steps {
@@ -283,10 +286,12 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
     let run_dir = req.home.join("runs").join(&req.run);
     let trace_dir = run_dir.join("trace");
     std::fs::create_dir_all(&trace_dir).map_err(|e| format!("create {}: {e}", trace_dir.display()))?;
-    let manifest = build_manifest(req.plan, req.nodes.clone(), &req.source, &req.run, &trace_dir, req.now_ms);
+    let mut nodes = req.nodes.clone();
+    for (node, (_, _, vault_env)) in nodes.iter_mut().zip(rendered.iter()) { node.vault_env = vault_env.clone(); }
+    let manifest = build_manifest(req.plan, nodes, &req.source, &req.run, &trace_dir, req.now_ms);
     let manifest_path = write_manifest_to(&manifest, &req.manifest_dir)?;
     let mut opened: Vec<String> = Vec::new();
-    for (step, (argv, secret_env)) in req.plan.steps.iter().zip(rendered.iter()) {
+    for (step, (argv, secret_env, _)) in req.plan.steps.iter().zip(rendered.iter()) {
         let log_path = run_dir.join(format!("open-{}.log", step.name));
         match runner.open(argv, secret_env, &log_path) {
             Ok(()) => { let _ = std::fs::remove_file(&log_path); opened.push(step.name.clone()); }
@@ -323,6 +328,78 @@ pub fn down_core(manifest: &Manifest, runner: &dyn LabRunner, manifest_dir: &Pat
         lines.push(format!("purged {}", manifest.run));
     }
     Ok(lines.join("\n") + "\n")
+}
+
+fn dotenv_path(vault: &Vault, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>) -> PathBuf {
+    let raw = vault.path.as_deref().unwrap_or(".env");
+    if let Some(rest) = raw.strip_prefix("~/") {
+        env("HOME").map(|h| PathBuf::from(h).join(rest)).unwrap_or_else(|| PathBuf::from(raw))
+    } else if Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        base_dir.join(raw)
+    }
+}
+
+fn program_found(program: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
+    if program.contains('/') { return Path::new(program).is_file(); }
+    let Some(path) = env("PATH") else { return false };
+    std::env::split_paths(&path).any(|dir| dir.join(program).is_file())
+}
+
+/// One `(ready, reason)` presence verdict for a vault: nothing is fetched.
+fn vault_presence(vault: &Vault, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>) -> (bool, Option<String>) {
+    match vault.provider.as_str() {
+        "dotenv" => {
+            let path = dotenv_path(vault, base_dir, env);
+            match std::fs::read_to_string(&path) { Ok(_) => (true, None), Err(e) => (false, Some(format!("cannot read {}: {e}", path.display()))) }
+        }
+        "env" => (true, None),
+        "command" => {
+            let Some(program) = vault.command.first() else { return (false, Some("no command configured".to_string())) };
+            if program_found(program, env) { (true, None) } else { (false, Some(format!("program {program} not found"))) }
+        }
+        other => (false, Some(format!("provider {other:?} is not available in this build"))),
+    }
+}
+
+/// `graphloop vault status`: one line per vault, then one line per declared secret key.
+/// Without `fetch`, only presence is checked and no provider is run; with `fetch`, each key
+/// is fetched and only its ok/error is printed. A value is never printed. The returned bool
+/// is true only when every printed line is ok/ready.
+pub fn vault_status_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>, command_env: Vec<(String, String)>, fetch: bool) -> (String, bool) {
+    let vaults = crate::vault::Vaults::new(&spec.vaults, base_dir.to_path_buf(), env).with_command_env(command_env);
+    let mut out = String::new();
+    let mut all_ok = true;
+    for vault in &spec.vaults {
+        let (ready, reason) = vault_presence(vault, base_dir, env);
+        if ready { out.push_str(&format!("vault {} ({}): ready\n", vault.name, vault.provider)); } else { all_ok = false; out.push_str(&format!("vault {} ({}): not ready: {}\n", vault.name, vault.provider, reason.unwrap_or_default())); }
+        for (key, reference) in &vault.secrets {
+            let line = if fetch {
+                match vaults.get(&vault.name, key) { Ok(_) => "ok".to_string(), Err(e) => format!("error: {e}") }
+            } else {
+                match vault.provider.as_str() {
+                    "dotenv" => {
+                        let path = dotenv_path(vault, base_dir, env);
+                        match std::fs::read_to_string(&path) {
+                            Ok(text) => { let map = crate::vault::parse_dotenv(&text); match map.get(reference) { Some(v) if !v.is_empty() => "ok".to_string(), _ => "missing".to_string() } }
+                            Err(e) => format!("error: cannot read {}: {e}", path.display()),
+                        }
+                    }
+                    "env" => match env(reference) { Some(v) if !v.is_empty() => "ok".to_string(), _ => "missing".to_string() },
+                    "command" => {
+                        let (ready, reason) = vault_presence(vault, base_dir, env);
+                        if ready { "ok".to_string() } else { format!("error: {}", reason.unwrap_or_default()) }
+                    }
+                    other => format!("error: provider {other:?} is not available in this build"),
+                }
+            };
+            if line != "ok" { all_ok = false; }
+            out.push_str(&format!("{} {}: {}\n", vault.name, key, line));
+        }
+    }
+    if spec.vaults.is_empty() { out.push_str("no vaults declared\n"); }
+    (crate::vault::scrub(&out, &vaults.values()), all_ok)
 }
 
 pub fn format_age(age_ms: u64) -> String {
@@ -391,6 +468,10 @@ fn build_picker(spec: &Spec) -> Box<dyn Picker> {
     }
 }
 
+fn load_env_files(args: &FileArgs) -> Result<crate::envfile::EnvFiles, String> {
+    crate::envfile::EnvFiles::load(&args.file, &args.env_file, !args.no_env_file).map_err(|e| err(&e))
+}
+
 fn load_and_resolve(args: &FileArgs) -> Result<(Spec, Team, Vec<Resolved>), String> {
     let spec = load_spec(&args.file, &args.var)?;
     let team = select_team(&spec.teams, args.team.as_deref()).map_err(|e| err(&e))?.clone();
@@ -427,6 +508,12 @@ struct FileArgs {
     /// Open every lab detached
     #[arg(long)]
     detached: bool,
+    /// Load extra env values from PATH (repeatable; earlier files win over later ones)
+    #[arg(long = "env-file", value_name = "PATH")]
+    env_file: Vec<PathBuf>,
+    /// Do not load the implicit `.env` beside the .yah file
+    #[arg(long)]
+    no_env_file: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -445,6 +532,8 @@ enum Cmd {
         file: Option<PathBuf>, /// Run id, as printed by `graphloop up`
         #[arg(long)] run: Option<String>, /// Also delete the run directory, including its traces
         #[arg(long)] purge: bool },
+    /// Inspect the vaults of a .yah file
+    Vault { #[command(subcommand)] action: VaultCmd },
     /// List known runs
     Runs,
     /// List the recordings in a run's trace directory
@@ -452,18 +541,41 @@ enum Cmd {
         run: String },
 }
 
+#[derive(Subcommand, Debug)]
+enum VaultCmd {
+    /// One line per vault and per declared secret key; values are never printed
+    Status {
+        /// Path to a .yah (Graphspec) file
+        file: PathBuf,
+        /// Actually fetch each key (default: presence checks only)
+        #[arg(long)]
+        fetch: bool,
+        /// Override a variable, NAME=VALUE (repeatable)
+        #[arg(long = "var", value_name = "NAME=VALUE")]
+        var: Vec<String>,
+        /// Load extra env values from PATH (repeatable; earlier files win over later ones)
+        #[arg(long = "env-file", value_name = "PATH")]
+        env_file: Vec<PathBuf>,
+        /// Do not load the implicit `.env` beside the .yah file
+        #[arg(long)]
+        no_env_file: bool,
+    },
+}
+
 fn dispatch(cli: Cli) -> Result<String, String> {
     match cli.command {
-        Cmd::Check { args } => { let spec = load_spec(&args.file, &args.var)?; Ok(format!("{}\n", check_line(spec.harnesses.len(), spec.teams.len()))) }
+        Cmd::Check { args } => { load_env_files(&args)?; let spec = load_spec(&args.file, &args.var)?; Ok(format!("{}\n", check_line(spec.harnesses.len(), spec.teams.len()))) }
         Cmd::Plan { args, json } => {
             let (spec, team, resolved) = load_and_resolve(&args)?;
             let opts = PlanOpts { prefix: args.prefix.clone(), run: String::new(), trace_dir: None, detached: args.detached };
+            load_env_files(&args)?;
             let plan = build_plan(&spec, &team, &resolved, opts)?;
             if json { serde_json::to_string_pretty(&plan_json(&plan, &resolved)).map(|s| s + "\n").map_err(|e| err(&e.to_string())) } else { Ok(plan_output(&plan, &resolved)) }
         }
         Cmd::Graph { args } => {
             let (spec, team, resolved) = load_and_resolve(&args)?;
             let opts = PlanOpts { prefix: args.prefix.clone(), run: String::new(), trace_dir: None, detached: args.detached };
+            load_env_files(&args)?;
             let plan = build_plan(&spec, &team, &resolved, opts)?;
             Ok(graph_output(&team, &plan, &resolved))
         }
@@ -476,13 +588,26 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             let plan = build_plan(&spec, &team, &resolved, opts)?;
             let nodes = build_nodes(&spec.harnesses, &plan, &resolved).map_err(|e| err(&e))?;
             let runner = ProcessRunner::from_env();
-            let env_fn = |name: &str| std::env::var(name).ok();
+            let env_files = load_env_files(&args)?;
+            let real_env = |name: &str| std::env::var(name).ok();
+            let env_fn = |name: &str| env_files.lookup(name, &real_env);
             let base_dir = std::path::Path::new(&absolute_string(&args.file)).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
-            let vaults = crate::vault::Vaults::new(&spec.vaults, base_dir, &env_fn);
+            let vaults = crate::vault::Vaults::new(&spec.vaults, base_dir, &env_fn).with_command_env(env_files.command_env());
             let vault_fn = |vault: &str, key: &str| vaults.get(vault, key);
             let req = UpRequest { plan: &plan, nodes, source: absolute_string(&args.file), home, manifest_dir: crate::manifest::dir(), run, now_ms: now_ms(), env: &env_fn, vault: &vault_fn };
             up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values())))
         }
+        Cmd::Vault { action } => match action {
+            VaultCmd::Status { file, fetch, var, env_file, no_env_file } => {
+                let spec = load_spec(&file, &var)?;
+                let env_files = crate::envfile::EnvFiles::load(&file, &env_file, !no_env_file).map_err(|e| err(&e))?;
+                let real_env = |name: &str| std::env::var(name).ok();
+                let env_fn = |name: &str| env_files.lookup(name, &real_env);
+                let base_dir = std::path::Path::new(&absolute_string(&file)).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+                let (out, ok) = vault_status_core(&spec, &base_dir, &env_fn, env_files.command_env(), fetch);
+                if ok { Ok(out) } else { Err(out) }
+            }
+        },
         Cmd::Down { file, run, purge } => {
             let manifests = Manifest::list();
             let manifest = match (&run, &file) {

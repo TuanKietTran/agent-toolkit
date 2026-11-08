@@ -18,6 +18,7 @@
 pub mod ast;
 pub mod cli;
 pub mod diag;
+pub mod envfile;
 pub mod lexer;
 pub mod load;
 pub mod manifest;

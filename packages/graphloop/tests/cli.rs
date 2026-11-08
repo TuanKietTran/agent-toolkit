@@ -36,8 +36,8 @@ fn sample_resolved() -> Vec<Resolved> {
 
 fn sample_nodes() -> Vec<Node> {
     vec![
-        Node { name: "commander".into(), harness: "commander".into(), role: "commander".into(), parent: None, requested_model: "system-one".into(), model: "anthropic/claude-sonnet-5-5".into(), model_label: "sonnet".into(), pick: PickInfo { via: "system-one".into(), rule: Some("R3".into()), reason: "strict constraints".into(), degraded_level: 0 }, tools: vec!["fs".into()] },
-        Node { name: "builder".into(), harness: "builder".into(), role: "builder".into(), parent: Some("commander".into()), requested_model: "system-one".into(), model: "anthropic/claude-sonnet-5-5".into(), model_label: "sonnet".into(), pick: PickInfo { via: "fallback".into(), rule: None, reason: "system-one unavailable".into(), degraded_level: 1 }, tools: vec![] },
+        Node { name: "commander".into(), harness: "commander".into(), role: "commander".into(), parent: None, requested_model: "system-one".into(), model: "anthropic/claude-sonnet-5-5".into(), model_label: "sonnet".into(), pick: PickInfo { via: "system-one".into(), rule: Some("R3".into()), reason: "strict constraints".into(), degraded_level: 0 }, tools: vec!["fs".into()], vault_env: vec![] },
+        Node { name: "builder".into(), harness: "builder".into(), role: "builder".into(), parent: Some("commander".into()), requested_model: "system-one".into(), model: "anthropic/claude-sonnet-5-5".into(), model_label: "sonnet".into(), pick: PickInfo { via: "fallback".into(), rule: None, reason: "system-one unavailable".into(), degraded_level: 1 }, tools: vec![], vault_env: vec![] },
     ]
 }
 
