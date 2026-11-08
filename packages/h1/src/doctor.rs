@@ -653,6 +653,54 @@ mod tests {
         }
     }
 
+    #[test]
+    fn every_doctor_line_kind_has_a_documented_sample_in_the_readme() {
+        // Every line kind `assess` / `process_findings` can emit (each status
+        // variant, each process finding, the fix-hints header, each hint kind
+        // incl. the rm warning and the no-resolving-link fallback, and both
+        // verdicts) must have one verbatim sample in the README Doctor section.
+        let readme = include_str!("../README.md");
+        let samples = [
+            "registry dir: /tmp/h1 (exists)",
+            "registry dir: /tmp/h1 (not created yet)",
+            "old registry /tmp/agent-cli-lab still holds 2 sessions: those labs do not show in h1 console/GUI",
+            "old registry dir: /tmp/agent-cli-lab (present, 0 sessions)",
+            "old registry dir: /tmp/agent-cli-lab (not present)",
+            "warning: old registry /Users/x/.agent-cli-lab still holds 1 session(s) while /tmp/h1 is in use - old labs will not show in TUI/GUI",
+            "old registry dir: /Users/x/.agent-cli-lab (exists, no sessions)",
+            "old registry dir: /Users/x/.agent-cli-lab (not present)",
+            "h1 on PATH: /Users/x/.local/bin/h1",
+            "h1 on PATH: not found",
+            "old binary agent-cli-lab on PATH: /Users/x/.local/bin/agent-cli-lab (stale, pre-rename)",
+            "old binary agent-cli-lab on PATH: not found",
+            "labctl shim on PATH: /Users/x/.local/bin/labctl (compatibility shim, execs h1)",
+            "labctl shim on PATH: not found",
+            "skill link /Users/x/.codex/skills/lab-commander: ok",
+            "skill link /Users/x/.codex/skills/lab-commander: broken",
+            "skill link /Users/x/.codex/skills/lab-commander: not installed",
+            "lab-gui port 4317: reachable",
+            "lab-gui port 4317: not reachable",
+            "old console pid 1234 cannot see h1 labs: close it and run h1 console",
+            "old process pid 1235 (host) runs the pre-rename binary: restart it as h1",
+            "lab-gui on port 4317 started from /Users/x/checkout/packages/lab-gui/server.mjs: current (this repo)",
+            "lab-gui on port 4317 started from /other/checkout/packages/lab-gui/server.mjs: restart it if it shows no labs",
+            "doctor: ok",
+            "doctor: attention needed",
+            "fix hints (print only, not executed):",
+            "  kill 1234",
+            "  ln -sfn /Users/x/checkout/skills/lab-commander /Users/x/.codex/skills/lab-commander",
+            "  no working skill link to copy: run skills/lab-commander/install.sh from your checkout",
+            "  only after your lab-commander checkout contains the h1 rename (git pull); the installed labctl and lab-* scripts call the old binary until then",
+            "  rm /Users/x/.local/bin/agent-cli-lab",
+        ];
+        for sample in samples {
+            assert!(
+                readme.contains(sample),
+                "README Doctor section lacks a verbatim sample for line kind: {sample:?}"
+            );
+        }
+    }
+
     #[cfg(unix)]
     #[test]
     fn resolved_link_target_returns_the_stored_symlink_target() {
