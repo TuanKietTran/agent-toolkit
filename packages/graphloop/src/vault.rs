@@ -29,6 +29,10 @@ pub const PROVIDERS: &[ProviderInfo] = &[
     ProviderInfo { name: "dotenv", keys: &["path"], required: &[], summary: "KEY=VALUE file; path is relative to the .yah file (default .env)" },
     ProviderInfo { name: "env", keys: &[], required: &[], summary: "the process environment" },
     ProviderInfo { name: "command", keys: &["command"], required: &["command"], summary: "any CLI: an argv list where {ref} and {key} are substituted; the value is its stdout" },
+    ProviderInfo { name: "1password", keys: &["account"], required: &[], summary: "1Password CLI: op read <ref> (ref is an op://vault/item/field URI)" },
+    ProviderInfo { name: "bitwarden", keys: &[], required: &[], summary: "Bitwarden CLI: bw get password|username|notes|uri|totp <item>, or <item>#<field> for a custom field (needs BW_SESSION / bw unlock)" },
+    ProviderInfo { name: "bitwarden-secrets", keys: &[], required: &[], summary: "Bitwarden Secrets Manager CLI: bws secret get <id>; the value is the JSON field value" },
+    ProviderInfo { name: "keychain", keys: &["account"], required: &[], summary: "macOS keychain: security find-generic-password -s <ref> -w" },
 ];
 
 pub fn provider(name: &str) -> Option<&'static ProviderInfo> {
@@ -205,8 +209,76 @@ impl<'a> Vaults<'a> {
                 let argv: Vec<String> = vault.command.iter().map(|a| a.replace("{ref}", reference).replace("{key}", key)).collect();
                 run_command(&argv, &self.command_env, self.timeout).map_err(|e| scrub(&e, &self.values()))
             }
+            "1password" => self.fetch_1password(vault, reference),
+            "bitwarden" => self.fetch_bitwarden(vault, reference),
+            "bitwarden-secrets" => self.fetch_bitwarden_secrets(vault, reference),
+            "keychain" => self.fetch_keychain(vault, reference),
             other => Err(format!("provider {other:?} is not available in this build")),
         }
+    }
+
+    /// The program for a CLI provider: `command = ["<path>"]` in the vault block overrides the
+    /// program name (tests point it at a fake CLI; users can pin an absolute path).
+    fn provider_bin(&self, vault: &Vault, default: &str) -> String {
+        vault.command.first().cloned().unwrap_or_else(|| default.to_owned())
+    }
+
+    /// Run a provider CLI. A program that cannot be started at all becomes the one-line install
+    /// hint; any other failure is scrubbed and never carries a fetched value.
+    fn run_provider(&self, argv: &[String], install_hint: &str) -> Result<String, String> {
+        run_command(argv, &self.command_env, self.timeout).map_err(|e| {
+            if e.starts_with("could not run ") { install_hint.to_owned() } else { scrub(&e, &self.values()) }
+        })
+    }
+
+    fn fetch_1password(&self, vault: &Vault, reference: &str) -> Result<String, String> {
+        let mut argv = vec![self.provider_bin(vault, "op"), "read".to_owned(), reference.to_owned()];
+        if let Some(account) = &vault.account {
+            argv.push("--account".to_owned());
+            argv.push(account.clone());
+        }
+        self.run_provider(&argv, "op is not installed: install the 1Password CLI (https://developer.1password.com/docs/cli/get-started) and run `op signin`")
+    }
+
+    fn fetch_bitwarden(&self, vault: &Vault, reference: &str) -> Result<String, String> {
+        let bin = self.provider_bin(vault, "bw");
+        if let Some((item, field)) = reference.split_once('#') {
+            let argv = vec![bin, "get".to_owned(), "item".to_owned(), item.to_owned(), "--nointeraction".to_owned(), "--raw".to_owned()];
+            let out = self.run_bitwarden(&argv)?;
+            let json: serde_json::Value = serde_json::from_str(&out).map_err(|_| "bw returned invalid JSON for the item".to_owned())?;
+            let fields = json.get("fields").and_then(|f| f.as_array()).ok_or_else(|| format!("item {item:?} has no custom fields"))?;
+            return fields.iter().find(|f| f.get("name").and_then(|n| n.as_str()) == Some(field)).and_then(|f| f.get("value")).and_then(|v| v.as_str()).map(str::to_owned).ok_or_else(|| format!("item {item:?} has no custom field {field:?}"));
+        }
+        let (kind, item) = match reference.rsplit_once('/') {
+            Some((item, kind @ ("username" | "password" | "notes" | "uri" | "totp"))) => (kind, item),
+            _ => ("password", reference),
+        };
+        let argv = vec![bin, "get".to_owned(), kind.to_owned(), item.to_owned(), "--nointeraction".to_owned(), "--raw".to_owned()];
+        self.run_bitwarden(&argv)
+    }
+
+    /// `bw` with the locked-vault translation: its error must tell the user to unlock.
+    fn run_bitwarden(&self, argv: &[String]) -> Result<String, String> {
+        self.run_provider(argv, "bw is not installed: install the Bitwarden CLI (https://bitwarden.com/help/cli) and run `bw unlock`").map_err(|e| {
+            if e.to_lowercase().contains("lock") && !e.contains("bw unlock") { format!("Bitwarden vault is locked: run: bw unlock ({e})") } else { e }
+        })
+    }
+
+    fn fetch_bitwarden_secrets(&self, vault: &Vault, reference: &str) -> Result<String, String> {
+        let argv = vec![self.provider_bin(vault, "bws"), "secret".to_owned(), "get".to_owned(), reference.to_owned(), "--output".to_owned(), "json".to_owned()];
+        let out = self.run_provider(&argv, "bws is not installed: install the Bitwarden Secrets Manager CLI (https://bitwarden.com/help/secrets-manager-cli)")?;
+        let json: serde_json::Value = serde_json::from_str(&out).map_err(|_| "bws returned invalid JSON for the secret".to_owned())?;
+        json.get("value").and_then(|v| v.as_str()).map(str::to_owned).ok_or_else(|| "bws response has no string field \"value\"".to_owned())
+    }
+
+    fn fetch_keychain(&self, vault: &Vault, reference: &str) -> Result<String, String> {
+        let mut argv = vec![self.provider_bin(vault, "security"), "find-generic-password".to_owned(), "-s".to_owned(), reference.to_owned()];
+        if let Some(account) = &vault.account {
+            argv.push("-a".to_owned());
+            argv.push(account.clone());
+        }
+        argv.push("-w".to_owned());
+        self.run_provider(&argv, "security is not available: the macOS keychain CLI ships with macOS")
     }
 
     fn fetch_dotenv(&self, vault: &Vault, reference: &str) -> Result<String, String> {
