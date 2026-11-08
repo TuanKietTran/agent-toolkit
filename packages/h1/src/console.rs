@@ -1686,6 +1686,17 @@ fn draw_peek(frame: &mut Frame, area: Rect, app: &App) {
     frame.render_widget(Paragraph::new(text).block(block), rect);
 }
 
+/// True only for env-NAME-shaped strings (`[A-Za-z_][A-Za-z0-9_]*`); anything value-shaped
+/// (contains `=`, `-`, spaces, starts with a digit, ...) is dropped, never printed.
+fn is_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
     let Some(lab) = app.selected_lab() else { return };
     let rect = Rect { x: area.x, y: area.y + 6, width: area.width, height: area.height.saturating_sub(7) };
@@ -1719,17 +1730,19 @@ fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
             None => pick.via.clone(),
         };
         let pick_text = if pick.reason.is_empty() { via } else { format!("{via} · {}", pick.reason) };
-        lines.splice(
-            5..5,
-            [
-                line("Team:", info.team.clone()),
-                line("Run:", info.run.clone()),
-                line("Harness:", info.node.harness.clone()),
-                line("Requested:", info.node.requested_model.clone()),
-                line("Pick:", pick_text),
-                line("Trace:", info.trace_dir.clone().unwrap_or_else(|| "-".into())),
-            ],
-        );
+        let mut extra = vec![
+            line("Team:", info.team.clone()),
+            line("Run:", info.run.clone()),
+            line("Harness:", info.node.harness.clone()),
+            line("Requested:", info.node.requested_model.clone()),
+            line("Pick:", pick_text),
+            line("Trace:", info.trace_dir.clone().unwrap_or_else(|| "-".into())),
+        ];
+        let secrets: Vec<String> = info.node.vault_env.iter().filter(|name| is_env_name(name)).cloned().collect();
+        if !secrets.is_empty() {
+            extra.push(line("Secrets (names only):", format!(" {}", secrets.join(", "))));
+        }
+        lines.splice(5..5, extra);
     }
     let mut screen: Vec<&str> = lab.probe.screen.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
     let keep = 14;
@@ -2135,6 +2148,33 @@ mod tests {
         app.mode = Mode::Describe;
         let text = render_text(&mut app, 120, 30).unwrap();
         assert!(text.contains("Children:") && text.contains("w1, w2"), "{text}");
+    }
+
+    #[test]
+    fn describe_shows_vault_env_names_only_and_omits_section_when_absent() {
+        let manifest_with: crate::graphspec::Manifest = serde_json::from_str(
+            r#"{"version":1,"run":"run-1","team":"default","source":"/tmp/x.yah","root":"mgr1","created_ms":1,"nodes":[{"name":"mgr1","harness":"mgr","role":"manager","parent":null,"requested_model":"system-one","model":"anthropic/claude-sonnet-5-5","model_label":"sonnet","pick":{"via":"system-one","rule":"R3","reason":"","degraded_level":0},"tools":[],"vault_env":["FLEET_TOKEN","OTHER_TOKEN","FLEET_TOKEN=abc123xyz","sk-abc123xyz"]}],"edges":[]}"#,
+        )
+        .unwrap();
+        let mut app = App::new(View::Labs, 1000);
+        app.apply(fleet());
+        app.overlay = crate::graphspec::overlay(&["mgr1"], &[manifest_with]);
+        app.mode = Mode::Describe;
+        let text = render_text(&mut app, 150, 36).unwrap();
+        assert!(text.contains("Secrets (names only):"), "{text}");
+        assert!(text.contains("FLEET_TOKEN") && text.contains("OTHER_TOKEN"), "{text}");
+        assert!(!text.contains("abc123xyz"), "value-shaped entry leaked in\n{text}");
+        let manifest_without: crate::graphspec::Manifest = serde_json::from_str(
+            r#"{"version":1,"run":"run-1","team":"default","source":"/tmp/x.yah","root":"mgr1","created_ms":1,"nodes":[{"name":"mgr1","harness":"mgr","role":"manager","parent":null,"requested_model":"system-one","model":"anthropic/claude-sonnet-5-5","model_label":"sonnet","pick":{"via":"system-one","rule":"R3","reason":"","degraded_level":0},"tools":[]}],"edges":[]}"#,
+        )
+        .unwrap();
+        let mut app = App::new(View::Labs, 1000);
+        app.apply(fleet());
+        app.overlay = crate::graphspec::overlay(&["mgr1"], &[manifest_without]);
+        app.mode = Mode::Describe;
+        let text = render_text(&mut app, 150, 36).unwrap();
+        assert!(text.contains("Team:") && text.contains("Children:"), "{text}");
+        assert!(!text.contains("Secrets"), "no vault_env must render unchanged in\n{text}");
     }
 
     #[test]
