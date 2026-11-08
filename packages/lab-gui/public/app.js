@@ -40,6 +40,14 @@ const fmtCost = (n) => (n == null ? "–" : n < 0.01 ? `$${n.toFixed(4)}` : `$${
 const shorten = (text, max) => (text && text.length > max ? `${text.slice(0, max - 1)}…` : text ?? "");
 const stateLabel = (st) => (st === "up" ? "working" : st);
 const graphspecOfLab = (lab) => (lab && typeof lab.graphspec === "object" && lab.graphspec ? lab.graphspec : null);
+// Names only, defence in depth: the API already sanitises vault_env in
+// lib/graphs.mjs; re-check the env-name shape here so a value-shaped entry
+// from any source is never rendered.
+const vaultNamesOf = (lab) => {
+  const gs = graphspecOfLab(lab);
+  if (!gs || !Array.isArray(gs.vault_env)) return [];
+  return gs.vault_env.filter((n) => typeof n === "string" && /^[A-Za-z_][A-Za-z0-9_]*$/.test(n));
+};
 function resolvedModelLabel(lab) {
   const gs = graphspecOfLab(lab);
   return (gs && (gs.model_label || gs.modelLabel)) || lab.modelLabel || (gs && gs.model) || lab.model || "–";
@@ -348,9 +356,10 @@ function renderPanel() {
   sub.replaceChildren(h("span", { class: `pill kind-${lab.kind}` }, lab.kind), " ", h("span", { class: `pill pill-state state-${lab.state}` }, `${STATE_GLYPH[lab.state] ?? "●"} ${stateLabel(lab.state)}`));
   const u = lab.usage;
   const gs = graphspecOfLab(lab);
+  const vaultNames = vaultNamesOf(lab);
   const rows = [
     ["Model", resolvedModelLabel(lab)],
-    ...(gs ? [["Pick", pickTag(lab) || "–"], ["Team", `${gs.team ?? "–"}${gs.run ? ` · ${gs.run}` : ""}`], ["Harness", gs.harness ?? "–"], ...(gs.requested_model && gs.requested_model !== gs.model ? [["Requested", gs.requested_model]] : []), ...(gs.tools?.length ? [["Tools", gs.tools.join(", ")]] : [])] : []),
+    ...(gs ? [["Pick", pickTag(lab) || "–"], ["Team", `${gs.team ?? "–"}${gs.run ? ` · ${gs.run}` : ""}`], ["Harness", gs.harness ?? "–"], ...(gs.requested_model && gs.requested_model !== gs.model ? [["Requested", gs.requested_model]] : []), ...(gs.tools?.length ? [["Tools", gs.tools.join(", ")]] : []), ...(vaultNames.length ? [["Secrets (names only)", vaultNames.join(", ")]] : [])] : []),
     ["Parent", lab.parent ?? "–"],
     ["Helpers", lab.children.length ? lab.children.join(", ") : "–"],
     ["Directory", lab.cwd ? (lab.cwd.length > 42 ? `…${lab.cwd.slice(-41)}` : lab.cwd) : "–"],

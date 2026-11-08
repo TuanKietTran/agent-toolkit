@@ -27,6 +27,24 @@ function pickOf(node) {
   return { via: typeof p.via === 'string' ? p.via : null, rule: typeof p.rule === 'string' ? p.rule : null, reason: typeof p.reason === 'string' ? p.reason : null };
 }
 
+// vault_env carries env NAMES whose values came from a vault (manifest.rs:
+// names only, never values). Defence in depth: only entries shaped exactly
+// like an env name pass; anything value-shaped (an '=' assignment, spaces,
+// dashes, dots, a leading digit, a non-string) is dropped, never rendered.
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function vaultEnvOf(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const v of raw) {
+    if (typeof v !== 'string' || !ENV_NAME.test(v) || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
 function nodeOf(raw) {
   if (!raw || typeof raw !== 'object' || typeof raw.name !== 'string' || !raw.name) return null;
   return {
@@ -39,6 +57,7 @@ function nodeOf(raw) {
     model_label: typeof raw.model_label === 'string' ? raw.model_label : null,
     pick: pickOf(raw),
     tools: Array.isArray(raw.tools) ? raw.tools.filter((t) => typeof t === 'string') : [],
+    vault_env: vaultEnvOf(raw.vault_env),
   };
 }
 
@@ -85,7 +104,7 @@ export async function loadGraphs({ dir, env, platform } = {}) {
 }
 
 export function graphspecOf(manifest, node) {
-  return { team: manifest.team, run: manifest.run, harness: node.harness, model: node.model, model_label: node.model_label, requested_model: node.requested_model, pick: { ...node.pick }, tools: [...node.tools] };
+  return { team: manifest.team, run: manifest.run, harness: node.harness, model: node.model, model_label: node.model_label, requested_model: node.requested_model, pick: { ...node.pick }, tools: [...node.tools], vault_env: vaultEnvOf(node.vault_env) };
 }
 
 /**
