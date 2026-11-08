@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
 /// One adapter: its name, the optional keys a `vault` block may carry for it, and the required ones.
@@ -46,6 +46,10 @@ pub fn provider_names() -> Vec<&'static str> {
 /// Secret values shorter than this are not scrubbed from text: replacing a 1-2 character value
 /// would mangle every message.
 const MIN_SCRUB_LEN: usize = 3;
+
+/// Provider/command output larger than this is rejected, so a broken or hostile CLI cannot make
+/// graphloop buffer unbounded output in memory.
+const MAX_OUTPUT_BYTES: usize = 1 << 20;
 
 /// Replace every known secret value in `text` with `***`.
 pub fn scrub(text: &str, secrets: &[String]) -> String {
@@ -106,29 +110,41 @@ pub fn parse_dotenv(text: &str) -> HashMap<String, String> {
     out
 }
 
+/// Kill the child's whole process group (Unix): the child was spawned with `process_group(0)`,
+/// so its pid is the group id and `kill -KILL -<pid>` takes down children it spawned too.
+/// A no-op elsewhere, where the caller also kills the child directly.
+#[cfg(unix)]
+fn kill_process_group(child: &Child) {
+    let _ = Command::new("kill").arg("-KILL").arg(format!("-{}", child.id())).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status();
+}
+
+#[cfg(not(unix))]
+fn kill_process_group(_child: &Child) {}
+
 /// Run `argv` (no shell), return stdout without its trailing newline. Errors carry the program
 /// name and the first line of stderr (scrubbed by the caller), never the arguments.
 pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Duration) -> Result<String, String> {
     let (program, args) = argv.split_first().ok_or_else(|| "empty command".to_owned())?;
     let name = Path::new(program).file_name().and_then(|n| n.to_str()).unwrap_or(program).to_owned();
-    let mut child = Command::new(program)
-        .args(args)
-        .envs(extra_env.iter().cloned())
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("could not run {name}: {e}"))?;
+    let mut cmd = Command::new(program);
+    cmd.args(args).envs(extra_env.iter().cloned()).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    // Own process group, so a timeout can kill the whole tree and leave no orphan children.
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0);
+    }
+    let mut child = cmd.spawn().map_err(|e| format!("could not run {name}: {e}"))?;
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
     let out_reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
-        let _ = stdout.read_to_end(&mut buf);
+        let _ = Read::take(&mut stdout, (MAX_OUTPUT_BYTES + 1) as u64).read_to_end(&mut buf);
         buf
     });
     let err_reader = std::thread::spawn(move || {
         let mut buf = Vec::new();
-        let _ = stderr.read_to_end(&mut buf);
+        let _ = Read::take(&mut stderr, (MAX_OUTPUT_BYTES + 1) as u64).read_to_end(&mut buf);
         buf
     });
     let deadline = Instant::now() + timeout;
@@ -136,6 +152,7 @@ pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Dur
         match child.try_wait() {
             Ok(Some(status)) => break status,
             Ok(None) if Instant::now() >= deadline => {
+                kill_process_group(&child);
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(format!("{name} did not finish within {}s", timeout.as_secs()));
@@ -149,6 +166,9 @@ pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Dur
     if !status.success() {
         let first = String::from_utf8_lossy(&err).lines().next().unwrap_or("").trim().chars().take(160).collect::<String>();
         return Err(if first.is_empty() { format!("{name} exited with {status}") } else { format!("{name} exited with {status}: {first}") });
+    }
+    if out.len() > MAX_OUTPUT_BYTES {
+        return Err(format!("{name} printed more than {MAX_OUTPUT_BYTES} bytes of output"));
     }
     let text = String::from_utf8(out).map_err(|_| format!("{name} printed bytes that are not UTF-8"))?;
     Ok(text.trim_end_matches(['\n', '\r']).to_owned())
