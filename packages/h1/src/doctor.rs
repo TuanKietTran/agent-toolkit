@@ -7,6 +7,15 @@
 //! created yet, an old registry existing with no sessions, the `labctl` compat shim
 //! (it execs `h1` by design), absent skill links, lab-gui not currently reachable
 //! (it is started on demand), and a lab-gui server running from this repo.
+//! With `--fix-hints` it also prints, after the findings, the exact shell command
+//! for each fixable finding (kill a stale process, re-link a broken lab-commander
+//! skill link, remove the stale binary); hints are printed only, never executed,
+//! and findings with no safe one-line fix (either old registry) get no hint.
+//! The re-link source is copied verbatim from a lab-commander skill link that
+//! already resolves (never derived from the cwd, the executable, or a checkout);
+//! when no such link resolves, a fallback line replaces the re-link hint. The
+//! stale-binary `rm` hint is preceded by a warning line, because the installed
+//! labctl/lab-* scripts still call the old binary until their checkout is updated.
 
 use std::{
     env, fs,
@@ -26,6 +35,12 @@ const OLD_BINARY_NAME: &str = "agent-cli-lab";
 /// resolved its registry the same way h1 does, so its real registry is
 /// `<temp dir>/agent-cli-lab`, not the home-dir location (functional literal).
 const OLD_TEMP_REGISTRY_DIR_NAME: &str = "agent-cli-lab";
+/// Warning printed as a hint immediately above the stale-binary `rm` hint (verbatim).
+const RM_OLD_BINARY_WARNING: &str = "only after your lab-commander checkout contains the h1 rename (git pull); the installed labctl and lab-* scripts call the old binary until then";
+/// Printed as a hint instead of any `ln -sfn` line when no lab-commander skill
+/// link resolves to copy the target from (verbatim).
+const NO_WORKING_SKILL_LINK_HINT: &str =
+    "no working skill link to copy: run skills/lab-commander/install.sh from your checkout";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum LinkState {
@@ -50,6 +65,8 @@ struct Inputs {
     old_temp_sessions: usize,
     processes: Vec<String>,
     local_roots: Vec<PathBuf>,
+    fix_hints: bool,
+    skill_source: Option<PathBuf>,
 }
 
 pub struct Report {
@@ -61,6 +78,7 @@ pub struct Report {
 fn assess(inputs: &Inputs) -> Report {
     let mut lines = Vec::new();
     let mut attention = false;
+    let mut hints: Vec<String> = Vec::new();
     lines.push(format!(
         "registry dir: {} ({})",
         inputs.registry_dir.display(),
@@ -121,6 +139,8 @@ fn assess(inputs: &Inputs) -> Report {
                 "old binary {OLD_BINARY_NAME} on PATH: {} (stale, pre-rename)",
                 path.display()
             ));
+            hints.push(RM_OLD_BINARY_WARNING.to_string());
+            hints.push(format!("rm {}", path.display()));
         }
         None => lines.push(format!("old binary {OLD_BINARY_NAME} on PATH: not found")),
     }
@@ -137,6 +157,13 @@ fn assess(inputs: &Inputs) -> Report {
             LinkState::Broken => {
                 attention = true;
                 lines.push(format!("skill link {}: broken", link.display()));
+                if link.file_name().is_some_and(|name| name == "lab-commander") {
+                    if let Some(source) = &inputs.skill_source {
+                        hints.push(format!("ln -sfn {} {}", source.display(), link.display()));
+                    } else if !hints.iter().any(|hint| hint == NO_WORKING_SKILL_LINK_HINT) {
+                        hints.push(NO_WORKING_SKILL_LINK_HINT.to_string());
+                    }
+                }
             }
             LinkState::Absent => {
                 lines.push(format!("skill link {}: not installed", link.display()))
@@ -156,6 +183,15 @@ fn assess(inputs: &Inputs) -> Report {
     for finding in process_findings(&inputs.processes, &inputs.local_roots) {
         attention |= finding.attention;
         lines.push(finding.line);
+        if let Some(hint) = finding.hint {
+            hints.push(hint);
+        }
+    }
+    if inputs.fix_hints && !hints.is_empty() {
+        lines.push("fix hints (print only, not executed):".to_string());
+        for hint in &hints {
+            lines.push(format!("  {hint}"));
+        }
     }
     lines.push(
         if attention {
@@ -205,6 +241,7 @@ fn count_registry_sessions(dir: &Path) -> usize {
 struct ProcessFinding {
     line: String,
     attention: bool,
+    hint: Option<String>,
 }
 
 /// Lexically resolve `.`/`..` components (no filesystem access), so a path
@@ -260,6 +297,7 @@ fn process_findings(processes: &[String], local_roots: &[PathBuf]) -> Vec<Proces
             findings.push(ProcessFinding {
                 line,
                 attention: true,
+                hint: Some(format!("kill {pid}")),
             });
             continue;
         }
@@ -299,6 +337,7 @@ fn process_findings(processes: &[String], local_roots: &[PathBuf]) -> Vec<Proces
             findings.push(ProcessFinding {
                 line: format!("lab-gui on port {port} started from {server}: current (this repo)"),
                 attention: false,
+                hint: None,
             });
         } else {
             findings.push(ProcessFinding {
@@ -306,6 +345,7 @@ fn process_findings(processes: &[String], local_roots: &[PathBuf]) -> Vec<Proces
                     "lab-gui on port {port} started from {server}: restart it if it shows no labs"
                 ),
                 attention: true,
+                hint: Some(format!("kill {pid}")),
             });
         }
     }
@@ -391,7 +431,7 @@ fn probe_port(port: u16) -> bool {
 /// the port probe, `processes` the injected process list and `local_roots`
 /// the injected "this repo" roots for lab-gui processes.
 #[allow(clippy::too_many_arguments)] // every input is injected so tests can fake the whole environment
-fn diagnose(
+fn diagnose_inner(
     registry_dir: &Path,
     home: &Path,
     temp_dir: &Path,
@@ -400,6 +440,7 @@ fn diagnose(
     probe: &dyn Fn(u16) -> bool,
     processes: &[String],
     local_roots: &[PathBuf],
+    fix_hints: bool,
 ) -> Report {
     let old_registry_dir = home.join(OLD_REGISTRY_DIR_NAME);
     let old_temp_registry_dir = temp_dir.join(OLD_TEMP_REGISTRY_DIR_NAME);
@@ -412,6 +453,18 @@ fn diagnose(
         home.join(".local").join("bin").join("lab-team"),
         home.join(".local").join("bin").join("lab-watch"),
     ];
+    let skill_links: Vec<(PathBuf, LinkState)> = skill_link_candidates
+        .iter()
+        .map(|link| (link.clone(), link_state(link)))
+        .collect();
+    // The ONLY re-link source: the verbatim target of a lab-commander skill
+    // link that already resolves. Never derived from cwd/current_exe/roots.
+    let skill_source = skill_links
+        .iter()
+        .filter(|(link, state)| {
+            *state == LinkState::Ok && link.file_name().is_some_and(|name| name == "lab-commander")
+        })
+        .find_map(|(link, _)| resolved_link_target(link));
     let inputs = Inputs {
         registry_dir: registry_dir.to_path_buf(),
         registry_exists: registry_dir.is_dir(),
@@ -423,19 +476,64 @@ fn diagnose(
         old_temp_registry_dir,
         processes: processes.to_vec(),
         local_roots: local_roots.to_vec(),
+        fix_hints,
+        skill_source,
         h1_on_path: find_on_path(path_dirs, "h1"),
         old_binary_on_path: find_on_path(path_dirs, OLD_BINARY_NAME),
         labctl_on_path: find_on_path(path_dirs, "labctl"),
-        skill_links: skill_link_candidates
-            .iter()
-            .map(|link| (link.clone(), link_state(link)))
-            .collect(),
+        skill_links,
         gui_ports: gui_ports.iter().map(|port| (*port, probe(*port))).collect(),
     };
     assess(&inputs)
 }
 
-pub fn run() -> Result<i32> {
+/// Plain diagnosis (no fix hints), as used by the existing tests.
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+fn diagnose(
+    registry_dir: &Path,
+    home: &Path,
+    temp_dir: &Path,
+    path_dirs: &[PathBuf],
+    gui_ports: &[u16],
+    probe: &dyn Fn(u16) -> bool,
+    processes: &[String],
+    local_roots: &[PathBuf],
+) -> Report {
+    diagnose_inner(
+        registry_dir,
+        home,
+        temp_dir,
+        path_dirs,
+        gui_ports,
+        probe,
+        processes,
+        local_roots,
+        false,
+    )
+}
+
+/// The verbatim target of a link that already resolves: its stored symlink
+/// target (a relative target resolved against the link's directory), or the
+/// canonical path itself when the path is a real directory/file. This is the
+/// only source a re-link hint may copy; it is never derived from the cwd,
+/// the current executable, or any checkout/worktree root.
+fn resolved_link_target(link: &Path) -> Option<PathBuf> {
+    if let Ok(target) = fs::read_link(link) {
+        if target.is_absolute() {
+            Some(target)
+        } else {
+            link.parent()
+                .map(|parent| normalize_path(&parent.join(&target)))
+        }
+    } else if link.exists() {
+        fs::canonicalize(link).ok()
+    } else {
+        None
+    }
+}
+
+pub fn run(fix_hints: bool) -> Result<i32> {
     let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let path_dirs: Vec<PathBuf> = env::var_os("PATH")
         .map(|path| env::split_paths(&path).collect())
@@ -444,7 +542,8 @@ pub fn run() -> Result<i32> {
         .ok()
         .and_then(|value| value.parse().ok())
         .unwrap_or(4317);
-    let report = diagnose(
+    let local_roots = local_gui_roots();
+    let report = diagnose_inner(
         &crate::session::session_dir(),
         &home,
         &env::temp_dir(),
@@ -452,7 +551,8 @@ pub fn run() -> Result<i32> {
         &[gui_port],
         &probe_port,
         &process_list(),
-        &local_gui_roots(),
+        &local_roots,
+        fix_hints,
     );
     for line in &report.lines {
         println!("{line}");
@@ -548,9 +648,234 @@ mod tests {
             .find_subcommand("doctor")
             .expect("doctor subcommand is wired into the CLI");
         let help = doctor.clone().render_long_help().to_string();
-        for needle in ["registry", "PATH", "skill links", "lab-gui"] {
+        for needle in ["registry", "PATH", "skill links", "lab-gui", "--fix-hints"] {
             assert!(help.contains(needle), "help missing {needle:?}: {help}");
         }
+    }
+
+    #[test]
+    fn every_doctor_line_kind_has_a_documented_sample_in_the_readme() {
+        // Every line kind `assess` / `process_findings` can emit (each status
+        // variant, each process finding, the fix-hints header, each hint kind
+        // incl. the rm warning and the no-resolving-link fallback, and both
+        // verdicts) must have one verbatim sample in the README Doctor section.
+        let readme = include_str!("../README.md");
+        let samples = [
+            "registry dir: /tmp/h1 (exists)",
+            "registry dir: /tmp/h1 (not created yet)",
+            "old registry /tmp/agent-cli-lab still holds 2 sessions: those labs do not show in h1 console/GUI",
+            "old registry dir: /tmp/agent-cli-lab (present, 0 sessions)",
+            "old registry dir: /tmp/agent-cli-lab (not present)",
+            "warning: old registry /Users/x/.agent-cli-lab still holds 1 session(s) while /tmp/h1 is in use - old labs will not show in TUI/GUI",
+            "old registry dir: /Users/x/.agent-cli-lab (exists, no sessions)",
+            "old registry dir: /Users/x/.agent-cli-lab (not present)",
+            "h1 on PATH: /Users/x/.local/bin/h1",
+            "h1 on PATH: not found",
+            "old binary agent-cli-lab on PATH: /Users/x/.local/bin/agent-cli-lab (stale, pre-rename)",
+            "old binary agent-cli-lab on PATH: not found",
+            "labctl shim on PATH: /Users/x/.local/bin/labctl (compatibility shim, execs h1)",
+            "labctl shim on PATH: not found",
+            "skill link /Users/x/.codex/skills/lab-commander: ok",
+            "skill link /Users/x/.codex/skills/lab-commander: broken",
+            "skill link /Users/x/.codex/skills/lab-commander: not installed",
+            "lab-gui port 4317: reachable",
+            "lab-gui port 4317: not reachable",
+            "old console pid 1234 cannot see h1 labs: close it and run h1 console",
+            "old process pid 1235 (host) runs the pre-rename binary: restart it as h1",
+            "lab-gui on port 4317 started from /Users/x/checkout/packages/lab-gui/server.mjs: current (this repo)",
+            "lab-gui on port 4317 started from /other/checkout/packages/lab-gui/server.mjs: restart it if it shows no labs",
+            "doctor: ok",
+            "doctor: attention needed",
+            "fix hints (print only, not executed):",
+            "  kill 1234",
+            "  ln -sfn /Users/x/checkout/skills/lab-commander /Users/x/.codex/skills/lab-commander",
+            "  no working skill link to copy: run skills/lab-commander/install.sh from your checkout",
+            "  only after your lab-commander checkout contains the h1 rename (git pull); the installed labctl and lab-* scripts call the old binary until then",
+            "  rm /Users/x/.local/bin/agent-cli-lab",
+        ];
+        for sample in samples {
+            assert!(
+                readme.contains(sample),
+                "README Doctor section lacks a verbatim sample for line kind: {sample:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolved_link_target_returns_the_stored_symlink_target() {
+        let root = temp_root("linksrc");
+        let target = root.join("skill-target");
+        fs::create_dir_all(&target).expect("target dir");
+        let link = root.join("lab-commander");
+        std::os::unix::fs::symlink(&target, &link).expect("plant resolving link");
+        assert_eq!(resolved_link_target(&link), Some(target));
+        assert_eq!(resolved_link_target(&root.join("missing")), None);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fix_hints_print_kill_ln_rm_and_skip_registries() {
+        let root = temp_root("hints");
+        let registry = root.join("sessions");
+        fs::create_dir_all(&registry).expect("registry");
+        let home = root.join("home");
+        let skill_source = root.join("skill-target");
+        fs::create_dir_all(&skill_source).expect("skill target");
+        let claude_dir = home.join(".claude").join("skills");
+        fs::create_dir_all(&claude_dir).expect("claude link dir");
+        std::os::unix::fs::symlink(&skill_source, claude_dir.join("lab-commander"))
+            .expect("plant resolving link");
+        let decoy = root.join("repo").join("skills").join("lab-commander");
+        fs::create_dir_all(&decoy).expect("decoy checkout skill dir");
+        let link_dir = home.join(".codex").join("skills");
+        fs::create_dir_all(&link_dir).expect("link dir");
+        let link = link_dir.join("lab-commander");
+        std::os::unix::fs::symlink(root.join("dead-target"), &link).expect("plant broken link");
+        let tmp = root.join("tmp");
+        let old_temp = tmp.join(OLD_TEMP_REGISTRY_DIR_NAME);
+        fs::create_dir_all(&old_temp).expect("old temp registry");
+        fs::write(old_temp.join("a.json"), "{}").expect("old session");
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("h1"), "fake").expect("fake h1");
+        fs::write(bin.join(OLD_BINARY_NAME), "fake").expect("stale binary");
+        let processes: Vec<String> = vec![
+            "81921 /Users/x/.local/bin/agent-cli-lab console".to_string(),
+            "21800 node /Users/x/Downloads/agent-toolkit/packages/lab-gui/server.mjs --open"
+                .to_string(),
+        ];
+        let report = diagnose_inner(
+            &registry,
+            &home,
+            &tmp,
+            std::slice::from_ref(&bin),
+            &[4317],
+            &|_| false,
+            &processes,
+            &[],
+            true,
+        );
+        assert!(report.attention, "lines: {:?}", report.lines);
+        for expected in [
+            "fix hints (print only, not executed):".to_string(),
+            "  kill 81921".to_string(),
+            "  kill 21800".to_string(),
+            format!("  ln -sfn {} {}", skill_source.display(), link.display()),
+            format!("  {RM_OLD_BINARY_WARNING}"),
+            format!("  rm {}", bin.join(OLD_BINARY_NAME).display()),
+        ] {
+            assert!(
+                report.lines.iter().any(|line| line == &expected),
+                "missing {expected:?} in {:?}",
+                report.lines
+            );
+        }
+        let hint_lines: Vec<&String> = report
+            .lines
+            .iter()
+            .filter(|line| line.starts_with("  "))
+            .collect();
+        assert_eq!(hint_lines.len(), 5, "hints: {hint_lines:?}");
+        assert!(
+            hint_lines
+                .iter()
+                .all(|line| !line.contains(&decoy.display().to_string())),
+            "exe/cwd-style decoy path in {hint_lines:?}"
+        );
+        let rm_index = report
+            .lines
+            .iter()
+            .position(|line| *line == format!("  rm {}", bin.join(OLD_BINARY_NAME).display()))
+            .expect("rm hint");
+        assert_eq!(
+            report.lines[rm_index - 1],
+            format!("  {RM_OLD_BINARY_WARNING}"),
+            "warning must immediately precede rm: {:?}",
+            report.lines
+        );
+        assert!(
+            hint_lines
+                .iter()
+                .all(|line| !line.contains(&old_temp.display().to_string())),
+            "registry hint in {hint_lines:?}"
+        );
+        let plain = diagnose(
+            &registry,
+            &home,
+            &tmp,
+            &[bin],
+            &[4317],
+            &|_| false,
+            &processes,
+            &[],
+        );
+        assert_eq!(plain.attention, report.attention);
+        assert!(
+            plain
+                .lines
+                .iter()
+                .all(|line| !line.contains("fix hints") && !line.starts_with("  kill")),
+            "plain: {:?}",
+            plain.lines
+        );
+        assert_eq!(report.lines.len(), plain.lines.len() + 6);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fix_hints_without_a_resolving_skill_link_print_the_fallback() {
+        let root = temp_root("hintsnone");
+        let registry = root.join("sessions");
+        fs::create_dir_all(&registry).expect("registry");
+        let home = root.join("home");
+        for host in [".claude", ".codex"] {
+            let dir = home.join(host).join("skills");
+            fs::create_dir_all(&dir).expect("link dir");
+            std::os::unix::fs::symlink(root.join("dead-target"), dir.join("lab-commander"))
+                .expect("plant broken link");
+        }
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("h1"), "fake").expect("fake h1");
+        let report = diagnose_inner(
+            &registry,
+            &home,
+            &root.join("tmp"),
+            &[bin],
+            &[4317],
+            &|_| false,
+            &[],
+            &[],
+            true,
+        );
+        assert!(report.attention, "lines: {:?}", report.lines);
+        assert!(
+            report
+                .lines
+                .iter()
+                .any(|line| line == &format!("  {NO_WORKING_SKILL_LINK_HINT}")),
+            "fallback missing in {:?}",
+            report.lines
+        );
+        assert!(
+            report.lines.iter().all(|line| !line.contains("ln -sfn")),
+            "ln hint in {:?}",
+            report.lines
+        );
+        assert_eq!(
+            report
+                .lines
+                .iter()
+                .filter(|line| line.contains(NO_WORKING_SKILL_LINK_HINT))
+                .count(),
+            1,
+            "fallback exactly once in {:?}",
+            report.lines
+        );
+        let _ = fs::remove_dir_all(&root);
     }
 
     fn report_in(root: &Path, processes: &[String], local_roots: &[PathBuf]) -> Report {
