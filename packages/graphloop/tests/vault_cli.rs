@@ -137,15 +137,76 @@ fn command_status_with_a_missing_program_is_not_ready() {
     assert!(out.contains("cmd TOKEN: error: program graphloop-no-such-program-9f2a not found"), "{out}");
 }
 
-#[test]
-fn unsupported_provider_is_not_ready() {
-    // Schema rejects unknown providers at load, so build the Spec directly: vault_status_core must still report a hand-built/forward Spec as not ready.
+/// The CLI providers in the PROVIDERS table, with the program each needs on PATH.
+const CLI_PROVIDERS: [(&str, &str); 4] = [("1password", "op"), ("bitwarden", "bw"), ("bitwarden-secrets", "bws"), ("keychain", "security")];
+
+fn hand_built_spec(provider: &str, command: Vec<String>) -> Spec {
+    // Schema rejects unknown providers at load, so build the Spec directly: vault_status_core must still report a hand-built/forward Spec correctly.
     let mut spec = load("");
-    spec.vaults.push(Vault { name: "op".into(), provider: "1password".into(), path: None, account: None, command: vec![], secrets: vec![("TOKEN".into(), "op://vault/item/token".into())], line: 1 });
+    spec.vaults.push(Vault { name: "v".into(), provider: provider.into(), path: None, account: None, command, secrets: vec![("TOKEN".into(), "some-ref".into())], line: 1 });
+    spec
+}
+
+fn path_env(dir: &Path) -> impl Fn(&str) -> Option<String> {
+    let path = dir.to_string_lossy().into_owned();
+    move |name: &str| if name == "PATH" { Some(path.clone()) } else { None }
+}
+
+#[test]
+fn cli_providers_without_their_program_are_not_ready_and_name_it() {
+    let empty = tempfile::tempdir().unwrap();
+    let env = path_env(empty.path());
+    for (provider, program) in CLI_PROVIDERS {
+        let spec = hand_built_spec(provider, vec![]);
+        let (out, ok) = vault_status_core(&spec, Path::new("."), &env, vec![], false);
+        assert!(!ok, "{provider}: {out}");
+        assert!(out.contains(&format!("vault v ({provider}): not ready: program {program} not found")), "{provider}: {out}");
+        assert!(out.contains(&format!("v TOKEN: error: program {program} not found")), "{provider}: {out}");
+        assert!(!out.contains("not available in this build"), "{provider}: {out}");
+    }
+}
+
+#[test]
+fn cli_providers_with_a_fake_program_on_path_are_ready() {
+    let dir = tempfile::tempdir().unwrap();
+    for (_, program) in CLI_PROVIDERS { std::fs::write(dir.path().join(program), "#!/bin/sh\n").unwrap(); }
+    let env = path_env(dir.path());
+    for (provider, _) in CLI_PROVIDERS {
+        let spec = hand_built_spec(provider, vec![]);
+        let (out, ok) = vault_status_core(&spec, Path::new("."), &env, vec![], false);
+        assert!(ok, "{provider}: {out}");
+        assert!(out.contains(&format!("vault v ({provider}): ready\n")), "{provider}: {out}");
+        assert!(out.contains("v TOKEN: ok\n"), "{provider}: {out}");
+        assert!(!out.contains("not available in this build"), "{provider}: {out}");
+    }
+}
+
+#[test]
+fn cli_provider_command_override_replaces_its_program_for_readiness() {
+    let real = |name: &str| std::env::var(name).ok();
+    // `printf` is on the real PATH even where `op` is not, so the override makes it ready.
+    let spec = hand_built_spec("1password", vec!["printf".into()]);
+    let (out, ok) = vault_status_core(&spec, Path::new("."), &real, vec![], false);
+    assert!(ok, "{out}");
+    assert!(out.contains("vault v (1password): ready\n"), "{out}");
+    assert!(out.contains("v TOKEN: ok\n"), "{out}");
+    // A missing override program is the one named, not the provider's own `op`.
+    let spec = hand_built_spec("1password", vec!["graphloop-no-such-program-9f2a".into()]);
+    let (out, ok) = vault_status_core(&spec, Path::new("."), &real, vec![], false);
+    assert!(!ok, "{out}");
+    assert!(out.contains("vault v (1password): not ready: program graphloop-no-such-program-9f2a not found"), "{out}");
+    assert!(out.contains("v TOKEN: error: program graphloop-no-such-program-9f2a not found"), "{out}");
+    assert!(!out.contains("not available in this build"), "{out}");
+}
+
+#[test]
+fn unknown_provider_is_not_ready() {
+    let mut spec = load("");
+    spec.vaults.push(Vault { name: "x".into(), provider: "no-such-provider".into(), path: None, account: None, command: vec![], secrets: vec![("TOKEN".into(), "some-ref".into())], line: 1 });
     let (out, ok) = vault_status_core(&spec, Path::new("."), &no_env, vec![], false);
     assert!(!ok, "{out}");
-    assert!(out.contains("vault op (1password): not ready: provider \"1password\" is not available in this build"), "{out}");
-    assert!(out.contains("op TOKEN: error: provider \"1password\" is not available in this build"), "{out}");
+    assert!(out.contains("vault x (no-such-provider): not ready: provider \"no-such-provider\" is not available in this build"), "{out}");
+    assert!(out.contains("x TOKEN: error: provider \"no-such-provider\" is not available in this build"), "{out}");
 }
 
 #[test]
