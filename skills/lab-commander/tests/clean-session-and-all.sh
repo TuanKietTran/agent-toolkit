@@ -5,7 +5,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(mktemp -d "${TMPDIR:-/tmp}/lab-clean-session.XXXXXX")
 trap 'rm -rf "$root"' EXIT HUP INT TERM
 mkdir -p "$root/bin" "$root/workspace/status" "$root/workspace/logs/handoffs" "$root/home/.pi/agent/sessions/--tmp-x-y--"
-cat >"$root/bin/agent-cli-lab" <<'FAKE'
+cat >"$root/bin/h1" <<'FAKE'
 #!/bin/sh
 case "$1" in
   open) exit 1 ;;
@@ -14,7 +14,7 @@ case "$1" in
   *) exit 0 ;;
 esac
 FAKE
-chmod +x "$root/bin/agent-cli-lab"
+chmod +x "$root/bin/h1"
 printf handoff > "$root/home/.pi/agent/sessions/--tmp-x-y--/handoff.json"
 : > "$root/calls"
 HOME="$root/home" PATH="$root/bin:$PATH" CALLS="$root/calls" "$here/../bin/lab-clean" a --workspace "$root/workspace" --cwd /tmp/x/y >/dev/null

@@ -1,4 +1,4 @@
-// Thin wrapper over the agent-cli-lab binary. Every call is an argv array handed to execFile,
+// Thin wrapper over the h1 binary. Every call is an argv array handed to execFile,
 // never a shell string, and lab names are validated before they reach the command line.
 import { execFile } from "node:child_process";
 
@@ -30,7 +30,7 @@ function assertName(name) {
 }
 
 /** @param {{bin?: string, env?: NodeJS.ProcessEnv, exec?: typeof realExec, timeout?: number}} options */
-export function createCli({ bin = process.env.AGENT_CLI_LAB_BIN || "agent-cli-lab", env = process.env, exec = realExec, timeout = 8000 } = {}) {
+export function createCli({ bin = process.env.H1_BIN || "h1", env = process.env, exec = realExec, timeout = 8000 } = {}) {
   const run = (args, extra = {}) => exec(bin, args, { env, timeout, ...extra });
   const json = async (args) => {
     const { stdout } = await run(args);

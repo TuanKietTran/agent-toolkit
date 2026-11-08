@@ -25,7 +25,7 @@ Use the [`interprocess`](https://crates.io/crates/interprocess) crate's `local_s
 ### `--socket PATH`
 
 - **Unix (Linux, macOS):** unchanged. `PATH` is the socket file. It is created with mode `0600` and removed when the host exits. macOS limits socket paths to about 104 bytes.
-- **Windows:** `PATH` is a name, not a file. It is made absolute (`std::path::absolute`), lowercased, mixed with the current user's SID, hashed (FNV-1a 64) and mapped to `\\.\pipe\agent-cli-lab-<16 hex digits>`. The same `--socket` value therefore reaches the same host from any later call in the same directory, exactly as on Unix, and two users can use the same path without colliding. No file is created. A value that already is a pipe path (`\\.\pipe\NAME`) is used verbatim. The pipe disappears when the host process ends, including when it is killed.
+- **Windows:** `PATH` is a name, not a file. It is made absolute (`std::path::absolute`), lowercased, mixed with the current user's SID, hashed (FNV-1a 64) and mapped to `\\.\pipe\h1-<16 hex digits>`. The same `--socket` value therefore reaches the same host from any later call in the same directory, exactly as on Unix, and two users can use the same path without colliding. No file is created. A value that already is a pipe path (`\\.\pipe\NAME`) is used verbatim. The pipe disappears when the host process ends, including when it is killed.
 
 ### Owner-only access
 

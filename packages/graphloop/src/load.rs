@@ -74,7 +74,7 @@ mod tests {
         assert_eq!(spec.apis[0].command.iter().map(|t| t.display()).collect::<Vec<_>>(), vec!["npx", "-y", "@modelcontextprotocol/server-filesystem", "./work"]);
         assert_eq!(spec.harnesses.len(), 2);
         let commander = spec.harness("commander").expect("commander harness");
-        assert_eq!(commander.kind, "agent-cli-lab");
+        assert_eq!(commander.kind, "h1");
         assert_eq!(commander.role, "commander");
         assert_eq!(commander.parent, None);
         assert_eq!(commander.model, ModelRef::SystemOne);
@@ -109,19 +109,19 @@ mod tests {
 
     #[test]
     fn negative_unknown_key_with_did_you_mean() {
-        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"agent-cli-lab\"\n role = \"builder\"\n modl = \"sonnet\"\n open { command = [\"pi\"] }\n}\n");
+        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"h1\"\n role = \"builder\"\n modl = \"sonnet\"\n open { command = [\"pi\"] }\n}\n");
         assert!(d.0.iter().any(|x| x.summary == "Unsupported argument" && x.hint.as_deref() == Some("Did you mean \"model\"?")), "{d:?}");
     }
 
     #[test]
     fn negative_missing_required_argument() {
-        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"agent-cli-lab\"\n open { command = [\"pi\"] }\n}\n");
+        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"h1\"\n open { command = [\"pi\"] }\n}\n");
         assert!(d.0.iter().any(|x| x.summary == "Missing required argument" && x.detail.contains("\"role\"")), "{d:?}");
     }
 
     #[test]
     fn negative_wrong_type() {
-        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"agent-cli-lab\"\n role = \"builder\"\n open { command = [\"pi\"] cols = \"wide\" }\n}\n");
+        let d = err_diags("yah 1\nharness \"b\" {\n kind = \"h1\"\n role = \"builder\"\n open { command = [\"pi\"] cols = \"wide\" }\n}\n");
         assert!(d.0.iter().any(|x| x.summary == "Incorrect attribute value type" && x.detail.contains("\"cols\"")), "{d:?}");
     }
 
@@ -139,7 +139,7 @@ mod tests {
 
     #[test]
     fn negative_parent_cycle() {
-        let d = err_diags("yah 1\nharness \"a\" {\n kind = \"agent-cli-lab\"\n role = \"builder\"\n parent = \"b\"\n open { command = [\"pi\"] }\n}\nharness \"b\" {\n kind = \"agent-cli-lab\"\n role = \"builder\"\n parent = \"a\"\n open { command = [\"pi\"] }\n}\n");
+        let d = err_diags("yah 1\nharness \"a\" {\n kind = \"h1\"\n role = \"builder\"\n parent = \"b\"\n open { command = [\"pi\"] }\n}\nharness \"b\" {\n kind = \"h1\"\n role = \"builder\"\n parent = \"a\"\n open { command = [\"pi\"] }\n}\n");
         assert!(d.0.iter().any(|x| x.summary == "Cycle detected"), "{d:?}");
     }
 

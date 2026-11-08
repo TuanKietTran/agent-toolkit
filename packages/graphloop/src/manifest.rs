@@ -1,16 +1,16 @@
 //! The run manifest: the contract between `graphloop` (writer) and the readers
-//! (`agent-cli-lab console`, `lab-gui`). SHARED CONTRACT, JSON, version 1.
+//! (`h1 console`, `lab-gui`). SHARED CONTRACT, JSON, version 1.
 //!
 //! Location: `<session dir>/graphs/<run>.json`, where `<session dir>` is exactly what
-//! `agent-cli-lab` uses for its sockets and registry (`$AGENT_CLI_LAB_DIR`, else Windows
-//! `%LOCALAPPDATA%\agent-cli-lab\sessions`, else `$XDG_RUNTIME_DIR` / `$TMPDIR` / system temp +
-//! `agent-cli-lab`). Readers must tolerate unknown fields and a missing file; writers write
+//! `h1` uses for its sockets and registry (`$H1_DIR`, else Windows
+//! `%LOCALAPPDATA%\h1\sessions`, else `$XDG_RUNTIME_DIR` / `$TMPDIR` / system temp +
+//! `h1`). Readers must tolerate unknown fields and a missing file; writers write
 //! atomically (temp file + rename). The manifest never contains secrets or expanded `${env.*}`.
 //!
 //! ```json
 //! { "version": 1, "run": "default-1762500000-ab12", "team": "default",
 //!   "source": "/abs/team.yah", "root": "commander", "created_ms": 1762500000000,
-//!   "trace_dir": "/home/u/.agent-cli-lab/runs/default-1762500000-ab12/trace",
+//!   "trace_dir": "/home/u/.h1/runs/default-1762500000-ab12/trace",
 //!   "nodes": [ { "name": "commander", "harness": "commander", "role": "commander", "parent": null,
 //!                "requested_model": "system-one", "model": "anthropic/claude-sonnet-5-5",
 //!                "model_label": "sonnet",
@@ -18,7 +18,7 @@
 //!                "tools": ["fs"] } ],
 //!   "edges": [ { "from": "commander", "to": "builder", "kind": "parent" } ] }
 //! ```
-//! `name` is the agent-cli-lab session name (the `-n` value, prefix included); `harness` is the
+//! `name` is the h1 session name (the `-n` value, prefix included); `harness` is the
 //! Graphspec label. `edges[].from/to` are session names. `via` is `system-one` | `fallback` | `pinned`.
 
 use std::path::{Path, PathBuf};
@@ -82,20 +82,20 @@ pub struct Edge {
     pub kind: EdgeKind,
 }
 
-/// Same rule as agent-cli-lab's `session_dir`, plus `/graphs`.
+/// Same rule as h1's `session_dir`, plus `/graphs`.
 pub fn dir() -> PathBuf {
     use std::env;
     let non_empty = |name: &str| env::var_os(name).filter(|v| !v.is_empty());
-    let base = if let Some(p) = non_empty("AGENT_CLI_LAB_DIR") {
+    let base = if let Some(p) = non_empty("H1_DIR") {
         PathBuf::from(p)
     } else if cfg!(windows) && non_empty("LOCALAPPDATA").is_some() {
-        PathBuf::from(non_empty("LOCALAPPDATA").unwrap()).join("agent-cli-lab").join("sessions")
+        PathBuf::from(non_empty("LOCALAPPDATA").unwrap()).join("h1").join("sessions")
     } else {
         non_empty("XDG_RUNTIME_DIR")
             .or_else(|| non_empty("TMPDIR"))
             .map(PathBuf::from)
             .unwrap_or_else(env::temp_dir)
-            .join("agent-cli-lab")
+            .join("h1")
     };
     base.join("graphs")
 }

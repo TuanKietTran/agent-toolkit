@@ -1,4 +1,4 @@
-//! `agent-cli-lab console`: a k9s-style terminal UI over every running lab.
+//! `h1 console`: a k9s-style terminal UI over every running lab.
 //!
 //! It reads the same session registry and host sockets as `list` and `status`, so it needs no
 //! daemon. Views: `labs` (table), `graph` (the commander -> manager -> worker tree drawn as nodes
@@ -41,7 +41,7 @@ pub(crate) struct ConsoleArgs {
     /// Run in this terminal instead of opening a new window.
     #[arg(long)]
     here: bool,
-    /// Terminal app to open on macOS and Linux. Defaults to $AGENT_CLI_LAB_TERMINAL, then Ghostty on macOS.
+    /// Terminal app to open on macOS and Linux. Defaults to $H1_TERMINAL, then Ghostty on macOS.
     #[arg(long, value_name = "NAME")]
     terminal: Option<String>,
     /// Milliseconds between refreshes.
@@ -56,7 +56,7 @@ pub(crate) struct ConsoleArgs {
     /// View for the first frame (and for --snapshot): labs, graph or models.
     #[arg(long, default_value = "labs", value_name = "VIEW")]
     view: String,
-    /// Agent registry written by the observer (default: $AGENT_CLI_LAB_AGENTS, then ~/.agent-cli-lab/agents.json).
+    /// Agent registry written by the observer (default: $H1_AGENTS, then ~/.h1/agents.json).
     #[arg(long, value_name = "PATH")]
     agents: Option<PathBuf>,
     /// Width of the --snapshot frame.
@@ -1128,7 +1128,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     };
     let counts = app.counts();
     let dir = session::session_dir().display().to_string();
-    let terminal = env::var("AGENT_CLI_LAB_TERMINAL").unwrap_or_else(|_| if cfg!(target_os = "macos") { "ghostty".into() } else { "default".into() });
+    let terminal = env::var("H1_TERMINAL").unwrap_or_else(|_| if cfg!(target_os = "macos") { "ghostty".into() } else { "default".into() });
     let lines = vec![
         label("Sessions:", fit(&dir, (info.width as usize).saturating_sub(11))),
         label("Terminal:", terminal),
@@ -1141,7 +1141,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             Span::styled(format!("✕ {}", counts[3].1), Style::default().fg(RED)),
         ]),
         label("Refresh:", format!("{} ms · sort {}", app.interval_ms, app.sort.name())),
-        label("Version:", format!("agent-cli-lab {}", env!("CARGO_PKG_VERSION"))),
+        label("Version:", format!("h1 {}", env!("CARGO_PKG_VERSION"))),
     ];
     frame.render_widget(Paragraph::new(lines), info);
 
@@ -1173,7 +1173,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
         r"| |     / _ \ |  _ \ ",
         r"| |___ / ___ \| |_) |",
         r"|_____/_/   \_\____/ ",
-        r"   agent-cli-lab     ",
+        r"   h1     ",
     ];
     let lines: Vec<Line> = logo_lines
         .iter()
@@ -1298,7 +1298,7 @@ fn draw_labs(frame: &mut Frame, area: Rect, app: &mut App) {
             vec![
                 Line::from("No labs are running.").alignment(Alignment::Center),
                 Line::from(""),
-                Line::from("agent-cli-lab open -n mgr1 --role manager -- pi --provider muse --model muse --no-session")
+                Line::from("h1 open -n mgr1 --role manager -- pi --provider muse --model muse --no-session")
                     .style(Style::default().fg(DIM))
                     .alignment(Alignment::Center),
             ]

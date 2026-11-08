@@ -51,7 +51,7 @@ comment       := "//" .*
 | `system_one` | 0..1 | system-one model-pick policy |
 | `image` | 0..1 | image generation & vision |
 | `api` | 0..n | MCP / HTTP tools |
-| `harness` | 0..n | named agent harnesses (kind = agent-cli-lab) |
+| `harness` | 0..n | named agent harnesses (kind = h1) |
 | `team` | 0..n | orchestration teams / graphs |
 | `workflow` | 0..n | higher-level multi-step flows |
 | `output` | 0..n | exported values |
@@ -92,7 +92,7 @@ api "fs" {
 }
 
 harness "commander" {
-  kind  = "agent-cli-lab"
+  kind  = "h1"
   role  = "commander"
   model = "system-one"
   tools = ["fs"]
@@ -104,7 +104,7 @@ harness "commander" {
 }
 
 harness "builder" {
-  kind   = "agent-cli-lab"
+  kind   = "h1"
   role   = "builder"
   parent = "commander"
   model  = "system-one"
@@ -205,7 +205,7 @@ Strict mode (vault: "Strict mode: unknown keys or missing required fields = erro
 
 | Key | Type | Required | Default |
 | --- | --- | --- | --- |
-| `kind` | string | yes | — (v1: must be `"agent-cli-lab"`) |
+| `kind` | string | yes | — (v1: must be `"h1"`) |
 | `role` | string | yes | — |
 | `parent` | string (a `harness` label) | no | — |
 | `model` | string (a `model` label, or `"system-one"`) | yes | — |
@@ -218,8 +218,8 @@ Strict mode (vault: "Strict mode: unknown keys or missing required fields = erro
 | Key | Type | Required | Default |
 | --- | --- | --- | --- |
 | `command` | list of template | yes | — |
-| `cols` | number | no | agent-cli-lab's default when absent |
-| `rows` | number | no | agent-cli-lab's default when absent |
+| `cols` | number | no | h1's default when absent |
+| `rows` | number | no | h1's default when absent |
 | `cwd` | template | no | the caller's working directory |
 | `env` | map of template | no | `{}` |
 | `title` | template | no | the session name |
@@ -258,10 +258,10 @@ commander (root)
 
 A parentless member `reviewer` of the same team would add `commander -> reviewer` as a member edge.
 
-- **Session naming.** Each harness becomes one agent-cli-lab session named after its label, optionally prefixed: `--prefix P` names sessions `P-<label>`, which keeps teams from colliding. Session names must match `[A-Za-z0-9._-]`, be at most 40 characters, and not start with `.`.
+- **Session naming.** Each harness becomes one h1 session named after its label, optionally prefixed: `--prefix P` names sessions `P-<label>`, which keeps teams from colliding. Session names must match `[A-Za-z0-9._-]`, be at most 40 characters, and not start with `.`.
 - **Model resolution.** `model = "system-one"` is resolved by system-one (`packages/system-one`) at plan time, using the harness's `role` and `complexity` hint. If system-one cannot decide or cannot be located, the resolved model is the `system_one.fallback` model — that fallback, and only that fallback, as defined in the `system_one` block. A pinned `model = "<label>"` is never re-decided.
 - **How the model reaches the program.** Only through interpolation: `open.command` (and `cwd`/`env`/`title`) may embed `${harnesses.<label>.model}`, replaced by the resolved model's `id` when the step is rendered. Graphloop does not inject the model any other way.
-- **`workflow` in v1.** `workflow` blocks are parsed, validated and listed, but not executed in v1. Loops live inside agent-cli-lab (see Orchestration rules).
+- **`workflow` in v1.** `workflow` blocks are parsed, validated and listed, but not executed in v1. Loops live inside h1 (see Orchestration rules).
 
 ## Error format
 
@@ -280,7 +280,7 @@ Lexer and parser errors stop at the first problem; resolve and schema errors are
 
 ## Run manifest
 
-`graphloop up` writes one JSON manifest per run, before opening any lab, so the console and lab-gui can show planned nodes. It lives next to agent-cli-lab's session data, under a `graphs` directory: the base is `$AGENT_CLI_LAB_DIR` when set, else the same base agent-cli-lab uses for its sessions (`$LOCALAPPDATA/agent-cli-lab/sessions` on Windows, else `$XDG_RUNTIME_DIR` or `$TMPDIR` or the system temp dir, joined with `agent-cli-lab`), plus `/graphs` (`src/manifest.rs`: `dir()` / `path_for(run)`). The file is `<graphs>/<run>.json`, written atomically (temp file in the same directory, then rename). Readers: the agent-cli-lab console (Graphspec overlay) and lab-gui. Writer: only `graphloop up`.
+`graphloop up` writes one JSON manifest per run, before opening any lab, so the console and lab-gui can show planned nodes. It lives next to h1's session data, under a `graphs` directory: the base is `$H1_DIR` when set, else the same base h1 uses for its sessions (`$LOCALAPPDATA/h1/sessions` on Windows, else `$XDG_RUNTIME_DIR` or `$TMPDIR` or the system temp dir, joined with `h1`), plus `/graphs` (`src/manifest.rs`: `dir()` / `path_for(run)`). The file is `<graphs>/<run>.json`, written atomically (temp file in the same directory, then rename). Readers: the h1 console (Graphspec overlay) and lab-gui. Writer: only `graphloop up`.
 
 Top-level fields: `version`, `run` (run id), `team`, `source` (the `.yah` path), `root` (root session name), `created_ms`, `trace_dir` (or `null`), `nodes`, `edges`. Each node: `name` (session name), `harness` (label), `role`, `parent` (session name or `null`), `requested_model` (as written), `model` (resolved model id), `model_label`, `pick` (`via`, `rule`, `reason`, `degraded_level`), `tools`. Each edge: `from`, `to`, `kind` (parent or member, per Semantics).
 
@@ -304,10 +304,10 @@ Illustrative excerpt:
 
 Reproduced from the contract's "Launching" section:
 
-1. Every harness is started via `agent-cli-lab open ... --model <resolved>` — Graphloop never starts a harness program directly.
+1. Every harness is started via `h1 open ... --model <resolved>` — Graphloop never starts a harness program directly.
 2. `model = "system-one"` is resolved by `packages/system-one`, with fallback only as defined in the `system_one` block.
 3. The `team` block is the graph: nodes are harnesses, edges are `parent` plus `root -> member`. There is no other graph definition.
-4. Loops stay inside agent-cli-lab; Graphloop adds no second loop runner.
+4. Loops stay inside h1; Graphloop adds no second loop runner.
 5. Graphs are small and explicit: every node and edge is written in the file, nothing is generated or discovered at run time.
 6. One trace per run: with recording on, every session of the run records into the run's single trace directory.
 7. `image` and `api` blocks are tools, not prompt text: they are handed to harnesses as tools and are never inlined into a prompt.
@@ -319,7 +319,7 @@ Common flags: `FILE` (a `.yah` path), `--team NAME` (default: the only team, or 
 - `graphloop check FILE` — load, resolve and validate; print the counts or the rendered diagnostics (stderr), exit 0 / 1.
 - `graphloop plan FILE [--json]` — resolve models, build the plan, print each step's shell line preceded by a comment naming the resolved model. `--json` prints one JSON object instead.
 - `graphloop graph FILE` — print the team's edges (the graph of Semantics) without opening anything.
-- `graphloop up FILE` — write the run manifest (above), then open every step in plan order with agent-cli-lab; on a failed open, stop and roll back the labs this run already opened.
+- `graphloop up FILE` — write the run manifest (above), then open every step in plan order with h1; on a failed open, stop and roll back the labs this run already opened.
 - `graphloop down RUN` — stop every session named in the run's manifest; report what it stopped.
 - `graphloop runs` — table of manifests: run, team, nodes live/total, age.
 - `graphloop trace RUN` — list the recordings in the run's trace directory, with sizes and the node each belongs to.
@@ -330,7 +330,7 @@ ok: 2 harnesses, 1 teams
 
 $ graphloop plan examples/team.yah
 # harness builder: claude-sonnet-5-5 (via system-one: role=builder)
-agent-cli-lab open -n builder -- pi --provider claude-cli --model claude-sonnet-5-5 --no-session
+h1 open -n builder -- pi --provider claude-cli --model claude-sonnet-5-5 --no-session
 
 $ graphloop graph examples/team.yah
 commander -> builder (parent)

@@ -44,10 +44,10 @@ const END_OF_INPUT: &[u8] = &[0x1a, 0x0d];
 
 #[derive(Debug, Parser)]
 #[command(
-    name = "agent-cli-lab",
+    name = "h1",
     version,
     about = "Test and control interactive CLI programs through a pseudo-terminal",
-    after_help = "EXAMPLES:\n  agent-cli-lab run -- python3 -i\n  agent-cli-lab host -r pi.jsonl -- pi\n  agent-cli-lab send -e 'Hello'\n  agent-cli-lab screen\n  agent-cli-lab attach\n\nRecordings contain all input and output and may contain secrets."
+    after_help = "EXAMPLES:\n  h1 run -- python3 -i\n  h1 host -r pi.jsonl -- pi\n  h1 send -e 'Hello'\n  h1 screen\n  h1 attach\n\nRecordings contain all input and output and may contain secrets."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -58,7 +58,7 @@ pub struct Cli {
 enum Commands {
     /// Run a command and proxy this process's input/output.
     Run(RunArgs),
-    /// Host a PTY that separate agent-cli-lab calls can control.
+    /// Host a PTY that separate h1 calls can control.
     Host(HostArgs),
     /// Send text or control keys to a hosted PTY.
     Send(SendArgs),
@@ -147,7 +147,7 @@ struct GraphArgs {
     /// Role in the lab hierarchy, for example `manager` or `worker`. Left out, `console` infers it.
     #[arg(long, value_name = "ROLE")]
     role: Option<String>,
-    /// Session that opened this one. Defaults to $AGENT_CLI_LAB_SELF, which every hosted program
+    /// Session that opened this one. Defaults to $H1_SELF, which every hosted program
     /// gets, so a worker opened from inside a manager lab is attached to it automatically.
     #[arg(long, value_name = "NAME")]
     parent: Option<String>,
@@ -195,11 +195,11 @@ struct SocketArgs {
 }
 
 impl SocketArgs {
-    /// `-s`, else `-n`, else $AGENT_CLI_LAB_SOCKET, else $AGENT_CLI_LAB_NAME, else the default socket.
+    /// `-s`, else `-n`, else $H1_SOCKET, else $H1_NAME, else the default socket.
     fn path(&self) -> Result<PathBuf> {
         self.resolve(
-            env::var_os("AGENT_CLI_LAB_SOCKET").filter(|value| !value.is_empty()),
-            env::var("AGENT_CLI_LAB_NAME")
+            env::var_os("H1_SOCKET").filter(|value| !value.is_empty()),
+            env::var("H1_NAME")
                 .ok()
                 .filter(|value| !value.is_empty()),
         )
@@ -237,7 +237,7 @@ struct AttachArgs {
     #[arg(long, default_value_t = 100)]
     interval_ms: u64,
     /// Terminal app to open for `foreground` from a non-terminal context.
-    /// Defaults to $AGENT_CLI_LAB_TERMINAL, then Ghostty on macOS.
+    /// Defaults to $H1_TERMINAL, then Ghostty on macOS.
     #[arg(long, value_name = "NAME")]
     terminal: Option<String>,
 }
@@ -487,7 +487,7 @@ struct OpenArgs {
     /// Session name: `-n NAME` reaches it afterwards. Defaults to `lab-<process id>`.
     #[arg(long, short = 'n', value_name = "NAME")]
     name: Option<String>,
-    /// Window title. Defaults to `agent-cli-lab: NAME`.
+    /// Window title. Defaults to `h1: NAME`.
     #[arg(long, value_name = "TEXT")]
     title: Option<String>,
     /// Terminal width in columns (also the width of the window on Windows).
@@ -511,7 +511,7 @@ struct OpenArgs {
     /// Keep QuickEdit on in the window (Windows).
     #[arg(long)]
     quick_edit: bool,
-    /// Terminal app to open on macOS and Linux. Defaults to $AGENT_CLI_LAB_TERMINAL.
+    /// Terminal app to open on macOS and Linux. Defaults to $H1_TERMINAL.
     #[arg(long, value_name = "NAME")]
     terminal: Option<String>,
     /// Seconds to wait until the session answers.
@@ -572,7 +572,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
 
 fn default_socket() -> PathBuf {
     default_socket_from(
-        env::var_os("AGENT_CLI_LAB_SOCKET"),
+        env::var_os("H1_SOCKET"),
         env::var_os("XDG_RUNTIME_DIR"),
         env::var_os("TMPDIR"),
         env::temp_dir(),
@@ -592,7 +592,7 @@ fn default_socket_from(
         .or(tmpdir)
         .map(PathBuf::from)
         .unwrap_or(system_temp);
-    base.join("agent-cli-lab.sock")
+    base.join("h1.sock")
 }
 
 fn prepare_socket_parent(socket: &Path) -> Result<()> {
@@ -615,7 +615,7 @@ fn print_default_socket(args: SocketAliasArgs) -> Result<i32> {
         println!("{}", socket.display());
     } else {
         println!("default socket: {}", socket.display());
-        println!("override with AGENT_CLI_LAB_SOCKET or --socket PATH");
+        println!("override with H1_SOCKET or --socket PATH");
     }
     Ok(0)
 }
@@ -773,7 +773,7 @@ fn host(mut args: HostArgs) -> Result<i32> {
     validate_terminal(&args.terminal)?;
     if let Some(name) = &args.target.name {
         // The hosted program learns its own name, so labs it opens know who their parent is.
-        args.terminal.env.push(("AGENT_CLI_LAB_SELF".into(), name.clone()));
+        args.terminal.env.push(("H1_SELF".into(), name.clone()));
     }
     if args.stdio {
         conpty::adopt_own_console();
@@ -820,7 +820,7 @@ fn host(mut args: HostArgs) -> Result<i32> {
                 .graph
                 .parent
                 .clone()
-                .or_else(|| env::var("AGENT_CLI_LAB_SELF").ok())
+                .or_else(|| env::var("H1_SELF").ok())
                 .filter(|parent| !parent.is_empty() && Some(parent) != args.target.name.as_ref()),
             model: args.graph.model.clone(),
         })?),
@@ -1029,7 +1029,7 @@ fn foreground(args: ForegroundArgs) -> Result<i32> {
 
 /// Start `host` in the background and wait until its socket answers.
 fn host_detached(socket: &Path, cols: u16, rows: u16, command: &[OsString]) -> Result<()> {
-    let exe = env::current_exe().context("failed to resolve agent-cli-lab executable")?;
+    let exe = env::current_exe().context("failed to resolve h1 executable")?;
     let mut host = Command::new(exe);
     host.arg("host")
         .arg("-s")
@@ -1063,12 +1063,12 @@ fn open_attach_terminal(socket: &Path, terminal: Option<&str>) -> Result<()> {
     )
 }
 
-/// Open the default terminal (Ghostty on macOS) in a new window running `agent-cli-lab ARGV...`.
+/// Open the default terminal (Ghostty on macOS) in a new window running `h1 ARGV...`.
 pub(crate) fn open_terminal_window(argv: &[String], terminal: Option<&str>) -> Result<()> {
-    let exe = env::current_exe().context("failed to resolve agent-cli-lab executable")?;
+    let exe = env::current_exe().context("failed to resolve h1 executable")?;
     let terminal = terminal
         .map(str::to_owned)
-        .or_else(|| env::var("AGENT_CLI_LAB_TERMINAL").ok())
+        .or_else(|| env::var("H1_TERMINAL").ok())
         .filter(|value| !value.trim().is_empty());
     open_terminal_impl(&exe, argv, terminal.as_deref())
 }
@@ -1093,7 +1093,7 @@ fn open_terminal_impl(exe: &Path, argv: &[String], terminal: Option<&str>) -> Re
                 // set from a config file does not, so write one and layer it over the user's config.
                 prune_old_ghostty_configs();
                 let config = env::temp_dir()
-                    .join(format!("agent-cli-lab-ghostty-{}.conf", std::process::id()));
+                    .join(format!("h1-ghostty-{}.conf", std::process::id()));
                 fs::write(
                     &config,
                     format!(
@@ -1104,7 +1104,7 @@ fn open_terminal_impl(exe: &Path, argv: &[String], terminal: Option<&str>) -> Re
                         80 + offset,
                         if argv.first().is_some_and(|word| word == "console") { 170 } else { 120 },
                         if argv.first().is_some_and(|word| word == "console") { 48 } else { 36 },
-                        if argv.first().is_some_and(|word| word == "console") { "agent-cli-lab console" } else { "agent-cli-lab" },
+                        if argv.first().is_some_and(|word| word == "console") { "h1 console" } else { "h1" },
                     ),
                 )
                 .with_context(|| format!("failed to write {}", config.display()))?;
@@ -1126,7 +1126,7 @@ fn open_terminal_impl(exe: &Path, argv: &[String], terminal: Option<&str>) -> Re
 
     // Terminal.app fallback: it opens executable .command files.
     let script = env::temp_dir().join(format!(
-        "agent-cli-lab-attach-{}.command",
+        "h1-attach-{}.command",
         std::process::id()
     ));
     let body = format!(
@@ -1203,7 +1203,7 @@ fn prune_old_ghostty_configs() {
             .ok()
             .and_then(|time| time.elapsed().ok())
             .is_some_and(|age| age > cutoff);
-        if name.starts_with("agent-cli-lab-ghostty-") && name.ends_with(".conf") && stale {
+        if name.starts_with("h1-ghostty-") && name.ends_with(".conf") && stale {
             let _ = fs::remove_file(item.path());
         }
     }
@@ -1457,7 +1457,7 @@ mod tests {
                 Some(OsString::from("/tmpdir")),
                 PathBuf::from("/system"),
             ),
-            PathBuf::from("/xdg/agent-cli-lab.sock")
+            PathBuf::from("/xdg/h1.sock")
         );
         assert_eq!(
             default_socket_from(
@@ -1466,11 +1466,11 @@ mod tests {
                 Some(OsString::from("/tmpdir")),
                 PathBuf::from("/system")
             ),
-            PathBuf::from("/tmpdir/agent-cli-lab.sock")
+            PathBuf::from("/tmpdir/h1.sock")
         );
         assert_eq!(
             default_socket_from(None, None, None, PathBuf::from("/system")),
-            PathBuf::from("/system/agent-cli-lab.sock")
+            PathBuf::from("/system/h1.sock")
         );
     }
 
@@ -1482,7 +1482,7 @@ mod tests {
                 args.target
                     .resolve(None, None)
                     .unwrap()
-                    .ends_with("agent-cli-lab.sock")
+                    .ends_with("h1.sock")
             ),
             _ => panic!("expected host command"),
         }
@@ -1493,7 +1493,7 @@ mod tests {
                 args.connection
                     .resolve(None, None)
                     .unwrap()
-                    .ends_with("agent-cli-lab.sock")
+                    .ends_with("h1.sock")
             ),
             _ => panic!("expected send command"),
         }
@@ -1505,7 +1505,7 @@ mod tests {
                     args.connection
                         .resolve(None, None)
                         .unwrap()
-                        .ends_with("agent-cli-lab.sock")
+                        .ends_with("h1.sock")
                 )
             }
             _ => panic!("expected attach command"),

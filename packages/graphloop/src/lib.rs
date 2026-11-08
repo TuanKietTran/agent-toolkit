@@ -1,5 +1,5 @@
 //! Graphloop: the Graphspec (`.yah`) vault and the launcher that turns a `team` block into
-//! `agent-cli-lab open` calls.
+//! `h1 open` calls.
 //!
 //! Pipeline (docs/graphspec.md, "Parser requirements"):
 //!
@@ -8,7 +8,7 @@
 //!        --resolve--> ast::File (variables substituted, references checked)
 //!        --schema---> spec::Spec (strict validation, defaults applied)
 //!        --pick-----> pick::Resolved per harness (system-one decides `model = "system-one"`)
-//!        --plan-----> plan::Plan (agent-cli-lab open argv, edges)
+//!        --plan-----> plan::Plan (h1 open argv, edges)
 //!        --cli------> `graphloop up` opens the labs, writes a manifest the console and lab-gui draw
 //! ```
 //!

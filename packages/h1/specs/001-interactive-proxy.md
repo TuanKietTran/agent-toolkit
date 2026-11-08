@@ -3,7 +3,7 @@
 ## Interface
 
 ```text
-agent-cli-lab run [--record PATH] [--cols N] [--rows N] -- COMMAND [ARG]...
+h1 run [--record PATH] [--cols N] [--rows N] -- COMMAND [ARG]...
 ```
 
 Everything after `--` is passed directly to the child without shell interpretation.

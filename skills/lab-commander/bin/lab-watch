@@ -9,13 +9,13 @@ tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT INT TERM
 start=$(date +%s); markers_initialized=0; idle_count=0; previous_screen=
 main_cli=0
-agent-cli-lab open --help >/dev/null 2>&1 && main_cli=1
+h1 open --help >/dev/null 2>&1 && main_cli=1
 while :; do
   now=$(date +%s); [ "$((now-start))" -lt "$timeout" ] || { echo "WATCH-TIMEOUT $name"; exit 124; }
   if [ "$main_cli" -eq 1 ]; then
-    if ! screen=$(agent-cli-lab screen -n "$name" 2>&1); then echo "WATCH-GONE $name"; exit 0; fi
+    if ! screen=$(h1 screen -n "$name" 2>&1); then echo "WATCH-GONE $name"; exit 0; fi
   else
-    if ! screen=$(agent-cli-lab screen -s "$name" 2>&1); then echo "WATCH-GONE $name"; exit 0; fi
+    if ! screen=$(h1 screen -s "$name" 2>&1); then echo "WATCH-GONE $name"; exit 0; fi
   fi
   if [ -n "$status_file" ] && [ -f "$status_file" ]; then
     grep -Ei '^[[:space:]]*LAB-(DONE|BLOCKED|CHECKPOINT)[[:blank:]]+[^[:blank:]]|usage limit|rate limit' "$status_file" 2>/dev/null | awk '!s[$0]++' > "$tmp/cur" || true
@@ -31,7 +31,7 @@ while :; do
     cat "$tmp/cur" >> "$tmp/seen"
   fi
   if [ "$main_cli" -eq 1 ]; then
-    state=$(agent-cli-lab status -n "$name" 2>&1 || true)
+    state=$(h1 status -n "$name" 2>&1 || true)
     if printf '%s\n' "$state" | grep -iE 'asking|stalled|idle' >/dev/null; then printf '%s\n' "$screen"; exit 0; fi
   fi
   if printf '%s\n' "$screen" | grep -q 'Working'; then idle_count=0

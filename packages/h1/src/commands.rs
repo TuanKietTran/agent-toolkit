@@ -533,7 +533,7 @@ pub(crate) fn list(args: ListArgs) -> Result<i32> {
     }
     if rows.is_empty() {
         println!(
-            "no sessions are running (start one with `agent-cli-lab open -n NAME -- command`)"
+            "no sessions are running (start one with `h1 open -n NAME -- command`)"
         );
         return Ok(0);
     }
@@ -757,11 +757,11 @@ pub(crate) fn open(args: OpenArgs) -> Result<i32> {
             "a session named {name:?} is already running; stop it or pick another name"
         ));
     }
-    let exe = env::current_exe().context("failed to resolve agent-cli-lab executable")?;
+    let exe = env::current_exe().context("failed to resolve h1 executable")?;
     let title = args
         .title
         .clone()
-        .unwrap_or_else(|| format!("agent-cli-lab: {name}"));
+        .unwrap_or_else(|| format!("h1: {name}"));
     let window_here = cfg!(windows) && !args.detached;
 
     let mut host: Vec<OsString> = vec![
@@ -833,7 +833,7 @@ pub(crate) fn open(args: OpenArgs) -> Result<i32> {
         }
         if let Some(status) = child.try_wait()? {
             return Err(anyhow!(
-                "the host ended before it was ready ({status}); run the same command with `agent-cli-lab host` to see why"
+                "the host ended before it was ready ({status}); run the same command with `h1 host` to see why"
             ));
         }
         if Instant::now() >= deadline {

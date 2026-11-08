@@ -59,7 +59,7 @@ pub struct Edge {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Default)]
 #[serde(default)]
 pub struct Node {
-    /// The agent-cli-lab session name (the `-n` value, prefix included).
+    /// The h1 session name (the `-n` value, prefix included).
     pub name: String,
     /// The Graphspec harness label.
     pub harness: String,

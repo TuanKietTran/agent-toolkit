@@ -1,9 +1,9 @@
 # lab-gui-desktop
 
-The lab board (`packages/lab-gui`) as a desktop app for **macOS** and **Windows**: an Electron window with the GUI server running inside it. Nothing to install except the `agent-cli-lab` command it reads your labs through.
+The lab board (`packages/lab-gui`) as a desktop app for **macOS** and **Windows**: an Electron window with the GUI server running inside it. Nothing to install except the `h1` command it reads your labs through.
 
 - No Node needed on the machine: the app carries its own runtime and starts the server itself, on `127.0.0.1` with a random port and a fresh launch key each time.
-- It looks for `agent-cli-lab` on `PATH` and then in the places a Finder or Start-menu launch does not see (`~/.local/bin`, `~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; on Windows `%USERPROFILE%\.cargo\bin` and `%LOCALAPPDATA%\Programs\agent-cli-lab`). `AGENT_CLI_LAB_BIN` names it explicitly; `AGENT_CLI_LAB_DIR` picks which labs are shown. If it is missing the app says so and opens empty.
+- It looks for `h1` on `PATH` and then in the places a Finder or Start-menu launch does not see (`~/.local/bin`, `~/.cargo/bin`, `/opt/homebrew/bin`, `/usr/local/bin`; on Windows `%USERPROFILE%\.cargo\bin` and `%LOCALAPPDATA%\Programs\h1`). `H1_BIN` names it explicitly; `H1_DIR` picks which labs are shown. If it is missing the app says so and opens empty.
 - Same screen as the browser version: graph, live state, peek, message, stop with confirmation, attach in a terminal window, themes (`t`).
 - The window is sandboxed (no Node, context isolation, no DevTools); requests to anything but the local server are cancelled; it cannot open other windows or ask for camera, microphone or location.
 
@@ -29,7 +29,7 @@ The apps are **not code signed or notarized**. On macOS the first launch may nee
 
 ```
 main.mjs          Electron entry: server, window, menu, single instance
-lib/binary.mjs    finds agent-cli-lab; widens PATH for what it starts
+lib/binary.mjs    finds h1; widens PATH for what it starts
 lib/policy.mjs    what the window may load or navigate to; window options
 scripts/          stage (collect files), package (electron packager), smoke
 test/             unit tests (binary lookup, policy, staged contents)

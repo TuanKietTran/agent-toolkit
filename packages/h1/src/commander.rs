@@ -87,7 +87,7 @@ pub(crate) fn spawn(a: SpawnArgs) -> Result<i32> {
     let mut cmd = match a.agent.as_str() { "sh" => vec!["sh".to_owned()], "pi" => vec!["pi".to_owned()], "claude" => vec!["claude".to_owned()], "codex" => vec!["codex".to_owned()], _ => unreachable!() };
     if let Some(model) = &a.model && (a.agent == "claude" || a.agent == "codex") { cmd.extend(["--model".into(), model.clone()]); }
     cmd.extend(a.extra);
-    let exe = env::var_os("AGENT_CLI_LAB").unwrap_or_else(|| "agent-cli-lab".into());
+    let exe = env::var_os("H1").unwrap_or_else(|| "h1".into());
     let socket = env::temp_dir().join(format!("{}.sock", a.name));
     let recfile = home().join(format!("{}.jsonl", a.name));
     let stderr = fs::File::create(home().join(format!("{}.stderr.log", a.name)))?;
@@ -98,7 +98,7 @@ pub(crate) fn spawn(a: SpawnArgs) -> Result<i32> {
     if !socket.exists() { return Err(anyhow!("host failed to create socket {}", socket.display())); }
     let lab = Lab { name: a.name.clone(), agent: a.agent, model: a.model, cwd: cwd.display().to_string(), socket: socket.display().to_string(), pid: host.id(), record: recfile.display().to_string(), last_prompt: None };
     fs::write(path, serde_json::to_vec_pretty(&lab)?)?;
-    if !a.no_open { let _ = Command::new(env::var_os("AGENT_CLI_LAB").unwrap_or_else(|| "agent-cli-lab".into())).args(["foreground", "-s"]).arg(&socket).spawn(); }
+    if !a.no_open { let _ = Command::new(env::var_os("H1").unwrap_or_else(|| "h1".into())).args(["foreground", "-s"]).arg(&socket).spawn(); }
     println!("{} up (pid {}, socket {})", lab.name, lab.pid, lab.socket);
     Ok(0)
 }
@@ -113,7 +113,7 @@ pub(crate) fn status(name: &str) -> Result<i32> {
     else { println!("{name:16} {:7} working", lab.agent); }
     Ok(0)
 }
-fn binary() -> std::ffi::OsString { env::var_os("AGENT_CLI_LAB").unwrap_or_else(|| "agent-cli-lab".into()) }
+fn binary() -> std::ffi::OsString { env::var_os("H1").unwrap_or_else(|| "h1".into()) }
 fn marker_regex() -> &'static Regex {
     static RE: OnceLock<Regex> = OnceLock::new();
     RE.get_or_init(|| Regex::new(r"(?m)^\s*LAB-(DONE|BLOCKED|CHECKPOINT)[ \t]+\S").unwrap())

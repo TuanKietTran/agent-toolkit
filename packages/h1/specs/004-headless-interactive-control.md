@@ -8,18 +8,18 @@
 
 ```sh
 # Long-running PTY host (on Windows `--socket` is a name, see spec 006)
-agent-cli-lab host --socket /tmp/pi.sock --record pi.jsonl -- pi --no-session
+h1 host --socket /tmp/pi.sock --record pi.jsonl -- pi --no-session
 # Or, using the default socket and shorter flags:
-agent-cli-lab host -r pi.jsonl -- pi --no-session
+h1 host -r pi.jsonl -- pi --no-session
 
 # Separate agent calls while host is running
-agent-cli-lab send --socket /tmp/pi.sock --enter 'Reply exactly: ONE'
-agent-cli-lab screen --socket /tmp/pi.sock
-agent-cli-lab send --socket /tmp/pi.sock --enter '/exit'
+h1 send --socket /tmp/pi.sock --enter 'Reply exactly: ONE'
+h1 screen --socket /tmp/pi.sock
+h1 send --socket /tmp/pi.sock --enter '/exit'
 # Or, with the default socket:
-agent-cli-lab send -e 'Reply exactly: ONE'
-agent-cli-lab screen
-agent-cli-lab send -e '/exit'
+h1 send -e 'Reply exactly: ONE'
+h1 screen
+h1 send -e '/exit'
 ```
 
 ## Protocol

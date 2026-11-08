@@ -91,7 +91,7 @@ test("a failing CLI keeps the last snapshot and reports the error", async () => 
   const monitor = createMonitor({ cli });
   await monitor.tick();
   cli.list = async () => {
-    throw new Error("agent-cli-lab not found");
+    throw new Error("h1 not found");
   };
   const snap = await monitor.tick();
   assert.equal(snap.labs.length, 3);

@@ -1,7 +1,7 @@
-//! Team -> `agent-cli-lab open` commands and graph edges. OWNER: gl-plan.
+//! Team -> `h1 open` commands and graph edges. OWNER: gl-plan.
 //!
-//! Orchestration rules 1 and 3 (docs/graphspec.md): every harness with `kind = "agent-cli-lab"` is
-//! started by `agent-cli-lab open -n NAME --role ROLE [--parent PARENT] --model <resolved> ...`;
+//! Orchestration rules 1 and 3 (docs/graphspec.md): every harness with `kind = "h1"` is
+//! started by `h1 open -n NAME --role ROLE [--parent PARENT] --model <resolved> ...`;
 //! the team block is the graph (nodes = harnesses; edges = parent relations plus `root -> member`
 //! for a member that has no parent).
 
@@ -27,7 +27,7 @@ pub struct PlanOpts {
     pub detached: bool,
 }
 
-/// One `agent-cli-lab open` call.
+/// One `h1 open` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenStep {
     pub harness: String,
@@ -46,7 +46,7 @@ pub struct OpenStep {
 impl OpenStep {
     /// Printable shell line with env parts shown as `${env.NAME}`. Never contains secret values.
     pub fn shell(&self) -> String {
-        let mut out = String::from("agent-cli-lab");
+        let mut out = String::from("h1");
         for arg in &self.argv {
             out.push(' ');
             out.push_str(&shell_quote(&arg.display()));
@@ -181,7 +181,7 @@ pub fn edges(spec: &Spec, team: &Team, prefix: Option<&str>) -> Vec<Edge> {
 }
 
 /// Validate the team (root and members exist, every ancestor is in the team, no parent cycle,
-/// `kind == "agent-cli-lab"`, session names valid: `[A-Za-z0-9._-]`, at most 40 chars, not starting
+/// `kind == "h1"`, session names valid: `[A-Za-z0-9._-]`, at most 40 chars, not starting
 /// with `.`) and build the plan. Errors are `Diagnostics` with `file:line` of the harness or team.
 pub fn build(spec: &Spec, team: &str, resolved: &[Resolved], opts: &PlanOpts) -> Result<Plan, Diagnostics> {
     let Some(team_block) = spec.team(team) else {
@@ -220,8 +220,8 @@ pub fn build(spec: &Spec, team: &str, resolved: &[Resolved], opts: &PlanOpts) ->
     let prefix = opts.prefix.as_deref();
 
     for harness in &nodes {
-        if harness.kind != "agent-cli-lab" {
-            diags.push(error(spec, harness.line, "Unsupported harness kind", format!("harness {:?} has kind {:?}; only \"agent-cli-lab\" is supported", harness.name, harness.kind)));
+        if harness.kind != "h1" {
+            diags.push(error(spec, harness.line, "Unsupported harness kind", format!("harness {:?} has kind {:?}; only \"h1\" is supported", harness.name, harness.kind)));
         }
         let name = session_name(&harness.name, prefix);
         if let Some(problem) = session_name_problem(&name) {
@@ -375,7 +375,7 @@ mod tests {
     fn harness(name: &str, role: &str, parent: Option<&str>, line: u32) -> Harness {
         Harness {
             name: name.to_owned(),
-            kind: "agent-cli-lab".to_owned(),
+            kind: "h1".to_owned(),
             role: role.to_owned(),
             parent: parent.map(str::to_owned),
             model: ModelRef::SystemOne,
@@ -551,7 +551,7 @@ mod tests {
     fn shell_plain_line() {
         let (s, r) = basic();
         let plan = build(&s, "default", &r, &opts()).unwrap();
-        assert_eq!(plan.steps[1].shell(), "agent-cli-lab open -n builder --role worker --parent commander --model anthropic/claude-sonnet-5-5 -- pi");
+        assert_eq!(plan.steps[1].shell(), "h1 open -n builder --role worker --parent commander --model anthropic/claude-sonnet-5-5 -- pi");
     }
 
     fn manual_step(argv: Vec<Templ>) -> OpenStep {
@@ -560,28 +560,28 @@ mod tests {
 
     #[test]
     fn shell_quotes_spaces() {
-        assert_eq!(manual_step(vec![Templ::lit("open"), Templ::lit("a b")]).shell(), "agent-cli-lab open 'a b'");
+        assert_eq!(manual_step(vec![Templ::lit("open"), Templ::lit("a b")]).shell(), "h1 open 'a b'");
     }
 
     #[test]
     fn shell_quotes_single_quote() {
-        assert_eq!(manual_step(vec![Templ::lit("it's")]).shell(), "agent-cli-lab 'it'\\''s'");
+        assert_eq!(manual_step(vec![Templ::lit("it's")]).shell(), "h1 'it'\\''s'");
     }
 
     #[test]
     fn shell_quotes_dollar() {
-        assert_eq!(manual_step(vec![Templ::lit("$HOME")]).shell(), "agent-cli-lab '$HOME'");
+        assert_eq!(manual_step(vec![Templ::lit("$HOME")]).shell(), "h1 '$HOME'");
     }
 
     #[test]
     fn shell_quotes_empty_string() {
-        assert_eq!(manual_step(vec![Templ::lit("")]).shell(), "agent-cli-lab ''");
+        assert_eq!(manual_step(vec![Templ::lit("")]).shell(), "h1 ''");
     }
 
     #[test]
     fn shell_shows_env_part_unexpanded() {
         let step = manual_step(vec![Templ(vec![Part::Env("SECRET".to_owned())])]);
-        assert_eq!(step.shell(), "agent-cli-lab '${env.SECRET}'");
+        assert_eq!(step.shell(), "h1 '${env.SECRET}'");
     }
 
     #[test]

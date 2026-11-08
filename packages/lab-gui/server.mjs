@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Local web GUI for agent-cli-lab. One command: `node server.mjs --open` (or `npm start`).
+// Local web GUI for h1. One command: `node server.mjs --open` (or `npm start`).
 // Binds 127.0.0.1 only. No external requests, no telemetry.
 import { spawn } from "node:child_process";
 import { homedir } from "node:os";
@@ -16,7 +16,7 @@ function parseArgs(argv) {
     else if (a === "--allow-control") opts.control = true;
     else if (a === "--new-key") opts.rotate = true;
     else if (a === "-h" || a === "--help") {
-      console.log("usage: lab-gui [--port N] [--open] [--listen ADDR [--allow-control] [--new-key]]\n  Serves the lab board on http://127.0.0.1:N (default 4317; 0 picks a free port).\n  --listen ADDR  also serve the native phone/desktop clients on ADDR (for example a VPN address);\n                 clients authenticate with a saved pairing key, read-only unless --allow-control.\n                 The connection is plain HTTP: use a private network or an SSH tunnel.\n  Reads labs through the agent-cli-lab binary on PATH (override with AGENT_CLI_LAB_BIN);\n  AGENT_CLI_LAB_DIR selects which labs it sees.");
+      console.log("usage: lab-gui [--port N] [--open] [--listen ADDR [--allow-control] [--new-key]]\n  Serves the lab board on http://127.0.0.1:N (default 4317; 0 picks a free port).\n  --listen ADDR  also serve the native phone/desktop clients on ADDR (for example a VPN address);\n                 clients authenticate with a saved pairing key, read-only unless --allow-control.\n                 The connection is plain HTTP: use a private network or an SSH tunnel.\n  Reads labs through the h1 binary on PATH (override with H1_BIN);\n  H1_DIR selects which labs it sees.");
       process.exit(0);
     } else {
       console.error(`lab-gui: unknown option ${a}`);

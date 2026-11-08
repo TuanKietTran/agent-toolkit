@@ -43,7 +43,7 @@ api "fs" {
 }
 
 harness "planner" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "planner"
   model = "sonnet"
   complexity = "high"
@@ -56,7 +56,7 @@ harness "planner" {
 }
 
 harness "researcher" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "researcher"
   parent = "planner"
   model = "system-one"
@@ -69,7 +69,7 @@ harness "researcher" {
 }
 
 harness "builder" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "builder"
   parent = "planner"
   model = "system-one"
@@ -82,7 +82,7 @@ harness "builder" {
 }
 
 harness "reviewer" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "reviewer"
   parent = "planner"
   model = "system-one"

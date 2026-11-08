@@ -70,7 +70,7 @@ pub fn shell_quote(word: &str) -> String {
 }
 
 pub fn shell_line(step: &OpenStep) -> String {
-    let mut out = String::from("agent-cli-lab");
+    let mut out = String::from("h1");
     for arg in &step.argv { out.push(' '); out.push_str(&shell_quote(&arg.display())); }
     out
 }
@@ -160,11 +160,11 @@ pub fn graph_output(team: &Team, plan: &Plan, resolved: &[Resolved]) -> String {
 }
 
 pub fn parse_list_names(text: &str) -> Result<HashSet<String>, String> {
-    let value: Value = serde_json::from_str(text).map_err(|e| format!("agent-cli-lab list --json: invalid JSON: {e}"))?;
+    let value: Value = serde_json::from_str(text).map_err(|e| format!("h1 list --json: invalid JSON: {e}"))?;
     let items: Vec<Value> = match value {
         Value::Array(a) => a,
-        Value::Object(o) => ["sessions", "entries", "items", "labs"].iter().find_map(|k| o.get(*k).and_then(Value::as_array).cloned()).ok_or_else(|| "agent-cli-lab list --json: unexpected shape".to_string())?,
-        _ => return Err("agent-cli-lab list --json: unexpected shape".to_string()),
+        Value::Object(o) => ["sessions", "entries", "items", "labs"].iter().find_map(|k| o.get(*k).and_then(Value::as_array).cloned()).ok_or_else(|| "h1 list --json: unexpected shape".to_string())?,
+        _ => return Err("h1 list --json: unexpected shape".to_string()),
     };
     Ok(items.iter().filter_map(|it| match it { Value::String(s) => Some(s.clone()), Value::Object(o) => o.get("name").and_then(Value::as_str).map(str::to_string), _ => None }).collect())
 }
@@ -181,7 +181,7 @@ pub struct ProcessRunner { pub bin: PathBuf }
 
 impl ProcessRunner {
     pub fn from_env() -> Self {
-        let bin = std::env::var_os("AGENT_CLI_LAB_BIN").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("agent-cli-lab"));
+        let bin = std::env::var_os("H1_BIN").filter(|v| !v.is_empty()).map(PathBuf::from).unwrap_or_else(|| PathBuf::from("h1"));
         ProcessRunner { bin }
     }
     fn run_capture(&self, args: &[&str]) -> Result<String, String> {
@@ -196,7 +196,7 @@ impl LabRunner for ProcessRunner {
         let file = std::fs::File::create(log_path).map_err(|e| format!("create {}: {e}", log_path.display()))?;
         let file_err = file.try_clone().map_err(|e| format!("clone {}: {e}", log_path.display()))?;
         let status = std::process::Command::new(&self.bin).args(argv).stdout(std::process::Stdio::from(file)).stderr(std::process::Stdio::from(file_err)).status().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
-        if status.success() { Ok(()) } else { Err(format!("agent-cli-lab open failed ({status}); see {}", log_path.display())) }
+        if status.success() { Ok(()) } else { Err(format!("h1 open failed ({status}); see {}", log_path.display())) }
     }
     fn stop(&self, name: &str) -> Result<(), String> { self.run_capture(&["stop", "-n", name]).map(|_| ()) }
     fn console_snapshot(&self) -> Result<String, String> { self.run_capture(&["console", "--snapshot", "--view", "graph", "--width", "140", "--height", "34"]) }
@@ -281,7 +281,7 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
         let snap = snap.trim_end();
         if !snap.is_empty() { output.push_str(snap); output.push('\n'); }
     }
-    output.push_str(&format!("watch it live: agent-cli-lab console\nclose it: graphloop down --run {}\n", req.run));
+    output.push_str(&format!("watch it live: h1 console\nclose it: graphloop down --run {}\n", req.run));
     Ok(UpOutcome { run: req.run.clone(), run_dir, manifest_path, output })
 }
 
@@ -339,8 +339,8 @@ fn now_ms() -> u64 { SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_m
 
 fn graphloop_home() -> PathBuf {
     if let Some(home) = std::env::var_os("GRAPHLOOP_HOME").filter(|v| !v.is_empty()) { return PathBuf::from(home); }
-    if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) { return PathBuf::from(home).join(".agent-cli-lab"); }
-    PathBuf::from(".agent-cli-lab")
+    if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) { return PathBuf::from(home).join(".h1"); }
+    PathBuf::from(".h1")
 }
 
 fn new_run_id(team: &str) -> String {
@@ -383,7 +383,7 @@ fn absolute_string(path: &Path) -> String {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "graphloop", version, about = "Bring a Graphspec (.yah) team up as agent-cli-lab labs")]
+#[command(name = "graphloop", version, about = "Bring a Graphspec (.yah) team up as h1 labs")]
 struct Cli { #[command(subcommand)] command: Cmd }
 
 #[derive(Args, Debug)]
@@ -408,7 +408,7 @@ struct FileArgs {
 enum Cmd {
     /// Validate a .yah file
     Check { #[command(flatten)] args: FileArgs },
-    /// Print the agent-cli-lab open commands for a team
+    /// Print the h1 open commands for a team
     Plan { #[command(flatten)] args: FileArgs, /// Emit one JSON document instead of text
         #[arg(long)] json: bool },
     /// Print the team graph as a tree

@@ -1,12 +1,12 @@
 # graphloop
 
-Graphloop is the first concrete implementation of **prompts -> agents -> loops -> graphs**: a Rust crate that parses Graphspec (`.yah`) files and brings a team up as `agent-cli-lab` labs.
+Graphloop is the first concrete implementation of **prompts -> agents -> loops -> graphs**: a Rust crate that parses Graphspec (`.yah`) files and brings a team up as `h1` labs.
 
 Each layer is owned by an existing piece, not reinvented here:
 
-- **Loop engineering** — `agent-cli-lab`: retries, idle detection, and the per-agent loop live there; graphloop adds no second loop runner.
+- **Loop engineering** — `h1`: retries, idle detection, and the per-agent loop live there; graphloop adds no second loop runner.
 - **Graph engineering** — graphloop itself: `team` blocks, the plan, and the run manifest that the console and lab-gui read.
-- **Harness engineering** — `harness` blocks describe how each agent is opened with `agent-cli-lab open`.
+- **Harness engineering** — `harness` blocks describe how each agent is opened with `h1 open`.
 - **Model choice** — system-one decides which concrete model sits in each node, with the `system_one` fallback when a pick fails.
 
 The language is specified in [docs/graphspec.md](docs/graphspec.md) (the vault plus the appended Schema, Semantics, Error format, Run manifest, Orchestration rules, and Command line sections).
@@ -18,7 +18,7 @@ cargo build
 graphloop check examples/team.yah
 graphloop plan examples/team.yah
 graphloop up examples/demo.yah
-agent-cli-lab console
+h1 console
 graphloop down examples/demo.yah
 ```
 

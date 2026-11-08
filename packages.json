@@ -1,7 +1,7 @@
 {
   "_doc": "Single source of truth for per-package workflows. Every package exposes the same verbs (install, check, test, build); a missing verb means 'nothing to do'. `dependsOn` lists sibling packages whose changes should also trigger this one. `os` is the CI runner.",
   "packages": {
-    "agent-cli-lab": {
+    "h1": {
       "os": "ubuntu-latest",
       "toolchain": "rust",
       "check": "cargo check --locked",
@@ -12,7 +12,7 @@
       "os": "ubuntu-latest",
       "toolchain": "rust",
       "dependsOn": [
-        "agent-cli-lab",
+        "h1",
         "system-one"
       ],
       "check": "cargo check --locked",

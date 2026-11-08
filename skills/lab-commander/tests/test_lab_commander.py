@@ -22,7 +22,7 @@ class LabCommanderTests(unittest.TestCase):
             bindir = root / "bin"
             bindir.mkdir()
             self.executable(
-                bindir / "agent-cli-lab",
+                bindir / "h1",
                 "#!/usr/bin/env python3\nimport json, os, sys\n"
                 "json.dump(sys.argv[1:], open(os.environ['CAPTURE'], 'w'))\n",
             )
@@ -54,7 +54,7 @@ class LabCommanderTests(unittest.TestCase):
             subprocess.run([str(SKILL / "install.sh"), "--agent", "codex", "--home", "/tmp/skill home"], cwd=tmp, env=env, check=True)
             records = [json.loads(line) for line in calls.read_text().splitlines()]
             self.assertEqual(records, [
-                ["cargo", "install", "--locked", "--path", str(SKILL / "../../packages/agent-cli-lab")],
+                ["cargo", "install", "--locked", "--path", str(SKILL / "../../packages/h1")],
                 ["python3", str(SKILL / "../install.py"), "lab-commander", "--agent", "codex", "--home", "/tmp/skill home"],
             ])
 

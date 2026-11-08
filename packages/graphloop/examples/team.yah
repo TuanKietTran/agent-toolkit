@@ -53,7 +53,7 @@ api "fs" {
 }
 
 harness "commander" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "commander"
   model = "system-one"
   tools = ["fs"]
@@ -65,7 +65,7 @@ harness "commander" {
 }
 
 harness "builder" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "builder"
   parent = "commander"
   model = "system-one"

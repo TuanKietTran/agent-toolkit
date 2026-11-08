@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Local web GUI for agent-cli-lab: lab graph, live state, peek, message, stop",
+  "description": "Local web GUI for h1: lab graph, live state, peek, message, stop",
   "license": "MIT",
   "engines": { "node": ">=20" },
   "bin": { "lab-gui": "./server.mjs" },

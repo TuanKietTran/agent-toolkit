@@ -7,7 +7,7 @@ on:
     paths:
       - "packages/lab-gui/**"
       - "packages/lab-gui-desktop/**"
-      - "packages/agent-cli-lab/**"
+      - "packages/h1/**"
       - ".github/workflows/desktop.yml"
   pull_request:
     paths:
@@ -37,8 +37,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Build agent-cli-lab (the apps read labs through it)
-        working-directory: packages/agent-cli-lab
+      - name: Build h1 (the apps read labs through it)
+        working-directory: packages/h1
         run: |
           rustup toolchain install stable --profile minimal --no-self-update
           rustup default stable
@@ -57,7 +57,7 @@ jobs:
       - name: Smoke test the packaged app against throwaway labs
         working-directory: packages/lab-gui-desktop
         env:
-          AGENT_CLI_LAB_BIN: ${{ github.workspace }}/packages/agent-cli-lab/target/debug/agent-cli-lab${{ matrix.platform == 'win32' && '.exe' || '' }}
+          H1_BIN: ${{ github.workspace }}/packages/h1/target/debug/h1${{ matrix.platform == 'win32' && '.exe' || '' }}
         run: node scripts/smoke.mjs "${{ matrix.exe }}"
       - uses: actions/upload-artifact@v4
         with:

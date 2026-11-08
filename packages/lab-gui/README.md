@@ -1,13 +1,13 @@
 # lab-gui
 
-A local web GUI for [`agent-cli-lab`](../agent-cli-lab): the lab graph, live state, a peek at each lab's screen, and message / stop / attach controls. It is the browser counterpart of `agent-cli-lab console`.
+A local web GUI for [`h1`](../h1): the lab graph, live state, a peek at each lab's screen, and message / stop / attach controls. It is the browser counterpart of `h1 console`.
 
 ```sh
 node packages/lab-gui/server.mjs --open      # or: npm start --prefix packages/lab-gui
 lab-gui --port 4400                          # after skills/lab-commander/install.sh (links bin/lab-gui)
 ```
 
-The server prints a link such as `http://127.0.0.1:4317/?key=…` (default port; `--port 0` picks a free one) and `--open` opens it. The key in the link is the launch key: the page swaps it for a cookie and nothing is served without it, so open the printed link rather than the bare address. Needs Node 20 or newer and `agent-cli-lab` on `PATH` (override with `AGENT_CLI_LAB_BIN`). `AGENT_CLI_LAB_DIR` selects which labs it sees, exactly as for the CLI. There are no dependencies to install.
+The server prints a link such as `http://127.0.0.1:4317/?key=…` (default port; `--port 0` picks a free one) and `--open` opens it. The key in the link is the launch key: the page swaps it for a cookie and nothing is served without it, so open the printed link rather than the bare address. Needs Node 20 or newer and `h1` on `PATH` (override with `H1_BIN`). `H1_DIR` selects which labs it sees, exactly as for the CLI. There are no dependencies to install.
 
 Desktop apps for macOS and Windows that wrap this server live in [`../lab-gui-desktop`](../lab-gui-desktop).
 
@@ -56,7 +56,7 @@ This is a separate mode with its own guards: clients send the saved pairing key 
 
 ```
 server.mjs        entry point: arguments, listen on 127.0.0.1, optional browser open
-lib/cli.mjs       the agent-cli-lab wrapper (list / status / screen / send / key / stop / foreground)
+lib/cli.mjs       the h1 wrapper (list / status / screen / send / key / stop / foreground)
 lib/monitor.mjs   builds the snapshot: graph, roles, state, models, activity, token and cost counters
 lib/app.mjs       HTTP: static page, JSON API, server-sent events, request guards
 lib/themes.mjs    reads themes/<name>/colors.toml

@@ -6,7 +6,7 @@ Orchestrating several hosted programs (three to five interactive agent TUIs at o
 
 | # | What was done by hand (PowerShell / Bash) | What it cost | Now |
 |---|---|---|---|
-| 1 | `Start-Process cmd.exe /c "title ... & mode con cols=150 lines=40 & agent-cli-lab host --stdio -C 150 -R 40 -s <absolute socket> -- <program>"` with `-WorkingDirectory`, to open a visible, interactive window | quoting in three layers, an absolute socket path, no cwd or env option | `open -n NAME --cwd DIR --env K=V -- program` |
+| 1 | `Start-Process cmd.exe /c "title ... & mode con cols=150 lines=40 & h1 host --stdio -C 150 -R 40 -s <absolute socket> -- <program>"` with `-WorkingDirectory`, to open a visible, interactive window | quoting in three layers, an absolute socket path, no cwd or env option | `open -n NAME --cwd DIR --env K=V -- program` |
 | 2 | A 15-line `no-quickedit.ps1` (P/Invoke `SetConsoleMode`) run in every new console, after the owner twice froze a hosted session by clicking in its window (QuickEdit starts a selection, "Select" appears in the title bar, and the console stops its process until Esc) | a script per launch, and a freeze when forgotten | `host --stdio` and `attach` turn QuickEdit off (`--quick-edit` keeps it) |
 | 3 | `title` in the launching `cmd`, which the hosted program then overwrote with its own title | windows could not be told apart | `--title` is pinned: title sequences are filtered from the stream shown in a titled window |
 | 4 | `mode con cols=150 lines=40` to size the window | one more shell command in the launcher | `--fit-window` (`open` does it) |
@@ -29,26 +29,26 @@ Orchestrating several hosted programs (three to five interactive agent TUIs at o
 
 ```sh
 # Start a program in its own visible window and name the session
-agent-cli-lab open -n ux --title "ux lab" --cwd D:\work\clone -C 150 -R 40 -- pi --no-session
-agent-cli-lab open -n bg --detached -- python3 -i          # no window; control it with the same commands
+h1 open -n ux --title "ux lab" --cwd D:\work\clone -C 150 -R 40 -- pi --no-session
+h1 open -n bg --detached -- python3 -i          # no window; control it with the same commands
 
-# Everything below accepts -n NAME instead of -s PATH (and $AGENT_CLI_LAB_NAME)
-agent-cli-lab list [--json] [--all]
-agent-cli-lab status -n ux [--json] [--stalled-ms 8000]
-agent-cli-lab send -n ux --paced "a long prompt" -e         # or --file brief.txt
-agent-cli-lab send -n ux -k Down -k Down -k Enter
-agent-cli-lab key  -n ux Down*2 Enter                       # Esc, Tab, Shift-Tab, Ctrl-C, Alt-x, F1-F12, y ...
-agent-cli-lab ask  -n ux --paced --file brief.txt --until "ALL DONE" -t 600 --tail 20
-agent-cli-lab wait -n ux --asking | --for REGEX | --idle-ms N | --gone REGEX  [-t 120] [--tail 12] [-q]
-agent-cli-lab watch -n ux [--only asking,stalled,gone] [--stalled-ms 8000] [--json] [--once]
-agent-cli-lab screen -n ux [--tail N] [--compact] [--json [--spans]]
-agent-cli-lab stop -n ux
-agent-cli-lab host -n NAME [--title T] [--cwd D] [--env K=V] [--stdio [--fit-window] [--quick-edit]] -- program
+# Everything below accepts -n NAME instead of -s PATH (and $H1_NAME)
+h1 list [--json] [--all]
+h1 status -n ux [--json] [--stalled-ms 8000]
+h1 send -n ux --paced "a long prompt" -e         # or --file brief.txt
+h1 send -n ux -k Down -k Down -k Enter
+h1 key  -n ux Down*2 Enter                       # Esc, Tab, Shift-Tab, Ctrl-C, Alt-x, F1-F12, y ...
+h1 ask  -n ux --paced --file brief.txt --until "ALL DONE" -t 600 --tail 20
+h1 wait -n ux --asking | --for REGEX | --idle-ms N | --gone REGEX  [-t 120] [--tail 12] [-q]
+h1 watch -n ux [--only asking,stalled,gone] [--stalled-ms 8000] [--json] [--once]
+h1 screen -n ux [--tail N] [--compact] [--json [--spans]]
+h1 stop -n ux
+h1 host -n NAME [--title T] [--cwd D] [--env K=V] [--stdio [--fit-window] [--quick-edit]] -- program
 ```
 
 ### Targets
 
-`-s PATH` (spec 004), or `-n NAME`, or `$AGENT_CLI_LAB_SOCKET`, or `$AGENT_CLI_LAB_NAME`, or the default socket; `-s` and `-n` together are an error. A name is 1 to 40 of letters, digits, `.`, `_`, `-`, not starting with `.`. `-n NAME` is the socket `<session dir>/NAME.sock`; the session directory is `$AGENT_CLI_LAB_DIR`, else `%LOCALAPPDATA%\agent-cli-lab\sessions` on Windows, else `$XDG_RUNTIME_DIR/agent-cli-lab`, else `$TMPDIR/agent-cli-lab`. A host started with `-n` (or by `open`) writes `NAME.json` there (pid, socket, command, cwd, size, start time) and removes it when it exits. The file is only a list for `list` and the pid `stop` falls back on; **the socket stays the single source of truth**: `list` asks each entry's host and deletes entries that do not answer (`--all` shows them as `dead`).
+`-s PATH` (spec 004), or `-n NAME`, or `$H1_SOCKET`, or `$H1_NAME`, or the default socket; `-s` and `-n` together are an error. A name is 1 to 40 of letters, digits, `.`, `_`, `-`, not starting with `.`. `-n NAME` is the socket `<session dir>/NAME.sock`; the session directory is `$H1_DIR`, else `%LOCALAPPDATA%\h1\sessions` on Windows, else `$XDG_RUNTIME_DIR/h1`, else `$TMPDIR/h1`. A host started with `-n` (or by `open`) writes `NAME.json` there (pid, socket, command, cwd, size, start time) and removes it when it exits. The file is only a list for `list` and the pid `stop` falls back on; **the socket stays the single source of truth**: `list` asks each entry's host and deletes entries that do not answer (`--all` shows them as `dead`).
 
 ### States
 

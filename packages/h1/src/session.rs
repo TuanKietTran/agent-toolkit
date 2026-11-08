@@ -82,10 +82,10 @@ pub fn validate_name(name: &str) -> Result<()> {
     }
 }
 
-/// Directory of the sockets and registry files. `AGENT_CLI_LAB_DIR` overrides it.
+/// Directory of the sockets and registry files. `H1_DIR` overrides it.
 pub fn session_dir() -> PathBuf {
     session_dir_from(
-        env::var_os("AGENT_CLI_LAB_DIR"),
+        env::var_os("H1_DIR"),
         env::var_os("LOCALAPPDATA"),
         env::var_os("XDG_RUNTIME_DIR"),
         env::var_os("TMPDIR"),
@@ -106,14 +106,14 @@ fn session_dir_from(
     if cfg!(windows)
         && let Some(base) = local_app_data.filter(|value| !value.is_empty())
     {
-        return PathBuf::from(base).join("agent-cli-lab").join("sessions");
+        return PathBuf::from(base).join("h1").join("sessions");
     }
     let base = xdg_runtime_dir
         .filter(|value| !value.is_empty())
         .or(tmpdir.filter(|value| !value.is_empty()))
         .map(PathBuf::from)
         .unwrap_or(system_temp);
-    base.join("agent-cli-lab")
+    base.join("h1")
 }
 
 /// The control socket of the session called `name`.
@@ -245,7 +245,7 @@ mod tests {
                 Some("/tmpdir".into()),
                 "/sys".into()
             ),
-            PathBuf::from("/xdg/agent-cli-lab")
+            PathBuf::from("/xdg/h1")
         );
         assert_eq!(
             session_dir_from(
@@ -255,11 +255,11 @@ mod tests {
                 Some("/tmpdir".into()),
                 "/sys".into()
             ),
-            PathBuf::from("/tmpdir/agent-cli-lab")
+            PathBuf::from("/tmpdir/h1")
         );
         assert_eq!(
             session_dir_from(None, None, None, None, "/sys".into()),
-            PathBuf::from("/sys/agent-cli-lab")
+            PathBuf::from("/sys/h1")
         );
         if cfg!(windows) {
             assert_eq!(
@@ -271,7 +271,7 @@ mod tests {
                     "C:\\Temp".into()
                 ),
                 PathBuf::from("C:\\Local")
-                    .join("agent-cli-lab")
+                    .join("h1")
                     .join("sessions")
             );
         }

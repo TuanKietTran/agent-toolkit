@@ -1,3 +1,3 @@
 #!/bin/sh
-# Backward-compatible name for the agent-cli-lab binary.
-exec agent-cli-lab "$@"
+# Backward-compatible name for the h1 binary.
+exec h1 "$@"

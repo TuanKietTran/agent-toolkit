@@ -1,5 +1,5 @@
 [package]
-name = "agent-cli-lab"
+name = "h1"
 version = "0.1.0"
 edition = "2024"
 description = "Run and test interactive CLI programs through a PTY-friendly proxy"

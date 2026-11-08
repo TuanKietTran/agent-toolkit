@@ -193,7 +193,7 @@ pub enum ModelRef {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Harness {
     pub name: String,
-    /// Only `agent-cli-lab` in version 1.
+    /// Only `h1` in version 1.
     pub kind: String,
     pub role: String,
     pub parent: Option<String>,
@@ -207,7 +207,7 @@ pub struct Harness {
     pub line: u32,
 }
 
-/// `open { command, cols, rows, cwd, env, title, detached }`: the `agent-cli-lab open` options.
+/// `open { command, cols, rows, cwd, env, title, detached }`: the `h1 open` options.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Open {
     /// The hosted program and its arguments (everything after `--`). Required, non-empty.

@@ -1,4 +1,4 @@
-//! `agent-cli-lab agents`: find every AI agent instance running on this machine, not only the
+//! `h1 agents`: find every AI agent instance running on this machine, not only the
 //! labs this tool hosts.
 //!
 //! Sources, all read-only:
@@ -60,7 +60,7 @@ pub(crate) struct AgentRec {
     /// Where the record came from: `lab`, `claude-session`, `process`.
     #[serde(default)]
     pub source: Option<String>,
-    /// Hosted by agent-cli-lab (a lab) rather than started by a person.
+    /// Hosted by h1 (a lab) rather than started by a person.
     #[serde(default)]
     pub managed: bool,
     /// The session that ran this scan (an ancestor of this process, or named by $CLAUDE_CODE_SESSION_ID).
@@ -226,7 +226,7 @@ impl Program {
 // home directory; process environments are not readable for other users' processes on macOS, so
 // they are never used as a required signal and their values never appear in output.
 //
-// Users may add or override rules in `~/.agent-cli-lab/harnesses.toml`, a hand-parsed subset:
+// Users may add or override rules in `~/.h1/harnesses.toml`, a hand-parsed subset:
 // one `[[harness]]` table per rule with `kind = "name"`, string arrays `exe_names`,
 // `script_keywords`, `argv_keywords`, `interpreters`, `env_keys`, `exclude_argv`, and
 // `weak_exe = true|false`. A user rule with an existing kind replaces that rule's non-empty
@@ -431,14 +431,14 @@ pub(crate) fn parse_harness_rules(text: &str) -> Vec<HarnessRule> {
     rules
 }
 
-/// Built-in rules merged with the user's `~/.agent-cli-lab/harnesses.toml`, loaded once.
+/// Built-in rules merged with the user's `~/.h1/harnesses.toml`, loaded once.
 pub(crate) fn merged_rules() -> &'static [HarnessRule] {
     static RULES: OnceLock<Vec<HarnessRule>> = OnceLock::new();
     RULES.get_or_init(|| {
         let mut rules = builtin_rules();
         if let Some(home) = env::var_os("HOME") {
             let path = PathBuf::from(home)
-                .join(".agent-cli-lab")
+                .join(".h1")
                 .join("harnesses.toml");
             if let Ok(text) = fs::read_to_string(&path) {
                 for user in parse_harness_rules(&text) {
@@ -480,7 +480,7 @@ pub(crate) fn detect_kind_with(command: &str, rules: &[HarnessRule]) -> Option<S
     let words: Vec<&str> = command.split_whitespace().collect();
     let first_word = words.first()?;
     let first = basename(first_word);
-    if first == "agent-cli-lab" {
+    if first == "h1" {
         return (words.get(1) == Some(&"host")).then(|| "lab".to_string());
     }
     if command.contains("extensionHost") || command.contains("Code Helper") {
@@ -550,7 +550,7 @@ pub(crate) struct HostSpec {
     pub hosted: String,
 }
 
-/// Reads a `agent-cli-lab host ...` command line. Only the part before ` -- ` is the host's own
+/// Reads a `h1 host ...` command line. Only the part before ` -- ` is the host's own
 /// options; after it comes the program being hosted, whose `--model` must not be mistaken for ours.
 pub(crate) fn parse_host(command: &str) -> HostSpec {
     let (head, hosted) = command.split_once(" -- ").unwrap_or((command, ""));
@@ -1249,7 +1249,7 @@ pub(crate) struct AgentsArgs {
     /// Print JSON (`{generatedAt, agents: [...]}`) instead of a table.
     #[arg(long)]
     json: bool,
-    /// Only agents of this kind: any built-in kind, or a custom kind from ~/.agent-cli-lab/harnesses.toml.
+    /// Only agents of this kind: any built-in kind, or a custom kind from ~/.h1/harnesses.toml.
     #[arg(long, value_name = "KIND")]
     kind: Option<String>,
     /// Skip asking each lab's host for its screen: faster, but no working/asking/stalled for labs.
@@ -1258,7 +1258,7 @@ pub(crate) struct AgentsArgs {
     /// Keep running: scan every N seconds (use with --publish, or to refresh the printed table).
     #[arg(long, value_name = "SECONDS")]
     watch: Option<u64>,
-    /// Also write the JSON atomically to PATH (default ~/.agent-cli-lab/agents.json) for the GUI and other readers.
+    /// Also write the JSON atomically to PATH (default ~/.h1/agents.json) for the GUI and other readers.
     #[arg(long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     publish: Option<String>,
     /// Quiet time (ms) after which a lab counts as stalled.
@@ -1267,14 +1267,14 @@ pub(crate) struct AgentsArgs {
 }
 
 pub(crate) fn default_publish_path() -> PathBuf {
-    env::var_os("AGENT_CLI_LAB_AGENTS")
+    env::var_os("H1_AGENTS")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| {
             env::var_os("HOME")
                 .map(PathBuf::from)
                 .unwrap_or_default()
-                .join(".agent-cli-lab")
+                .join(".h1")
                 .join("agents.json")
         })
 }
@@ -1440,13 +1440,13 @@ mod tests {
 76581 10855    05:09:12  11.6 claude
 85026 84716 21:02:44   0.3 claude
 80511 80489    04:50:51   0.0 /Users/me/.local/bin/claude --chrome-native-host
-12412     1    02:49:03   0.2 /x/target/debug/agent-cli-lab host --name cmdr-expense --role commander --parent boss --model muse/muse -C 150 -R 40 --title cmdr-expense (muse) --cwd /w/exp -- pi --provider muse --model muse --thinking off --no-session
+12412     1    02:49:03   0.2 /x/target/debug/h1 host --name cmdr-expense --role commander --parent boss --model muse/muse -C 150 -R 40 --title cmdr-expense (muse) --cwd /w/exp -- pi --provider muse --model muse --thinking off --no-session
 12413 12412    02:49:03   0.0 pi
-65059     1       21:42   0.2 /x/target/debug/agent-cli-lab host --name aws -C 150 -R 40 --title aws lab (claude sonnet, chrome, rc) -- env -u CLAUDE_CODE_SESSION_ID claude --chrome --model claude-sonnet-5-5
+65059     1       21:42   0.2 /x/target/debug/h1 host --name aws -C 150 -R 40 --title aws lab (claude sonnet, chrome, rc) -- env -u CLAUDE_CODE_SESSION_ID claude --chrome --model claude-sonnet-5-5
 65060 65059       21:42   5.0 claude --chrome --remote-control aws-lab --model claude-sonnet-5-5
-25038     1    01:55:23   0.0 agent-cli-lab host -s abac-mgr -C 150 -R 40 -- pi --provider muse --model muse --thinking off --no-session
+25038     1    01:55:23   0.0 h1 host -s abac-mgr -C 150 -R 40 -- pi --provider muse --model muse --thinking off --no-session
 25040 25038    01:55:23   0.0 pi
-66824     1       17:48   0.1 agent-cli-lab host -s /var/T/aws-deploy.sock -r /h/.lab-commander/aws-deploy.jsonl -C 14 -- pi --model opencode-cli/opencode/gpt-6-luna
+66824     1       17:48   0.1 h1 host -s /var/T/aws-deploy.sock -r /h/.lab-commander/aws-deploy.jsonl -C 14 -- pi --model opencode-cli/opencode/gpt-6-luna
 8283      1 17-00:23:55   0.0 /Applications/Zed.app/Contents/MacOS/zed external_agents/registry/npx
 8284   8283 17-00:23:55   9.9 pi
 4001    900       00:10   0.0 /opt/homebrew/bin/opencode run -m opencode/big-pickle hi
@@ -1556,10 +1556,10 @@ mod tests {
             Some(Program::Opencode)
         );
         assert_eq!(
-            program_of("agent-cli-lab host --name x -- pi"),
+            program_of("h1 host --name x -- pi"),
             Some(Program::LabHost)
         );
-        assert_eq!(program_of("agent-cli-lab list"), None);
+        assert_eq!(program_of("h1 list"), None);
         assert_eq!(program_of("python3 pi.py"), None);
         assert_eq!(program_of("/Applications/Zed.app/Contents/MacOS/zed"), None);
     }
@@ -1650,7 +1650,7 @@ mod tests {
     #[test]
     fn host_options_are_read_from_before_the_separator_only() {
         let spec = parse_host(
-            "/x/agent-cli-lab host --name w1 --role worker --parent mgr --model muse/muse -C 150 --title a b -- pi --provider other --model hosted",
+            "/x/h1 host --name w1 --role worker --parent mgr --model muse/muse -C 150 --title a b -- pi --provider other --model hosted",
         );
         assert_eq!(
             (
@@ -1662,9 +1662,9 @@ mod tests {
             (Some("w1"), Some("worker"), Some("mgr"), Some("muse/muse"))
         );
         assert_eq!(spec.hosted_model().as_deref(), Some("other/hosted"));
-        let legacy = parse_host("agent-cli-lab host -s /var/T/aws-deploy.sock -r log.jsonl -- pi");
+        let legacy = parse_host("h1 host -s /var/T/aws-deploy.sock -r log.jsonl -- pi");
         assert_eq!(legacy.lab_name().as_deref(), Some("aws-deploy"));
-        let short = parse_host("agent-cli-lab host -s abac-mgr -C 150 -- pi");
+        let short = parse_host("h1 host -s abac-mgr -C 150 -- pi");
         assert_eq!(short.lab_name().as_deref(), Some("abac-mgr"));
         assert!(
             short
@@ -1789,7 +1789,7 @@ mod tests {
     #[test]
     fn ancestors_walk_up_to_the_session() {
         let procs = parse_ps(
-            "76581 1 01:00:00 1.0 claude\n300 76581 00:10 0.0 zsh\n301 300 00:05 0.0 agent-cli-lab agents\n",
+            "76581 1 01:00:00 1.0 claude\n300 76581 00:10 0.0 zsh\n301 300 00:05 0.0 h1 agents\n",
         );
         assert_eq!(ancestors_of(301, &procs), HashSet::from([300, 76581]));
     }
@@ -1965,9 +1965,9 @@ mod tests {
             "gemini --help",
             "opencode --version",
             "aider --help",
-            "agent-cli-lab agents --json",
-            "agent-cli-lab status",
-            "/x/target/debug/agent-cli-lab screen -n w1",
+            "h1 agents --json",
+            "h1 status",
+            "/x/target/debug/h1 screen -n w1",
             "node /usr/lib/node_modules/typescript/bin/tsserver",
             "node /srv/app/server.js",
             "bun run dev",
@@ -1984,7 +1984,7 @@ mod tests {
     #[test]
     fn fixture_table_builds_every_harness_once_and_dedupes_children() {
         let procs = parse_ps(
-            "9101 1 00:10 0.5 ttys001 claude\n9102 1 00:10 0.5 ttys002 pi\n9103 1 00:10 0.5 ttys003 opencode\n9104 1 00:10 0.5 ttys004 codex\n9105 1 00:10 0.5 ttys005 gemini\n9106 1 00:10 0.5 ttys006 aider\n9107 1 00:10 0.5 ttys007 cursor-agent chat\n9108 1 00:10 0.5 ttys008 /opt/homebrew/bin/goose session\n9109 1 00:10 0.5 ttys009 /opt/homebrew/bin/amp threads\n9110 1 00:10 0.5 ttys010 /opt/homebrew/bin/crush\n9111 1 00:10 0.5 ttys011 qwen\n9112 1 00:10 0.5 ttys012 kimi\n9113 1 00:10 0.5 ttys013 /opt/homebrew/bin/droid\n9114 1 00:10 0.5 ttys014 copilot\n9115 1 00:10 0.5 ttys015 /opt/homebrew/bin/cline\n9116 1 00:10 0.5 ttys016 /opt/homebrew/bin/cn\n9117 1 00:10 0.5 ttys017 /opt/homebrew/bin/cody\n9118 9102 00:09 0.0 ttys002 node /usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js\n9119 9104 00:09 0.0 ttys004 node /usr/lib/node_modules/@openai/codex/cli.js\n9120 9101 00:09 0.0 ?? /Users/me/.local/bin/claude --chrome-native-host\n9121 1 00:09 0.0 ?? node /opt/tools/@modelcontextprotocol/server-filesystem/index.js\n9122 1 00:09 0.0 ?? agent-cli-lab agents --json\n9123 1 00:09 0.0 ttys018 codex --version\n",
+            "9101 1 00:10 0.5 ttys001 claude\n9102 1 00:10 0.5 ttys002 pi\n9103 1 00:10 0.5 ttys003 opencode\n9104 1 00:10 0.5 ttys004 codex\n9105 1 00:10 0.5 ttys005 gemini\n9106 1 00:10 0.5 ttys006 aider\n9107 1 00:10 0.5 ttys007 cursor-agent chat\n9108 1 00:10 0.5 ttys008 /opt/homebrew/bin/goose session\n9109 1 00:10 0.5 ttys009 /opt/homebrew/bin/amp threads\n9110 1 00:10 0.5 ttys010 /opt/homebrew/bin/crush\n9111 1 00:10 0.5 ttys011 qwen\n9112 1 00:10 0.5 ttys012 kimi\n9113 1 00:10 0.5 ttys013 /opt/homebrew/bin/droid\n9114 1 00:10 0.5 ttys014 copilot\n9115 1 00:10 0.5 ttys015 /opt/homebrew/bin/cline\n9116 1 00:10 0.5 ttys016 /opt/homebrew/bin/cn\n9117 1 00:10 0.5 ttys017 /opt/homebrew/bin/cody\n9118 9102 00:09 0.0 ttys002 node /usr/lib/node_modules/@earendil-works/pi-coding-agent/dist/cli.js\n9119 9104 00:09 0.0 ttys004 node /usr/lib/node_modules/@openai/codex/cli.js\n9120 9101 00:09 0.0 ?? /Users/me/.local/bin/claude --chrome-native-host\n9121 1 00:09 0.0 ?? node /opt/tools/@modelcontextprotocol/server-filesystem/index.js\n9122 1 00:09 0.0 ?? h1 agents --json\n9123 1 00:09 0.0 ttys018 codex --version\n",
         );
         let tail = |_: &str| -> Option<Tail> { None };
         let found = build(

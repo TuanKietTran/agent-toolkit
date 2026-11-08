@@ -28,26 +28,26 @@ The GNU toolchain links through `gcc`; here it was the WinLibs MinGW-w64 package
 Docker, nothing installed on the host. The repo is bind-mounted and Cargo's registry and `target/` go on a named volume, so the working tree stays clean and Windows file locking is avoided:
 
 ```sh
-docker volume create agent-cli-lab-cache
-MSYS_NO_PATHCONV=1 docker run -d --name agent-cli-lab-dev \
-  -v "$(pwd -W):/src" -v agent-cli-lab-cache:/cache -w /src \
+docker volume create h1-cache
+MSYS_NO_PATHCONV=1 docker run -d --name h1-dev \
+  -v "$(pwd -W):/src" -v h1-cache:/cache -w /src \
   -e CARGO_HOME=/cache/cargo -e CARGO_TARGET_DIR=/cache/target \
   rust:1-slim sleep infinity                  # `$(pwd -W)` and MSYS_NO_PATHCONV are for Git Bash on Windows
-docker exec agent-cli-lab-dev cargo build --locked   # about 9s cold
-docker exec agent-cli-lab-dev cargo test --locked    # 3 unit + 4 integration tests passed on 2026-10-10; 10 unit + 7 integration tests after spec 006
+docker exec h1-dev cargo build --locked   # about 9s cold
+docker exec h1-dev cargo test --locked    # 3 unit + 4 integration tests passed on 2026-10-10; 10 unit + 7 integration tests after spec 006
 ```
 
-Binary: `target/debug/agent-cli-lab`, or `/cache/target/debug/agent-cli-lab` in the container.
+Binary: `target/debug/h1`, or `/cache/target/debug/h1` in the container.
 
 ## Run
 
 ```sh
-agent-cli-lab run [--record PATH|-r PATH] -- COMMAND [ARG]...        # direct proxy, spec 001
-agent-cli-lab host [--socket PATH|-s PATH] [--record PATH|-r PATH] [--cols N|-C N] [--rows N|-R N] [--stdio] -- COMMAND ...   # spec 004
-agent-cli-lab send [--socket PATH|-s PATH] [--enter|-e] 'text'
-agent-cli-lab screen [--socket PATH|-s PATH]
-agent-cli-lab attach [--socket PATH|-s PATH]   # foreground a hosted PTY; Ctrl-] detaches
-agent-cli-lab socket --path-only   # print the resolved default socket
+h1 run [--record PATH|-r PATH] -- COMMAND [ARG]...        # direct proxy, spec 001
+h1 host [--socket PATH|-s PATH] [--record PATH|-r PATH] [--cols N|-C N] [--rows N|-R N] [--stdio] -- COMMAND ...   # spec 004
+h1 send [--socket PATH|-s PATH] [--enter|-e] 'text'
+h1 screen [--socket PATH|-s PATH]
+h1 attach [--socket PATH|-s PATH]   # foreground a hosted PTY; Ctrl-] detaches
+h1 socket --path-only   # print the resolved default socket
 ```
 
 Acceptance criteria exercised by hand (the integration tests cover the same behavior programmatically):
@@ -81,8 +81,8 @@ On Windows `--socket PATH` is only a name (spec 006): no file is created, so `ls
 - Docker:
 
   ```sh
-  docker rm -f agent-cli-lab-dev
-  docker volume rm agent-cli-lab-cache     # cargo registry cache and target/
+  docker rm -f h1-dev
+  docker volume rm h1-cache     # cargo registry cache and target/
   docker rmi rust:1-slim                   # optional, about 1.3 GB; leave it to keep rebuilds fast
   ```
 

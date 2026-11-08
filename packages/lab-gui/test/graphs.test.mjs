@@ -9,18 +9,18 @@ const node = (name, extra = {}) => ({ name, harness: "pi", role: null, parent: n
 const manifest = (extra = {}) => ({ version: 1, run: "run-1", team: "team.yah", source: null, root: "lead", created_ms: 100, nodes: [node("lead")], edges: [], ...extra });
 const liveLab = (name, extra = {}) => ({ name, role: null, state: "working", ...extra });
 
-test("sessionDir: AGENT_CLI_LAB_DIR wins, then platform rules", () => {
-  assert.equal(sessionDir({ env: { AGENT_CLI_LAB_DIR: "/custom" }, platform: "linux" }), "/custom");
-  assert.equal(sessionDir({ env: { LOCALAPPDATA: "C:/Users/x/AppData/Local" }, platform: "win32" }), join("C:/Users/x/AppData/Local", "agent-cli-lab", "sessions"));
-  assert.equal(sessionDir({ env: { XDG_RUNTIME_DIR: "/run/user/1000" }, platform: "linux" }), join("/run/user/1000", "agent-cli-lab"));
-  assert.equal(sessionDir({ env: { TMPDIR: "/var/tmp" }, platform: "darwin" }), join("/var/tmp", "agent-cli-lab"));
-  assert.equal(sessionDir({ env: {}, platform: "linux" }), join(tmpdir(), "agent-cli-lab"));
+test("sessionDir: H1_DIR wins, then platform rules", () => {
+  assert.equal(sessionDir({ env: { H1_DIR: "/custom" }, platform: "linux" }), "/custom");
+  assert.equal(sessionDir({ env: { LOCALAPPDATA: "C:/Users/x/AppData/Local" }, platform: "win32" }), join("C:/Users/x/AppData/Local", "h1", "sessions"));
+  assert.equal(sessionDir({ env: { XDG_RUNTIME_DIR: "/run/user/1000" }, platform: "linux" }), join("/run/user/1000", "h1"));
+  assert.equal(sessionDir({ env: { TMPDIR: "/var/tmp" }, platform: "darwin" }), join("/var/tmp", "h1"));
+  assert.equal(sessionDir({ env: {}, platform: "linux" }), join(tmpdir(), "h1"));
   // Empty strings do not count as set.
-  assert.equal(sessionDir({ env: { AGENT_CLI_LAB_DIR: "", XDG_RUNTIME_DIR: "/run" }, platform: "linux" }), join("/run", "agent-cli-lab"));
+  assert.equal(sessionDir({ env: { H1_DIR: "", XDG_RUNTIME_DIR: "/run" }, platform: "linux" }), join("/run", "h1"));
 });
 
 test("graphsDir appends graphs/ to the session dir, dir override passes through", () => {
-  assert.equal(graphsDir({ env: { AGENT_CLI_LAB_DIR: "/s" }, platform: "linux" }), join("/s", "graphs"));
+  assert.equal(graphsDir({ env: { H1_DIR: "/s" }, platform: "linux" }), join("/s", "graphs"));
   assert.equal(graphsDir({ dir: "/given" }), "/given");
 });
 

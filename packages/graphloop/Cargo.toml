@@ -2,7 +2,7 @@
 name = "graphloop"
 version = "0.1.0"
 edition = "2024"
-description = "Graphspec (.yah) vault, parser and one-command team launcher for agent-cli-lab"
+description = "Graphspec (.yah) vault, parser and one-command team launcher for h1"
 license = "MIT"
 
 [lib]

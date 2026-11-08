@@ -811,7 +811,7 @@ mod tests {
 
     #[test]
     fn string_splice_via_parser() {
-        let src = "yah 1\nvariable \"root\" {\n  type = \"string\"\n  default = \"/srv\"\n}\nharness \"builder\" {\n  kind = \"agent-cli-lab\"\n  role = \"builder\"\n  open {\n    cwd = \"${var.root}/app\"\n  }\n}\n";
+        let src = "yah 1\nvariable \"root\" {\n  type = \"string\"\n  default = \"/srv\"\n}\nharness \"builder\" {\n  kind = \"h1\"\n  role = \"builder\"\n  open {\n    cwd = \"${var.root}/app\"\n  }\n}\n";
         let parsed = crate::parser::parse("team.yah", src).expect("parses");
         let out = resolve(parsed, &BTreeMap::new()).expect("resolves");
         let builder = find_block(&out, "harness", "builder");

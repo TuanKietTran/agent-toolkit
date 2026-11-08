@@ -5,7 +5,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(mktemp -d "${TMPDIR:-/tmp}/lab-watch-marker.XXXXXX")
 trap 'kill "${watch_pid:-}" 2>/dev/null || true; rm -rf "$root"' EXIT HUP INT TERM
 mkdir -p "$root/bin"
-cat >"$root/bin/agent-cli-lab" <<'FAKE'
+cat >"$root/bin/h1" <<'FAKE'
 #!/bin/sh
 case "$1" in
   open) exit 1 ;;
@@ -24,7 +24,7 @@ case "$1" in
   *) exit 2 ;;
 esac
 FAKE
-chmod +x "$root/bin/agent-cli-lab"
+chmod +x "$root/bin/h1"
 run_watch() {
   scenario=$1; seconds=$2; shift 2
   rm -f "$root/count"

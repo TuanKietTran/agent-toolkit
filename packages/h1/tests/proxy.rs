@@ -50,7 +50,7 @@ mod os {
 }
 
 fn binary() -> &'static str {
-    env!("CARGO_BIN_EXE_agent-cli-lab")
+    env!("CARGO_BIN_EXE_h1")
 }
 
 fn wait_with_timeout(child: &mut Child) -> ExitStatus {

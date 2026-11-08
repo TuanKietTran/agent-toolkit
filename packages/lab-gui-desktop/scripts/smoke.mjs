@@ -1,6 +1,6 @@
 // Starts the desktop app against fake labs held in a throwaway directory and checks it paints them.
 // node scripts/smoke.mjs [path-to-packaged-app-executable]   (default: electron from node_modules)
-// Uses real throwaway labs, so it needs an agent-cli-lab binary; it starts two tiny hosts and stops them.
+// Uses real throwaway labs, so it needs an h1 binary; it starts two tiny hosts and stops them.
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -12,15 +12,15 @@ import { findLabBinary } from "../lib/binary.mjs";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const lab = findLabBinary();
 if (!lab) {
-  console.error("smoke: agent-cli-lab not found");
+  console.error("smoke: h1 not found");
   process.exit(2);
 }
 const exe = process.argv[2] ?? createRequire(import.meta.url)("electron");
 // Unix sockets have a short path limit, so the lab directory sits right under the temp root.
 const labDir = mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "ld-"));
 const png = join(labDir, "smoke.png");
-const env = { ...process.env, AGENT_CLI_LAB_DIR: labDir, AGENT_CLI_LAB_BIN: lab, LAB_GUI_DESKTOP_SMOKE: png };
-delete env.AGENT_CLI_LAB_SELF;
+const env = { ...process.env, H1_DIR: labDir, H1_BIN: lab, LAB_GUI_DESKTOP_SMOKE: png };
+delete env.H1_SELF;
 const idle = process.platform === "win32" ? ["cmd", "/c", "ping -n 600 127.0.0.1 >nul"] : ["sleep", "600"];
 let code = 1;
 try {

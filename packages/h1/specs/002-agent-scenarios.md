@@ -7,7 +7,7 @@ Allow an agent to describe a reproducible interactive exchange without manually 
 ## Proposed interface
 
 ```text
-agent-cli-lab scenario path/to/scenario.json
+h1 scenario path/to/scenario.json
 ```
 
 A scenario contains a command, environment overrides, terminal size, ordered `expect`/`send` steps, per-step timeouts, and an expected exit status.

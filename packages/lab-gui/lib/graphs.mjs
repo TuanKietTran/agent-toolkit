@@ -9,13 +9,13 @@ import { classify, parseModel } from './monitor.mjs';
 
 const nonEmpty = (v) => (typeof v === 'string' && v.length ? v : undefined);
 
-/** agent-cli-lab's session-dir rule, exactly as in session.rs / manifest.rs. */
+/** h1's session-dir rule, exactly as in session.rs / manifest.rs. */
 export function sessionDir({ env = process.env, platform = process.platform } = {}) {
-  const override = nonEmpty(env.AGENT_CLI_LAB_DIR);
+  const override = nonEmpty(env.H1_DIR);
   if (override) return override;
-  if (platform === 'win32' && nonEmpty(env.LOCALAPPDATA)) return join(env.LOCALAPPDATA, 'agent-cli-lab', 'sessions');
+  if (platform === 'win32' && nonEmpty(env.LOCALAPPDATA)) return join(env.LOCALAPPDATA, 'h1', 'sessions');
   const base = nonEmpty(env.XDG_RUNTIME_DIR) || nonEmpty(env.TMPDIR) || tmpdir();
-  return join(base, 'agent-cli-lab');
+  return join(base, 'h1');
 }
 
 export function graphsDir(opts = {}) {

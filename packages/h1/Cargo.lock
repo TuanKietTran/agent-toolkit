@@ -3,25 +3,6 @@
 version = 4
 
 [[package]]
-name = "agent-cli-lab"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "crossterm",
- "interprocess",
- "portable-pty",
- "ratatui",
- "regex",
- "serde",
- "serde_json",
- "tempfile",
- "vt100",
- "widestring",
- "windows-sys",
-]
-
-[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -592,6 +573,25 @@ dependencies = [
  "cfg-if",
  "libc",
  "r-efi 6.0.0",
+]
+
+[[package]]
+name = "h1"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "crossterm",
+ "interprocess",
+ "portable-pty",
+ "ratatui",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "vt100",
+ "widestring",
+ "windows-sys",
 ]
 
 [[package]]

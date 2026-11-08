@@ -523,7 +523,7 @@ fn parse_harness(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnes
         Some(a) => {
             let v = static_string(cx, a, &ctx);
             if let Some(s) = &v
-                && s != "agent-cli-lab" { cx.invalid_value(a.value.span, "kind", format!("Invalid value for attribute \"kind\": expected \"agent-cli-lab\", got \"{s}\"."), &ctx); }
+                && s != "h1" { cx.invalid_value(a.value.span, "kind", format!("Invalid value for attribute \"kind\": expected \"h1\", got \"{s}\"."), &ctx); }
             v
         }
         None => { cx.missing(block.span, "kind", &ctx); None }

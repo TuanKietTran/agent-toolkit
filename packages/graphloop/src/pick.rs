@@ -82,7 +82,7 @@ pub struct Resolved {
 }
 
 impl Resolved {
-    /// `provider_type/id`, what `agent-cli-lab open --model` receives and what
+    /// `provider_type/id`, what `h1 open --model` receives and what
     /// `${harnesses.NAME.model}` expands to.
     pub fn display_model(&self) -> String {
         format!("{}/{}", self.provider_type, self.id)
@@ -472,7 +472,7 @@ mod tests {
     ) -> Harness {
         Harness {
             name: name.to_string(),
-            kind: "agent-cli-lab".to_string(),
+            kind: "h1".to_string(),
             role: role.to_string(),
             parent: None,
             model,

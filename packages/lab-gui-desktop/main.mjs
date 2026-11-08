@@ -1,5 +1,5 @@
 // Electron entry: starts the lab-gui server inside this process (loopback, random port, launch key)
-// and shows it in a window. No Node install is needed on the machine, only the agent-cli-lab binary.
+// and shows it in a window. No Node install is needed on the machine, only the h1 binary.
 import { app, BrowserWindow, Menu, dialog, session, shell } from "electron";
 import { existsSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
@@ -25,11 +25,11 @@ async function start() {
   if (!binary && !smokePath) {
     await dialog.showMessageBox({
       type: "warning",
-      message: "agent-cli-lab was not found",
-      detail: "Lab Deck reads your labs through the agent-cli-lab command. Install it (cargo install --path packages/agent-cli-lab) or set AGENT_CLI_LAB_BIN to its full path, then restart. The window will open, but stay empty until then.",
+      message: "h1 was not found",
+      detail: "Lab Deck reads your labs through the h1 command. Install it (cargo install --path packages/h1) or set H1_BIN to its full path, then restart. The window will open, but stay empty until then.",
     });
   }
-  gui = await startGui({ cli: createCli({ bin: binary ?? "agent-cli-lab", env }) });
+  gui = await startGui({ cli: createCli({ bin: binary ?? "h1", env }) });
 
   // Everything the page loads must come from the local server.
   session.defaultSession.webRequest.onBeforeRequest((details, callback) => callback({ cancel: !isOwnRequest(gui.origin, details.url) }));
@@ -75,7 +75,7 @@ function buildMenu() {
     { role: "editMenu" },
     { label: "View", submenu: [{ role: "reload" }, { role: "forceReload" }, { type: "separator" }, { role: "resetZoom" }, { role: "zoomIn" }, { role: "zoomOut" }, { type: "separator" }, { role: "togglefullscreen" }] },
     { role: "windowMenu" },
-    { label: "Help", submenu: [{ label: "About agent-cli-lab", click: () => shell.openExternal("https://github.com/TuanKietTran/agent-toolkit/tree/main/packages/agent-cli-lab") }] },
+    { label: "Help", submenu: [{ label: "About h1", click: () => shell.openExternal("https://github.com/TuanKietTran/agent-toolkit/tree/main/packages/h1") }] },
   ]);
 }
 

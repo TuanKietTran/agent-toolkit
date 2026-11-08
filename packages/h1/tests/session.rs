@@ -59,7 +59,7 @@ mod os {
 }
 
 fn binary() -> &'static str {
-    env!("CARGO_BIN_EXE_agent-cli-lab")
+    env!("CARGO_BIN_EXE_h1")
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool) {
@@ -87,9 +87,9 @@ impl Lab {
     fn command(&self, args: &[&str]) -> Command {
         let mut command = Command::new(binary());
         command
-            .env("AGENT_CLI_LAB_DIR", self.directory.path())
-            .env_remove("AGENT_CLI_LAB_SOCKET")
-            .env_remove("AGENT_CLI_LAB_NAME");
+            .env("H1_DIR", self.directory.path())
+            .env_remove("H1_SOCKET")
+            .env_remove("H1_NAME");
         command.args(args);
         command
     }

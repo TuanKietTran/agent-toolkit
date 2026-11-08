@@ -1,4 +1,4 @@
-// A fake agent-cli-lab: sessions are plain objects, calls are recorded. No process, no socket.
+// A fake h1: sessions are plain objects, calls are recorded. No process, no socket.
 export function createFakeCli(initial = []) {
   const sessions = new Map(initial.map((s) => [s.name, { bytes_out: 0, state: "working", quiet_ms: 10, uptime_ms: 1000, lines: [], ...s }]));
   const calls = [];

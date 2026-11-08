@@ -1,33 +1,33 @@
 ---
 name: lab-commander
 description: >
-  Command agent labs using agent-cli-lab. Spawn, brief, monitor,
+  Command agent labs using h1. Spawn, brief, monitor,
   checkpoint, resume and close interactive agent sessions.
 ---
 
 # Lab commander
 
-Use `agent-cli-lab` to host and control interactive PTYs. `labctl` is a compatibility shim that execs `agent-cli-lab`. `install.sh` builds and installs the binary, then links this skill and `labctl`, `lab-watch`, and `lab-clean`. Requires the main CLI capability set (`open --help` succeeds).
+Use `h1` to host and control interactive PTYs. `labctl` is a compatibility shim that execs `h1`. `install.sh` builds and installs the binary, then links this skill and `labctl`, `lab-watch`, and `lab-clean`. Requires the main CLI capability set (`open --help` succeeds).
 
 ## CLI and legacy detection
 
-Detect the CLI by capability, not version: `agent-cli-lab open --help >/dev/null 2>&1` succeeds on the main CLI and fails on legacy 0.1.0. Main CLI examples:
+Detect the CLI by capability, not version: `h1 open --help >/dev/null 2>&1` succeeds on the main CLI and fails on legacy 0.1.0. Main CLI examples:
 
 ```sh
-agent-cli-lab open -n worker --role worker --parent mgr1 --cwd /absolute/repo -- pi --provider muse --model muse --thinking off --no-session
-agent-cli-lab send -n worker --file /absolute/brief.md --paced
-agent-cli-lab status -n worker
-agent-cli-lab stop -n worker
+h1 open -n worker --role worker --parent mgr1 --cwd /absolute/repo -- pi --provider muse --model muse --thinking off --no-session
+h1 send -n worker --file /absolute/brief.md --paced
+h1 status -n worker
+h1 stop -n worker
 ```
 
-Consult `agent-cli-lab <command> --help` for `open`, `send`, `status`, `watch`, `key`, `stop`, `list`, and `host` options. **Legacy 0.1.0:** use `host -s <name> -- <cmd>` (background), `send -s`, `screen -s`, `ask -s`, and `ls`; it has no stop command, so send `/quit` + Enter or Ctrl-C twice. Run `install.sh` to upgrade.
+Consult `h1 <command> --help` for `open`, `send`, `status`, `watch`, `key`, `stop`, `list`, and `host` options. **Legacy 0.1.0:** use `host -s <name> -- <cmd>` (background), `send -s`, `screen -s`, `ask -s`, and `ls`; it has no stop command, so send `/quit` + Enter or Ctrl-C twice. Run `install.sh` to upgrade.
 
 ## Models: Muse first, opencode-cli sometimes
 
 **Every manager and every worker is a Muse Pi lab.** Open each one with:
 
 ```sh
-agent-cli-lab open -n NAME --role manager|worker --parent PARENT --cwd /absolute/dir -- \
+h1 open -n NAME --role manager|worker --parent PARENT --cwd /absolute/dir -- \
   pi --provider muse --model muse --thinking off --no-session
 ```
 
@@ -37,9 +37,9 @@ Muse quirks (learned running it as executor and manager): give it **one brief fi
 
 ```sh
 # at launch (the console shows this in the MODEL column)
-agent-cli-lab open -n w4 --role worker --parent mgr1 -- pi --provider opencode-cli --model opencode/gpt-6-luna --no-session
+h1 open -n w4 --role worker --parent mgr1 -- pi --provider opencode-cli --model opencode/gpt-6-luna --no-session
 # inside a running lab
-agent-cli-lab send -n w4 -e '/model opencode-cli/opencode/gpt-6-luna'
+h1 send -n w4 -e '/model opencode-cli/opencode/gpt-6-luna'
 ```
 
 opencode-cli goes through the free Zen quota (`provider.free-limit`, long retry-after once exhausted), so use it for the few steps that need it and go back to Muse. Pass `--model PROVIDER/ID` to `open` only when the program line does not say it (for example a lab switched in-session), so the console labels it correctly.
@@ -60,7 +60,7 @@ lab-team down -p demo                                        # stop advisor, exp
 | `explorer` | Haiku 5.5 | reads, searches, summarises, checks pages | read-only; send it questions that need many file reads |
 | `advisor` | Opus 5.5 | reviews | consult sparingly: it spends the most quota |
 
-All three are Pi labs on the `claude-cli` provider (`pi --provider claude-cli --model <id> --no-session`, started with the `CLAUDE_CODE_*` variables unset so a nested Claude Code does not inherit the parent's session). The explorer and advisor hang under the builder in the graph, the builder under `--parent`; `agent-cli-lab console` colours the three roles and `lab-gui` draws them with their own shapes. Override a model with `LAB_TEAM_BUILDER_MODEL`, `LAB_TEAM_EXPLORER_MODEL`, `LAB_TEAM_ADVISOR_MODEL`.
+All three are Pi labs on the `claude-cli` provider (`pi --provider claude-cli --model <id> --no-session`, started with the `CLAUDE_CODE_*` variables unset so a nested Claude Code does not inherit the parent's session). The explorer and advisor hang under the builder in the graph, the builder under `--parent`; `h1 console` colours the three roles and `lab-gui` draws them with their own shapes. Override a model with `LAB_TEAM_BUILDER_MODEL`, `LAB_TEAM_EXPLORER_MODEL`, `LAB_TEAM_ADVISOR_MODEL`.
 
 **When to consult the advisor** (a handful of times per task, not per step):
 
@@ -76,15 +76,15 @@ Give the advisor the files or diff to read rather than a long retelling, and ask
 
 ## Lab graph and console
 
-`open` records `--role` and `--parent`. A lab opened from inside a manager lab (the hosted program gets `AGENT_CLI_LAB_SELF=<its name>`) is attached to that manager automatically, so managers need no extra flags. Role is inferred when left out: has children, `manager`; has a parent, `worker`.
+`open` records `--role` and `--parent`. A lab opened from inside a manager lab (the hosted program gets `H1_SELF=<its name>`) is attached to that manager automatically, so managers need no extra flags. Role is inferred when left out: has children, `manager`; has a parent, `worker`.
 
 ```sh
-agent-cli-lab console                    # opens a new terminal window (Ghostty on macOS; AGENT_CLI_LAB_TERMINAL / --terminal to change)
-agent-cli-lab console --here             # run in the current terminal instead
-agent-cli-lab console --snapshot --view graph   # one text frame, no terminal needed (for you, the commander, to read)
+h1 console                    # opens a new terminal window (Ghostty on macOS; H1_TERMINAL / --terminal to change)
+h1 console --here             # run in the current terminal instead
+h1 console --snapshot --view graph   # one text frame, no terminal needed (for you, the commander, to read)
 ```
 
-The console is a k9s-style TUI: `:labs`, `:graph`, `:models` (or `1 2 3` / Tab), `/` filter, `enter` peek the live screen, `d` describe, `a` attach in a new window, `m` message a lab, `ctrl-d` stop (asks first), `o` sort, `?` help. Open it for the user at the start of a run (`agent-cli-lab console`) and use `--snapshot` to read the same state yourself.
+The console is a k9s-style TUI: `:labs`, `:graph`, `:models` (or `1 2 3` / Tab), `/` filter, `enter` peek the live screen, `d` describe, `a` attach in a new window, `m` message a lab, `ctrl-d` stop (asks first), `o` sort, `?` help. Open it for the user at the start of a run (`h1 console`) and use `--snapshot` to read the same state yourself.
 
 ## Session workflow
 
@@ -108,7 +108,7 @@ Keep `repo/`, `wt/<lab>/`, `notes/`, `status/`, `briefs/`, and `logs/` separate.
 
 ## Clean up resources
 
-Stop with `stop`, or `/quit` + Enter / Ctrl-C twice on legacy. Verify the `agent-cli-lab` host exited; after about five seconds, identify any orphan with `pgrep -f "agent-cli-lab host .*(-s|-n|--name) <name>( |$)"` and kill only that PID. Confirm with `list` (legacy: `ls`); remove a socket only when no host listens, then confirm again. `lab-clean <name> --workspace W [--cwd DIR|--session-dir DIR] [--into BRANCH]` performs safe workspace cleanup; `--session-dir DIR` selects the Pi session directory directly and takes precedence over `--cwd`; `--all` is scoped to names represented by `status/<name>.log` or `logs/<name>.*` in W.
+Stop with `stop`, or `/quit` + Enter / Ctrl-C twice on legacy. Verify the `h1` host exited; after about five seconds, identify any orphan with `pgrep -f "h1 host .*(-s|-n|--name) <name>( |$)"` and kill only that PID. Confirm with `list` (legacy: `ls`); remove a socket only when no host listens, then confirm again. `lab-clean <name> --workspace W [--cwd DIR|--session-dir DIR] [--into BRANCH]` performs safe workspace cleanup; `--session-dir DIR` selects the Pi session directory directly and takes precedence over `--cwd`; `--all` is scoped to names represented by `status/<name>.log` or `logs/<name>.*` in W.
 
 Actively delete temp resources: clean each one immediately when it is no longer needed, not at the end of the run, and sweep for leftovers (temp files, scripts, build output, handoffs, sockets, worktrees) every time a lab finishes. `lab-clean` removes the named `<name>.host.log` by default; it retains `<name>.jsonl` unless `--purge-logs` is supplied. Keep `notes/` and reports. Use this timing guide:
 

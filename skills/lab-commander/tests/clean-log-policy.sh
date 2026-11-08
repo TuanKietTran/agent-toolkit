@@ -5,8 +5,8 @@ here=$(cd "$(dirname "$0")" && pwd)
 root=$(mktemp -d "${TMPDIR:-/tmp}/lab-clean-logs.XXXXXX")
 trap 'rm -rf "$root"' EXIT HUP INT TERM
 mkdir -p "$root/bin" "$root/workspace/logs"
-printf '#!/bin/sh\ncase "$1" in open) exit 1;; send|ls) exit 0;; *) exit 0;; esac\n' > "$root/bin/agent-cli-lab"
-chmod +x "$root/bin/agent-cli-lab"
+printf '#!/bin/sh\ncase "$1" in open) exit 1;; send|ls) exit 0;; *) exit 0;; esac\n' > "$root/bin/h1"
+chmod +x "$root/bin/h1"
 printf host > "$root/workspace/logs/worker.host.log"
 printf recording > "$root/workspace/logs/worker.jsonl"
 PATH="$root/bin:$PATH" "$here/../bin/lab-clean" worker --workspace "$root/workspace" >/dev/null

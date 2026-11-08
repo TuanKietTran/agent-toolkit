@@ -14,7 +14,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 workspace=$(cd "$workspace" 2>/dev/null && pwd) || { echo "workspace not found" >&2; exit 1; }
-main_cli=0; agent-cli-lab open --help >/dev/null 2>&1 && main_cli=1
+main_cli=0; h1 open --help >/dev/null 2>&1 && main_cli=1
 if [ "$selection" = --all ]; then
   names=$(find "$workspace/status" "$workspace/logs" -maxdepth 1 -type f \( -name '*.log' -o -name '*.jsonl' \) 2>/dev/null | awk -F/ '{n=$NF; sub(/\.host\.log$/, "", n); sub(/\.log$/, "", n); sub(/\.jsonl$/, "", n); if(n ~ /^[A-Za-z0-9_.-]+$/) print n}' | sort -u)
 else names=$selection
@@ -22,14 +22,14 @@ fi
 for name in $names; do
   case $name in ''|*[!A-Za-z0-9_.-]*) echo "invalid lab name: $name" >&2; exit 2;; esac
   if [ "$main_cli" -eq 1 ]; then
-    agent-cli-lab stop -n "$name" >/dev/null 2>&1 || true
+    h1 stop -n "$name" >/dev/null 2>&1 || true
   else
-    agent-cli-lab send -s "$name" -e '/quit' >/dev/null 2>&1 || agent-cli-lab send -s "$name" -c >/dev/null 2>&1 || true
-    agent-cli-lab send -s "$name" -c >/dev/null 2>&1 || true
+    h1 send -s "$name" -e '/quit' >/dev/null 2>&1 || h1 send -s "$name" -c >/dev/null 2>&1 || true
+    h1 send -s "$name" -c >/dev/null 2>&1 || true
   fi
   sleep 5
-  if [ "$main_cli" -eq 1 ]; then agent-cli-lab list >/dev/null 2>&1 || true; else agent-cli-lab ls >/dev/null 2>&1 || true; fi
-  pids=$(pgrep -f "agent-cli-lab host .*(-s|-n|--name) $name( |$)" || true)
+  if [ "$main_cli" -eq 1 ]; then h1 list >/dev/null 2>&1 || true; else h1 ls >/dev/null 2>&1 || true; fi
+  pids=$(pgrep -f "h1 host .*(-s|-n|--name) $name( |$)" || true)
   if [ -n "$pids" ]; then
     for pid in $pids; do case $pid in $$) continue;; esac; kill "$pid" 2>/dev/null || true; done
     echo "terminated identified orphan for $name"
@@ -63,4 +63,4 @@ for name in $names; do
     done
   fi
 done
-if [ "$main_cli" -eq 1 ]; then agent-cli-lab list; else agent-cli-lab ls; fi
+if [ "$main_cli" -eq 1 ]; then h1 list; else h1 ls; fi

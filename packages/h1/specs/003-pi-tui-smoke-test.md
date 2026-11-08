@@ -2,7 +2,7 @@
 
 ## Result
 
-**Passed on Pi 0.87.1.** `agent-cli-lab` launched the real Pi interactive TUI in a 120×36 PTY, submitted two prompts, captured both responses, processed `/exit`, restored terminal modes, and propagated exit code 0.
+**Passed on Pi 0.87.1.** `h1` launched the real Pi interactive TUI in a 120×36 PTY, submitted two prompts, captured both responses, processed `/exit`, restored terminal modes, and propagated exit code 0.
 
 Observed conversation:
 
@@ -26,7 +26,7 @@ The capture contains Pi's startup screen, input editor, animated `Working` frame
   sleep 20
   printf '/exit\r'
   sleep 2
-) | target/debug/agent-cli-lab run \
+) | target/debug/h1 run \
       --cols 120 --rows 36 \
       --record artifacts/pi-smoke-cr.jsonl \
       -- pi --no-session --no-tools --no-skills --no-extensions --offline

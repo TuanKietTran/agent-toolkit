@@ -1,7 +1,7 @@
 //! Integration tests for the graphloop CLI cores (OWNER: gl-cli).
 //!
 //! The cores are driven with a hand-built `Plan`/`Resolved` and a fake
-//! `agent-cli-lab`: a small sh script that logs its argv, answers `list --json`
+//! `h1`: a small sh script that logs its argv, answers `list --json`
 //! from a fixture, and can be told to fail one open/stop by session name.
 
 use std::collections::HashSet;
@@ -52,13 +52,13 @@ fn sample_manifest(run: &str, created_ms: u64, trace_dir: Option<String>) -> Man
 const RUN: &str = "default-1700000000-ab12";
 const NOW_MS: u64 = 1_700_000_000_000;
 
-/// Write the fake `agent-cli-lab` script into `dir`; returns (bin, argv log).
+/// Write the fake `h1` script into `dir`; returns (bin, argv log).
 fn make_fake(dir: &Path, list_json: &str, fail_open: &str, fail_stop: &str) -> (PathBuf, PathBuf) {
     use std::os::unix::fs::PermissionsExt;
     let fixture = dir.join("list.json");
     std::fs::write(&fixture, list_json).unwrap();
     let log = dir.join("calls.log");
-    let bin = dir.join("agent-cli-lab");
+    let bin = dir.join("h1");
     let script = format!("#!/bin/sh\necho \"$@\" >> \"{log}\"\ncase \"$1\" in\nlist) cat \"{fixture}\" ;;\nconsole) echo \"FAKE GRAPH SNAPSHOT\" ;;\nopen) for a in \"$@\"; do if [ \"$a\" = \"{fail_open}\" ]; then echo \"fake open failure\" >&2; exit 3; fi; done; exit 0 ;;\nstop) for a in \"$@\"; do if [ \"$a\" = \"{fail_stop}\" ]; then exit 4; fi; done; exit 0 ;;\nesac\nexit 0\n", log = log.display(), fixture = fixture.display());
     std::fs::write(&bin, script).unwrap();
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -86,8 +86,8 @@ fn plan_text_comment_and_shell_per_step() {
     let out = plan_output(&sample_plan(), &sample_resolved());
     assert!(out.contains("# harness commander: anthropic/claude-sonnet-5-5 (via system-one R3: strict constraints)"), "{out}");
     assert!(out.contains("# harness builder: anthropic/claude-sonnet-5-5 (via fallback: system-one unavailable)"), "{out}");
-    assert!(out.contains("agent-cli-lab open -n commander --role commander --model anthropic/claude-sonnet-5-5 -- pi --no-session"), "{out}");
-    assert!(out.contains("agent-cli-lab open -n builder --role builder --parent commander --model anthropic/claude-sonnet-5-5 -- pi API_KEY=${env.GL_TEST_KEY}"), "{out}");
+    assert!(out.contains("h1 open -n commander --role commander --model anthropic/claude-sonnet-5-5 -- pi --no-session"), "{out}");
+    assert!(out.contains("h1 open -n builder --role builder --parent commander --model anthropic/claude-sonnet-5-5 -- pi API_KEY=${env.GL_TEST_KEY}"), "{out}");
 }
 
 #[test]
@@ -154,8 +154,8 @@ fn shell_line_quotes_args_with_spaces() {
 fn build_nodes_uses_resolved_and_tools() {
     use graphloop::spec::{Harness, ModelRef, Open};
     let harnesses = vec![
-        Harness { name: "commander".into(), kind: "agent-cli-lab".into(), role: "commander".into(), parent: None, model: ModelRef::SystemOne, tools: vec!["fs".into()], complexity: None, open: Open::default(), line: 1 },
-        Harness { name: "builder".into(), kind: "agent-cli-lab".into(), role: "builder".into(), parent: Some("commander".into()), model: ModelRef::SystemOne, tools: vec![], complexity: None, open: Open::default(), line: 9 },
+        Harness { name: "commander".into(), kind: "h1".into(), role: "commander".into(), parent: None, model: ModelRef::SystemOne, tools: vec!["fs".into()], complexity: None, open: Open::default(), line: 1 },
+        Harness { name: "builder".into(), kind: "h1".into(), role: "builder".into(), parent: Some("commander".into()), model: ModelRef::SystemOne, tools: vec![], complexity: None, open: Open::default(), line: 9 },
     ];
     let nodes = build_nodes(&harnesses, &sample_plan(), &sample_resolved()).unwrap();
     assert_eq!(nodes.len(), 2);
@@ -224,7 +224,7 @@ fn up_opens_in_order_writes_manifest_and_reports() {
     assert!(!out.run_dir.join("open-commander.log").exists(), "open log deleted on success");
     assert!(out.output.contains(&format!("up: {RUN} (2 labs)")), "{}", out.output);
     assert!(out.output.contains("FAKE GRAPH SNAPSHOT"), "{}", out.output);
-    assert!(out.output.contains("agent-cli-lab console"), "{}", out.output);
+    assert!(out.output.contains("h1 console"), "{}", out.output);
     assert!(out.output.contains(&format!("graphloop down --run {RUN}")), "{}", out.output);
 }
 

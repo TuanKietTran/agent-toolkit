@@ -25,7 +25,7 @@ system_one {
 }
 
 harness "alpha" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "demo"
   model = "system-one"
   open {
@@ -35,7 +35,7 @@ harness "alpha" {
 }
 
 harness "beta" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "demo"
   parent = "alpha"
   model = "system-one"
@@ -46,7 +46,7 @@ harness "beta" {
 }
 
 harness "gamma" {
-  kind = "agent-cli-lab"
+  kind = "h1"
   role = "demo"
   parent = "alpha"
   model = "system-one"

@@ -94,7 +94,7 @@ fn pipe_name(path: &str, sid: &str) -> String {
         hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
-    format!("agent-cli-lab-{hash:016x}")
+    format!("h1-{hash:016x}")
 }
 
 #[cfg(windows)]
@@ -178,8 +178,8 @@ mod tests {
     fn pipe_name_is_stable_and_case_insensitive() {
         let name = pipe_name(r"C:\Temp\Pi.sock", "S-1-5-21-1");
         assert_eq!(name, pipe_name(r"c:\temp\pi.sock", "S-1-5-21-1"));
-        assert!(name.starts_with("agent-cli-lab-"));
-        assert_eq!(name.len(), "agent-cli-lab-".len() + 16);
+        assert!(name.starts_with("h1-"));
+        assert_eq!(name.len(), "h1-".len() + 16);
     }
 
     #[test]

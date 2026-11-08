@@ -1,16 +1,16 @@
 #!/bin/sh
-# lab-team: open or close the three-role team as agent-cli-lab labs.
+# lab-team: open or close the three-role team as h1 labs.
 #   builder  (Sonnet 5.5)  does the work
 #   explorer (Haiku 5.5)   reads and searches, read-only
 #   advisor  (Opus 5.5)    reviews plans and results, consulted sparingly
 # All three are Pi labs on the claude-cli provider. The builder hangs under --parent
 # (default: the lab this runs in, or none); explorer and advisor hang under the builder,
-# so `agent-cli-lab console` and the lab GUI draw lead -> helpers.
+# so `h1 console` and the lab GUI draw lead -> helpers.
 #
 #   lab-team up   -p PREFIX [--parent NAME] [--cwd DIR] [--only builder,explorer,advisor]
 #   lab-team down -p PREFIX [--only ...]
 #   lab-team plan -p PREFIX [...]      print the open commands without running them
-# LAB_TEAM_OPEN_ARGS adds arguments to every `agent-cli-lab open`, for example --detached
+# LAB_TEAM_OPEN_ARGS adds arguments to every `h1 open`, for example --detached
 # to host the labs without opening terminal windows.
 set -eu
 
@@ -19,7 +19,7 @@ usage() {
   exit "${1:-2}"
 }
 
-LAB_BIN=${AGENT_CLI_LAB_BIN:-agent-cli-lab}
+LAB_BIN=${H1_BIN:-h1}
 BUILDER_MODEL=${LAB_TEAM_BUILDER_MODEL:-claude-sonnet-5-5}
 EXPLORER_MODEL=${LAB_TEAM_EXPLORER_MODEL:-claude-haiku-5-5}
 ADVISOR_MODEL=${LAB_TEAM_ADVISOR_MODEL:-claude-opus-5-5}
@@ -30,7 +30,7 @@ shift
 case "$action" in up | down | plan) ;; -h | --help) usage 0 ;; *) usage ;; esac
 
 prefix=
-parent=${AGENT_CLI_LAB_SELF:-}
+parent=${H1_SELF:-}
 cwd=$(pwd)
 only=builder,explorer,advisor
 while [ $# -gt 0 ]; do
