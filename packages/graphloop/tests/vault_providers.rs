@@ -4,6 +4,8 @@
 //! received (logged one arg per line), that failures never leak a value, and that a missing
 //! program yields the install hint.
 
+#![cfg(unix)]
+
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

@@ -3,9 +3,12 @@
 //! children), and scrubbing of overlapping secrets (longest first).
 
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::process::{Command, Stdio};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
 use graphloop::spec::Vault;
@@ -21,12 +24,14 @@ fn fetch(v: Vault, key: &str) -> Result<String, String> {
     Vaults::new(&vs, PathBuf::from("."), &env).get("v", key)
 }
 
+#[cfg(unix)]
 fn fetch_timeout(v: Vault, key: &str, timeout: Duration) -> Result<String, String> {
     let vs = [v];
     let env = |_: &str| -> Option<String> { None };
     Vaults::new(&vs, PathBuf::from("."), &env).with_timeout(timeout).get("v", key)
 }
 
+#[cfg(unix)]
 fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
     let p = dir.join(name);
     fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
@@ -66,6 +71,7 @@ fn dotenv_file_with_bom_and_crlf_reads_through_the_vault() {
     assert_eq!(fetch(v, "FLEET_TOKEN").unwrap(), "s3cret");
 }
 
+#[cfg(unix)]
 #[test]
 fn command_non_utf8_output_is_an_error() {
     let dir = tempfile::tempdir().unwrap();
@@ -78,6 +84,7 @@ fn command_non_utf8_output_is_an_error() {
     assert!(err.contains("not UTF-8"), "{err}");
 }
 
+#[cfg(unix)]
 #[test]
 fn command_huge_output_is_rejected() {
     let mut v = vault("command");
@@ -86,6 +93,7 @@ fn command_huge_output_is_rejected() {
     assert!(err.contains("more than") && err.contains("bytes of output"), "{err}");
 }
 
+#[cfg(unix)]
 #[test]
 fn provider_huge_output_is_rejected() {
     let dir = tempfile::tempdir().unwrap();
@@ -96,6 +104,7 @@ fn provider_huge_output_is_rejected() {
     assert!(err.contains("more than") && err.contains("bytes of output"), "{err}");
 }
 
+#[cfg(unix)]
 #[test]
 fn timeout_kills_the_whole_process_group() {
     let dir = tempfile::tempdir().unwrap();

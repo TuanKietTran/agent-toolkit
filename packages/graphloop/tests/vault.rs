@@ -6,6 +6,7 @@
 //! (manifest, run directory) contains a secret value.
 
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
@@ -160,6 +161,7 @@ fn vault_block_needs_a_label_and_a_provider() {
 
 // ---- end to end against a fake h1 -------------------------------------------------------------
 
+#[cfg(unix)]
 fn fake_h1(dir: &Path) -> (PathBuf, PathBuf, PathBuf) {
     let argv_log = dir.join("argv.log");
     let env_log = dir.join("env.log");
@@ -190,10 +192,12 @@ fn vault_plan() -> Plan {
     Plan { team: "t".into(), root: "alpha".into(), steps: vec![step], edges: Vec::<Edge>::new() }
 }
 
+#[cfg(unix)]
 fn nodes() -> Vec<Node> {
     vec![Node { name: "alpha".into(), harness: "alpha".into(), role: "worker".into(), parent: None, requested_model: "haiku".into(), model: "anthropic/claude-haiku-5-5".into(), model_label: "haiku".into(), pick: PickInfo { via: "pinned".into(), rule: None, reason: "pinned".into(), degraded_level: 0 }, tools: vec![], vault_env: vec![] }]
 }
 
+#[cfg(unix)]
 fn all_files_text(dir: &Path) -> String {
     let mut out = String::new();
     let mut stack = vec![dir.to_path_buf()];
@@ -206,6 +210,7 @@ fn all_files_text(dir: &Path) -> String {
     out
 }
 
+#[cfg(unix)]
 #[test]
 fn up_passes_the_secret_in_the_environment_and_never_on_a_command_line() {
     let dir = tempfile::tempdir().unwrap();
@@ -228,6 +233,7 @@ fn up_passes_the_secret_in_the_environment_and_never_on_a_command_line() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn up_opens_nothing_when_a_secret_cannot_be_fetched() {
     let dir = tempfile::tempdir().unwrap();
