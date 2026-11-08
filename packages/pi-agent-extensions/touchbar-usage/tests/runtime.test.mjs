@@ -31,7 +31,10 @@ test("atomic writes use private same-directory files and remove failed temporari
   const target = path.join(dir, "state.json");
   writeAtomic(target, "ok");
   assert.equal(fs.readFileSync(target, "utf8"), "ok");
-  assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  // Windows does not expose POSIX file modes through fs.stat; check the private mode where supported.
+  if (process.platform !== "win32") {
+    assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  }
   const failed = {
     mkdirSync: fs.mkdirSync.bind(fs), writeFileSync: fs.writeFileSync.bind(fs),
     renameSync() { throw new Error("rename fixture"); }, unlinkSync: fs.unlinkSync.bind(fs),

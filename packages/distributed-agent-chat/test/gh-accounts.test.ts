@@ -37,7 +37,10 @@ test('gh-accounts: list, switch, map, run-and-restore, remove; never prints a to
   assert.match(go('map', t.repo, 'alice').stdout, /alice/);          // alice is not active: falls back to the plain no-reply email
   assert.equal(execFileSync('git', ['-C', t.repo, 'config', 'user.name'], { encoding: 'utf8' }).trim(), 'alice');
   assert.equal(execFileSync('git', ['-C', t.repo, 'config', 'user.email'], { encoding: 'utf8' }).trim(), 'alice@users.noreply.github.com');
-  assert.equal(statSync(t.env.GH_ACCOUNTS_CONFIG).mode & 0o777, 0o600);
+  // Windows does not expose POSIX file modes through fs.stat; check the private mode where supported.
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(t.env.GH_ACCOUNTS_CONFIG).mode & 0o777, 0o600);
+  }
   assert.match(go('current', t.repo).stdout, /MISMATCH/);
   const r = go('run', '--dir', t.repo, '--', process.execPath, '-e', `console.log('ran')`);
   assert.equal(r.status, 0); assert.match(r.stdout, /ran/); assert.equal(t.active(), 'bob', 'previous account restored after run');
