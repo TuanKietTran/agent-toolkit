@@ -107,9 +107,8 @@ fn timeout_kills_the_whole_process_group() {
     let mut pid = None;
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
-        if let Ok(text) = fs::read_to_string(&pid_file) {
-            if let Ok(n) = text.trim().parse::<u32>() { pid = Some(n); break; }
-        }
+        if let Ok(text) = fs::read_to_string(&pid_file)
+            && let Ok(n) = text.trim().parse::<u32>() { pid = Some(n); break; }
         std::thread::sleep(Duration::from_millis(50));
     }
     let pid = pid.expect("the child shell wrote its background pid");
