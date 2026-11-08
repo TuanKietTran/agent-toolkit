@@ -298,4 +298,32 @@ mod tests {
     fn canonical_fixture_round_trips() {
         round_trip(include_str!("../tests/fixtures/canonical.yah"));
     }
+
+    #[test]
+    fn every_yah_file_round_trips() {
+        // Named exclusion only: a parse-error fixture by design (unclosed interpolation).
+        const EXCLUDED: &[&str] = &["A-39-unclosed-interpolation.yah"];
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let mut dirs = vec![manifest.join("examples"), manifest.join("tests/fixtures")];
+        if let Some(lab) = manifest.ancestors().nth(4) { let scn = lab.join("notes/scn"); if scn.is_dir() { dirs.push(scn); } }
+        let (mut checked, mut excluded) = (0usize, 0usize);
+        for dir in &dirs {
+            let mut paths: Vec<std::path::PathBuf> = std::fs::read_dir(dir).unwrap().filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "yah")).collect();
+            paths.sort();
+            for path in paths {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if EXCLUDED.contains(&name.as_str()) { excluded += 1; continue; }
+                let src = std::fs::read_to_string(&path).unwrap();
+                let first = parse(&name, &src).unwrap_or_else(|d| panic!("{name}: {}", d.render(&src)));
+                let printed = print(&first);
+                let second = parse(&name, &printed).unwrap_or_else(|d| panic!("{name} reparse: {}", d.render(&printed)));
+                let (mut a, mut b) = (first, second); strip(&mut a); strip(&mut b);
+                assert_eq!(a, b, "{name}: AST differs after print");
+                assert_eq!(print(&b), printed, "{name}: print is not idempotent");
+                checked += 1;
+            }
+        }
+        assert!(checked >= 44, "expected at least 44 .yah files, checked {checked}");
+        assert_eq!(excluded, 1, "expected exactly the 1 named exclusion");
+    }
 }
