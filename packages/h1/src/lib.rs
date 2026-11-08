@@ -476,7 +476,11 @@ struct StopArgs {
 }
 
 #[derive(Debug, Args)]
-struct DoctorArgs {}
+struct DoctorArgs {
+    /// Also print the exact shell command that would fix each fixable finding (print only, never executed).
+    #[arg(long)]
+    fix_hints: bool,
+}
 
 #[derive(Debug, Args)]
 struct ListArgs {
@@ -560,7 +564,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
         },
         Commands::Stop(args) => commands::stop(args),
         Commands::Console(args) => console::run(args),
-        Commands::Doctor(_args) => doctor::run(),
+        Commands::Doctor(args) => doctor::run(args.fix_hints),
         Commands::Agents(args) => agents::run(args),
         Commands::Key(args) => commands::key(args),
         Commands::Wait(args) => match args.lab_name {
