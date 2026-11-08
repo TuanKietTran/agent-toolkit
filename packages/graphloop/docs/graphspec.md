@@ -360,7 +360,9 @@ A `.yah` file never contains a secret value. It contains a `vault` block that sa
 
 ## The `vault` block
 
-```yah
+```yah check
+yah 1
+
 vault "local" {
   provider = "dotenv"
   path     = "fleet.env"
@@ -425,7 +427,9 @@ The first three are the adapters in this build. The last four are being added be
 
 Because a block ignores keys the selected provider does not use, the provider itself can come from a variable:
 
-```yah
+```yah check
+yah 1
+
 variable "secrets" {
   type    = "string"
   default = "dotenv"
@@ -461,7 +465,7 @@ This is the pattern `fleet.yah` uses: the graph, the harness `env` maps and the 
 
 ### 1. A dotenv vault for local development
 
-```yah
+```yah check
 yah 1
 
 vault "local" {
@@ -475,7 +479,7 @@ vault "local" {
 harness "worker" {
   kind  = "h1"
   role  = "worker"
-  model = "haiku"
+  model = "system-one"
   open {
     command = ["cat"]
     env = {
