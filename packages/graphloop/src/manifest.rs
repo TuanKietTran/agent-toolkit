@@ -56,6 +56,9 @@ pub struct Node {
     pub pick: PickInfo,
     #[serde(default)]
     pub tools: Vec<String>,
+    /// Env NAMES whose values came from a vault for this node (names only, never values).
+    #[serde(default)]
+    pub vault_env: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

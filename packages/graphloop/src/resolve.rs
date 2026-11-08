@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use crate::ast::{self, Assign, Block, Expr, ExprKind, Span, Stmt, StrPart};
 use crate::diag::{suggest, Diagnostic, Diagnostics};
 
-const VALID_FORMS: &str = "Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY> and harnesses.<label>.model.";
+const VALID_FORMS: &str = "Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY>, harnesses.<label>.model and harnesses.<label>.model_id.";
 
 fn make_diag(file: &str, span: Span, summary: &str, detail: String, context: Option<&str>, hint: Option<String>) -> Diagnostic {
     let mut d = Diagnostic::error(file, span, summary, detail);
@@ -165,7 +165,7 @@ impl Walker<'_> {
             ),
             Some("env") if path.len() == 2 => Class::LateBound,
             Some("env") => unknown(format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"), None),
-            Some("harnesses") if path.len() == 3 && path[2] == "model" => {
+            Some("harnesses") if path.len() == 3 && (path[2] == "model" || path[2] == "model_id") => {
                 if self.harnesses.iter().any(|h| h == &path[1]) {
                     Class::LateBound
                 } else {

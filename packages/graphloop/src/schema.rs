@@ -105,12 +105,12 @@ fn static_string(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<Strin
 fn interp_part(cx: &mut Cx, path: &[String], span: Span, harnesses: &[String], key: &str, ctx: &str) -> Option<Part> {
     if path.len() == 2 && path[0] == "env" && !path[1].is_empty() {
         Some(Part::Env(path[1].clone()))
-    } else if path.len() == 3 && path[0] == "harnesses" && path[2] == "model" {
+    } else if path.len() == 3 && path[0] == "harnesses" && (path[2] == "model" || path[2] == "model_id") {
         if !harnesses.contains(&path[1]) {
-            cx.unknown_ref(span, format!("The reference \"harnesses.{}.model\" names an unknown harness.", path[1]), &path[1], harnesses, ctx);
+            cx.unknown_ref(span, format!("The reference \"harnesses.{}.{}\" names an unknown harness.", path[1], path[2]), &path[1], harnesses, ctx);
             return None;
         }
-        Some(Part::HarnessModel(path[1].clone()))
+        if path[2] == "model_id" { Some(Part::HarnessModelId(path[1].clone())) } else { Some(Part::HarnessModel(path[1].clone())) }
     } else if path.len() == 3 && path[0] == "vault" {
         let Some(keys) = cx.vault_keys.get(&path[1]).cloned() else {
             let mut names: Vec<String> = cx.vault_keys.keys().cloned().collect();
@@ -128,7 +128,7 @@ fn interp_part(cx: &mut Cx, path: &[String], span: Span, harnesses: &[String], k
         }
         Some(Part::Vault(path[1].clone(), path[2].clone()))
     } else {
-        cx.err(span, "Unsupported reference", format!("The reference \"${{{}}}\" is not supported here. Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY> and harnesses.<label>.model.", path.join(".")), Some(ctx), None);
+        cx.err(span, "Unsupported reference", format!("The reference \"${{{}}}\" is not supported here. Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY>, harnesses.<label>.model and harnesses.<label>.model_id.", path.join(".")), Some(ctx), None);
         let _ = key;
         None
     }
