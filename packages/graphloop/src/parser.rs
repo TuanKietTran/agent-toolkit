@@ -290,6 +290,12 @@ impl Parser {
 
     fn parse_statement(&mut self) -> Result<ast::Stmt, Diagnostics> {
         let start_span = self.peek_span();
+        if let Tok::Error(d) = self.peek().clone() {
+            // A lexical error standing where a statement starts: report it
+            // exactly once and let the caller's recovery continue.
+            self.bump();
+            return Err(Diagnostics::one(d));
+        }
         let Tok::Ident(kind) = self.peek().clone() else {
             return Err(self.error(start_span, "Expected statement", "Expected a block or an assignment."));
         };
@@ -324,6 +330,10 @@ impl Parser {
     fn parse_value(&mut self) -> Result<Expr, Diagnostics> {
         let span = self.peek_span();
         match self.peek().clone() {
+            Tok::Error(d) => {
+                self.bump();
+                Err(Diagnostics::one(d))
+            }
             Tok::Str(text) => {
                 self.bump();
                 let parts = split_string(&self.file, &text, span)?;
@@ -432,9 +442,12 @@ impl Parser {
 /// from, collecting up to 20 diagnostics in one run. Does NOT check which blocks or keys
 /// are allowed (that is `schema`), nor top-level assignments (also `schema`).
 pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
-    let tokens = lexer::lex(file, src)?;
+    let tokens = lexer::lex(file, src);
     // Header: Ident("yah") then Num(1).
     let first = tokens.first().cloned().unwrap_or(Token { tok: Tok::Eof, span: Span { line: 1, col: 1, offset: 0, len: 0 } });
+    if let Tok::Error(d) = &first.tok {
+        return Err(Diagnostics::one(d.clone()));
+    }
     if first.tok != Tok::Ident("yah".to_string()) {
         return Err(err(file, first.span, "Missing or unsupported header", HEADER_DETAIL));
     }
@@ -768,6 +781,32 @@ mod tests {
         let d = err1("yah 1\nx = \"unterminated");
         assert_eq!(d.summary, "Unterminated string");
         assert_eq!((d.line, d.col), (2, 5));
+    }
+
+    #[test]
+    fn unterminated_string_reports_opening_quote_and_following_statement_recovers() {
+        // S5b(d): the string opened at (2,5) has no closing quote; the next
+        // quote in the file is at (3,5). The single error must be at the
+        // OPENING quote (2,5), not (3,5) or EOF, and the following
+        // statement must still parse (no cascade, no extra errors).
+        let d = err1("yah 1\nx = \"unterminated\ny = \"ok\"\n");
+        assert_eq!(d.summary, "Unterminated string");
+        assert_eq!((d.line, d.col), (2, 5));
+    }
+
+    #[test]
+    fn unterminated_string_and_later_stray_at_report_exactly_two_errors() {
+        // S5b(d): one unterminated string and one later stray '@' in one
+        // file report BOTH errors, each exactly once: the unterminated
+        // string at its opening quote and the '@' at its own position.
+        let src = "yah 1\nx = \"unterminated\ny = \"ok\"\n@\n";
+        let d = parse("test.yah", src).unwrap_err();
+        assert_eq!(d.0.len(), 2, "{d:?}");
+        assert_eq!(d.0[0].summary, "Unterminated string");
+        assert_eq!((d.0[0].line, d.0[0].col), (2, 5));
+        assert_eq!(d.0[1].summary, "Unexpected character");
+        assert!(d.0[1].detail.contains('@'));
+        assert_eq!((d.0[1].line, d.0[1].col), (4, 1));
     }
 
     #[test]
