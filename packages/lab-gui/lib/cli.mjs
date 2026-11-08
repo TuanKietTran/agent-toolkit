@@ -68,6 +68,10 @@ export function createCli({ bin = process.env.H1_BIN || "h1", env = process.env,
       assertName(name);
       await run(["stop", "-n", name], { timeout: 15000 });
     },
+    renew: async (name) => {
+      assertName(name);
+      await run(["renew", "-n", name], { timeout: 15000 });
+    },
     attach: async (name) => {
       assertName(name);
       await run(["foreground", "-n", name]);

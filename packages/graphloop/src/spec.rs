@@ -248,7 +248,7 @@ pub struct Harness {
     pub line: u32,
 }
 
-/// `open { command, cols, rows, cwd, env, title, detached }`: the `h1 open` options.
+/// `open { command, cols, rows, cwd, env, title, detached, brief, resume_log, auto_rearm }`: the `h1 open` options.
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
 pub struct Open {
     /// The hosted program and its arguments (everything after `--`). Required, non-empty.
@@ -259,6 +259,12 @@ pub struct Open {
     pub env: Vec<(String, Templ)>,
     pub title: Option<Templ>,
     pub detached: bool,
+    /// Brief file for renew-with-context (`h1 open --brief`, R40/R41).
+    pub brief: Option<Templ>,
+    /// Resume/status log file for renew-with-context (`h1 open --resume-log`).
+    pub resume_log: Option<Templ>,
+    /// Auto re-arm on the session's new-command (`h1 open --auto-rearm`, default off).
+    pub auto_rearm: bool,
 }
 
 /// `team "label" { root, members, graph }`. Nodes are harnesses; edges are `parent` relations plus

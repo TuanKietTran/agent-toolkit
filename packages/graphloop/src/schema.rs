@@ -592,7 +592,7 @@ fn parse_api(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses:
 }
 fn parse_open(cx: &mut Cx, block: &crate::ast::Block, harnesses: &[String], hctx: &str) -> Open {
     let ctx = format!("{hctx} > open");
-    let (assigns, _) = collect_body(cx, block, &["command", "cols", "rows", "cwd", "env", "title", "detached"], &[], &ctx);
+    let (assigns, _) = collect_body(cx, block, &["command", "cols", "rows", "cwd", "env", "title", "detached", "brief", "resume_log", "auto_rearm"], &[], &ctx);
     let mut command: Vec<Templ> = Vec::new();
     match assigns.get("command") {
         Some(a) => {
@@ -611,7 +611,10 @@ fn parse_open(cx: &mut Cx, block: &crate::ast::Block, harnesses: &[String], hctx
     cx.allow_vault = false;
     let title = assigns.get("title").and_then(|a| expr_as_templ(cx, &a.value, "title", harnesses, &ctx));
     let detached = assigns.get("detached").and_then(|a| bool_value(cx, a, &ctx)).unwrap_or(false);
-    Open { command, cols, rows, cwd, env, title, detached }
+    let brief = assigns.get("brief").and_then(|a| expr_as_templ(cx, &a.value, "brief", harnesses, &ctx));
+    let resume_log = assigns.get("resume_log").and_then(|a| expr_as_templ(cx, &a.value, "resume_log", harnesses, &ctx));
+    let auto_rearm = assigns.get("auto_rearm").and_then(|a| bool_value(cx, a, &ctx)).unwrap_or(false);
+    Open { command, cols, rows, cwd, env, title, detached, brief, resume_log, auto_rearm }
 }
 fn parse_harness(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses: &[String]) -> Option<HarnessRefs> {
     let label = block.label.clone().unwrap_or_default();

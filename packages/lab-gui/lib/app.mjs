@@ -180,7 +180,7 @@ export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleM
       return;
     }
 
-    const m = /^\/api\/labs\/([^/]+)\/(screen|send|key|stop|attach)$/.exec(path);
+    const m = /^\/api\/labs\/([^/]+)\/(screen|send|key|stop|attach|renew)$/.exec(path);
     if (!m) return sendJson(res, 404, { error: "not found" });
     const name = decodeURIComponent(m[1]);
     const action = m[2];
@@ -193,7 +193,7 @@ export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleM
     }
 
     if (req.method !== "POST" || action === "screen") return sendJson(res, 405, { error: "method not allowed" });
-    if (remote && !remote.control) return sendJson(res, 403, { error: "remote control is off; restart lab-gui with --allow-control to send, press keys or stop" });
+    if (remote && !remote.control) return sendJson(res, 403, { error: "remote control is off; restart lab-gui with --allow-control to send, press keys, stop or renew" });
     if (remote && action === "attach") return sendJson(res, 403, { error: "attach opens a window on the host; not available remotely" });
     if (!viaBearer) {
       if (!sameToken(req.headers["x-lab-gui-token"], token)) return sendJson(res, 403, { error: "missing or wrong token" });
@@ -211,6 +211,9 @@ export function createApp({ cli, monitor, key, token, port, pollMs = 1500, idleM
     } else if (action === "stop") {
       if (body.confirm !== name) throw new CliError("stop needs {\"confirm\": \"<lab name>\"}", { status: 400 });
       await cli.stop(name);
+    } else if (action === "renew") {
+      if (body.confirm !== name) throw new CliError("renew needs {\"confirm\": \"<lab name>\"}", { status: 400 });
+      await cli.renew(name);
     } else if (action === "attach") {
       await cli.attach(name);
     }

@@ -450,16 +450,31 @@ $("p-stop").addEventListener("click", () => {
   if (!name) return;
   $("c-body").textContent = `This ends ${name} and everything running inside it. Labs started from it are not stopped. This cannot be undone.`;
   $("c-title").textContent = `Stop ${name}?`;
+  $("c-ok").value = "stop";
+  $("c-ok").textContent = "Stop lab";
+  $("c-ok").classList.add("danger");
+  $("confirm").showModal();
+});
+$("p-renew").addEventListener("click", () => {
+  const name = state.selected;
+  if (!name) return;
+  $("c-body").textContent = `This starts a fresh session in ${name} and re-sends its brief and the last lines of its resume log. The lab itself keeps running.`;
+  $("c-title").textContent = `Renew ${name}?`;
+  $("c-ok").value = "renew";
+  $("c-ok").textContent = "Renew lab";
+  $("c-ok").classList.remove("danger");
   $("confirm").showModal();
 });
 $("confirm").addEventListener("close", async () => {
   const dlg = $("confirm");
-  if (dlg.returnValue !== "stop" || !state.selected) return;
+  if (dlg.returnValue !== "stop" && dlg.returnValue !== "renew") return;
+  if (!state.selected) return;
+  const action = dlg.returnValue;
   const name = state.selected;
   try {
-    await api(`/api/labs/${encodeURIComponent(name)}/stop`, { confirm: name });
-    setNote(`${name} stopped.`);
-    announce(`${name} stopped`);
+    await api(`/api/labs/${encodeURIComponent(name)}/${action}`, { confirm: name });
+    setNote(action === "stop" ? `${name} stopped.` : `${name} renewed.`);
+    announce(action === "stop" ? `${name} stopped` : `${name} renewed`);
     tickNow();
   } catch (error) {
     setNote(error.message, true);

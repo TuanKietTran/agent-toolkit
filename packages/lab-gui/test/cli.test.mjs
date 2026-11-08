@@ -24,13 +24,16 @@ test("calls are plain argv arrays, text goes after --", async () => {
   assert.deepEqual(calls[1].args, ["send", "-n", "w1", "--paced", "--", "no enter"]);
   await cli.stop("w1");
   assert.deepEqual(calls[2].args, ["stop", "-n", "w1"]);
+  await cli.renew("w1");
+  assert.deepEqual(calls[3].args, ["renew", "-n", "w1"]);
   await cli.attach("w1");
-  assert.deepEqual(calls[3].args, ["foreground", "-n", "w1"]);
+  assert.deepEqual(calls[4].args, ["foreground", "-n", "w1"]);
 });
 
 test("invalid names and keys never reach the binary", async () => {
   const { calls, cli } = recorder();
   await assert.rejects(cli.stop("a;b"), (e) => e instanceof CliError && e.status === 400);
+  await assert.rejects(cli.renew("a;b"), (e) => e instanceof CliError && e.status === 400);
   await assert.rejects(cli.key("w1", "Ctrl-D"), (e) => e.status === 400);
   await assert.rejects(cli.send("w1", "x".repeat(20001)), (e) => e.status === 400);
   assert.equal(calls.length, 0);

@@ -335,6 +335,17 @@ pub fn build(spec: &Spec, team: &str, resolved: &[Resolved], opts: &PlanOpts) ->
         if opts.detached || harness.open.detached {
             argv.push(Templ::lit("--detached"));
         }
+        if let Some(brief) = &harness.open.brief {
+            argv.push(Templ::lit("--brief"));
+            argv.push(sub(brief)?);
+        }
+        if let Some(resume_log) = &harness.open.resume_log {
+            argv.push(Templ::lit("--resume-log"));
+            argv.push(sub(resume_log)?);
+        }
+        if harness.open.auto_rearm {
+            argv.push(Templ::lit("--auto-rearm"));
+        }
         argv.push(Templ::lit("--"));
         for command in &harness.open.command {
             argv.push(sub(command)?);
@@ -393,7 +404,7 @@ mod tests {
             model: ModelRef::SystemOne,
             tools: vec!["fs".to_owned()],
             complexity: None,
-            open: Open { command: vec![Templ::lit("pi")], cols: None, rows: None, cwd: None, env: Vec::new(), title: None, detached: false },
+            open: Open { command: vec![Templ::lit("pi")], cols: None, rows: None, cwd: None, env: Vec::new(), title: None, detached: false, brief: None, resume_log: None, auto_rearm: false },
             line,
         }
     }
@@ -522,6 +533,27 @@ mod tests {
         let plan = build(&s, "default", &r, &opts()).unwrap();
         assert!(!displays(&plan.steps[0]).contains(&"--detached".to_owned()));
         assert!(displays(&plan.steps[1]).contains(&"--detached".to_owned()));
+    }
+
+    #[test]
+    fn renew_fields_from_open_block() {
+        let (mut s, r) = basic();
+        s.harnesses[1].open.brief = Some(Templ::lit("briefs/builder.md"));
+        s.harnesses[1].open.resume_log = Some(Templ::lit("status/builder.log"));
+        s.harnesses[1].open.auto_rearm = true;
+        let plan = build(&s, "default", &r, &opts()).unwrap();
+        let d0 = displays(&plan.steps[0]);
+        assert!(!d0.contains(&"--brief".to_owned()));
+        assert!(!d0.contains(&"--resume-log".to_owned()));
+        assert!(!d0.contains(&"--auto-rearm".to_owned()));
+        let d = displays(&plan.steps[1]);
+        let brief_at = d.iter().position(|a| a == "--brief").unwrap();
+        assert_eq!(d[brief_at + 1], "briefs/builder.md");
+        let log_at = d.iter().position(|a| a == "--resume-log").unwrap();
+        assert_eq!(d[log_at + 1], "status/builder.log");
+        let rearm_at = d.iter().position(|a| a == "--auto-rearm").unwrap();
+        let sep = d.iter().position(|a| a == "--").unwrap();
+        assert!(brief_at < sep && log_at < sep && rearm_at < sep);
     }
 
     #[test]

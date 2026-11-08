@@ -30,13 +30,14 @@ Every request: `Authorization: Bearer <key>`. No cookie, no CSRF token. Wrong or
 
 | Method and path | Purpose |
 | --- | --- |
-| `GET /api/info` | `{name:"lab-gui", api:1, remote, control, attach}`. Check `control` before showing send/stop. |
+| `GET /api/info` | `{name:"lab-gui", api:1, remote, control, attach}`. Check `control` before showing send/stop/renew. |
 | `GET /api/labs` | The snapshot (below). Poll every 1.5-3 s while the screen is visible; stop polling in the background. |
 | `GET /api/stream` | Optional server-sent events, event `snapshot`, same payload. Polling is simpler on phones. |
 | `GET /api/labs/{name}/screen?tail=N` | `{name, lines:[string], cols, rows, title}`; `tail` is the last N lines (default 40). |
 | `POST /api/labs/{name}/send` | `{text, enter?:bool}` types text (and Enter unless `enter:false`). 403 when control is off. |
 | `POST /api/labs/{name}/key` | `{key}` one of `Enter Esc Tab Up Down Ctrl-C` (the server rejects others). |
 | `POST /api/labs/{name}/stop` | `{confirm: "<lab name>"}` stops the lab. Always ask the person first. |
+| `POST /api/labs/{name}/renew` | `{confirm: "<lab name>"}` renews the lab: a fresh session starts in the same lab and its brief and the last resume-log lines are re-sent; the lab keeps running. Always ask the person first. 403 when control is off. |
 | `POST /api/labs/{name}/attach` | Loopback only; refused remotely. |
 
 Errors are `{error: string}` with 400 (bad input), 401, 403, 404, 413, 415, 429, 502 (the lab CLI failed).
@@ -63,7 +64,7 @@ as plain/neutral so a newer server does not break an older client.
 
 The same board as the web page: the lab tree (commander to managers to workers) with the three team
 roles drawn distinctly (builder, explorer, advisor), live state, the sparkline, model, token/cost
-totals, and per lab: the live screen, a message box, keys, and stop with confirmation (hidden when
+totals, and per lab: the live screen, a message box, keys, and stop and renew with confirmation (hidden when
 `control` is false). Dark and light, accessible labels, no analytics, no requests to any host except the
 paired server. Store the key in the platform keychain (Keychain, Credential Locker/DPAPI, Android
 Keystore-backed encrypted storage), never in plain files or logs.

@@ -98,6 +98,20 @@ mod tests {
         assert!(spec.outputs.is_empty());
     }
 
+    #[test]
+    fn load_str_open_renew_fields() {
+        let src = "yah 1\nprovider \"anthropic\" {\n type = \"anthropic\"\n api_key = env.ANTHROPIC_API_KEY\n}\nmodel \"sonnet\" {\n provider = \"anthropic\"\n id = \"claude-sonnet-5-5\"\n capabilities = [\"chat\", \"tools\"]\n}\nsystem_one {\n fallback = \"sonnet\"\n}\nharness \"worker\" {\n kind = \"h1\"\n role = \"worker\"\n model = \"system-one\"\n open {\n  command = [\"cat\"]\n  brief = \"briefs/worker.md\"\n  resume_log = \"status/worker.log\"\n  auto_rearm = true\n }\n}\nharness \"plain\" {\n kind = \"h1\"\n role = \"worker\"\n model = \"system-one\"\n open { command = [\"cat\"] }\n}\nteam \"default\" {\n root = \"worker\"\n members = [\"plain\"]\n graph = true\n}\n";
+        let spec = load_str("renew.yah", src, &no_overrides()).expect("renew source must load");
+        let worker = spec.harness("worker").expect("worker harness");
+        assert_eq!(worker.open.brief.as_ref().map(|t| t.display()).as_deref(), Some("briefs/worker.md"));
+        assert_eq!(worker.open.resume_log.as_ref().map(|t| t.display()).as_deref(), Some("status/worker.log"));
+        assert!(worker.open.auto_rearm);
+        let plain = spec.harness("plain").expect("plain harness");
+        assert_eq!(plain.open.brief, None);
+        assert_eq!(plain.open.resume_log, None);
+        assert!(!plain.open.auto_rearm);
+    }
+
     fn err_diags(src: &str) -> crate::diag::Diagnostics {
         load_str("x.yah", src, &no_overrides()).unwrap_err()
     }
