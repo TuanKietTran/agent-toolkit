@@ -8,7 +8,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use graphloop::cli::vault_status_core;
+use graphloop::cli::{vault_status_core, vault_status_json_core};
 use graphloop::load::load_str;
 use graphloop::spec::{Spec, Vault};
 
@@ -137,15 +137,192 @@ fn command_status_with_a_missing_program_is_not_ready() {
     assert!(out.contains("cmd TOKEN: error: program graphloop-no-such-program-9f2a not found"), "{out}");
 }
 
-#[test]
-fn unsupported_provider_is_not_ready() {
-    // Schema rejects unknown providers at load, so build the Spec directly: vault_status_core must still report a hand-built/forward Spec as not ready.
+/// The CLI providers in the PROVIDERS table, with the program each needs on PATH.
+const CLI_PROVIDERS: [(&str, &str); 4] = [("1password", "op"), ("bitwarden", "bw"), ("bitwarden-secrets", "bws"), ("keychain", "security")];
+
+fn hand_built_spec(provider: &str, command: Vec<String>) -> Spec {
+    // Schema rejects unknown providers at load, so build the Spec directly: vault_status_core must still report a hand-built/forward Spec correctly.
     let mut spec = load("");
-    spec.vaults.push(Vault { name: "op".into(), provider: "1password".into(), path: None, account: None, command: vec![], secrets: vec![("TOKEN".into(), "op://vault/item/token".into())], line: 1 });
+    spec.vaults.push(Vault { name: "v".into(), provider: provider.into(), path: None, account: None, command, secrets: vec![("TOKEN".into(), "some-ref".into())], line: 1 });
+    spec
+}
+
+fn path_env(dir: &Path) -> impl Fn(&str) -> Option<String> {
+    let path = dir.to_string_lossy().into_owned();
+    move |name: &str| if name == "PATH" { Some(path.clone()) } else { None }
+}
+
+#[test]
+fn cli_providers_without_their_program_are_not_ready_and_name_it() {
+    let empty = tempfile::tempdir().unwrap();
+    let env = path_env(empty.path());
+    for (provider, program) in CLI_PROVIDERS {
+        let spec = hand_built_spec(provider, vec![]);
+        let (out, ok) = vault_status_core(&spec, Path::new("."), &env, vec![], false);
+        assert!(!ok, "{provider}: {out}");
+        assert!(out.contains(&format!("vault v ({provider}): not ready: program {program} not found")), "{provider}: {out}");
+        assert!(out.contains(&format!("v TOKEN: error: program {program} not found")), "{provider}: {out}");
+        assert!(!out.contains("not available in this build"), "{provider}: {out}");
+    }
+}
+
+#[test]
+fn cli_providers_with_a_fake_program_on_path_are_ready() {
+    let dir = tempfile::tempdir().unwrap();
+    for (_, program) in CLI_PROVIDERS { std::fs::write(dir.path().join(program), "#!/bin/sh\n").unwrap(); }
+    let env = path_env(dir.path());
+    for (provider, _) in CLI_PROVIDERS {
+        let spec = hand_built_spec(provider, vec![]);
+        let (out, ok) = vault_status_core(&spec, Path::new("."), &env, vec![], false);
+        assert!(ok, "{provider}: {out}");
+        assert!(out.contains(&format!("vault v ({provider}): ready\n")), "{provider}: {out}");
+        assert!(out.contains("v TOKEN: ok\n"), "{provider}: {out}");
+        assert!(!out.contains("not available in this build"), "{provider}: {out}");
+    }
+}
+
+#[test]
+fn cli_provider_command_override_replaces_its_program_for_readiness() {
+    let real = |name: &str| std::env::var(name).ok();
+    // `printf` is on the real PATH even where `op` is not, so the override makes it ready.
+    let spec = hand_built_spec("1password", vec!["printf".into()]);
+    let (out, ok) = vault_status_core(&spec, Path::new("."), &real, vec![], false);
+    assert!(ok, "{out}");
+    assert!(out.contains("vault v (1password): ready\n"), "{out}");
+    assert!(out.contains("v TOKEN: ok\n"), "{out}");
+    // A missing override program is the one named, not the provider's own `op`.
+    let spec = hand_built_spec("1password", vec!["graphloop-no-such-program-9f2a".into()]);
+    let (out, ok) = vault_status_core(&spec, Path::new("."), &real, vec![], false);
+    assert!(!ok, "{out}");
+    assert!(out.contains("vault v (1password): not ready: program graphloop-no-such-program-9f2a not found"), "{out}");
+    assert!(out.contains("v TOKEN: error: program graphloop-no-such-program-9f2a not found"), "{out}");
+    assert!(!out.contains("not available in this build"), "{out}");
+}
+
+#[test]
+fn unknown_provider_is_not_ready() {
+    let mut spec = load("");
+    spec.vaults.push(Vault { name: "x".into(), provider: "no-such-provider".into(), path: None, account: None, command: vec![], secrets: vec![("TOKEN".into(), "some-ref".into())], line: 1 });
     let (out, ok) = vault_status_core(&spec, Path::new("."), &no_env, vec![], false);
     assert!(!ok, "{out}");
-    assert!(out.contains("vault op (1password): not ready: provider \"1password\" is not available in this build"), "{out}");
-    assert!(out.contains("op TOKEN: error: provider \"1password\" is not available in this build"), "{out}");
+    assert!(out.contains("vault x (no-such-provider): not ready: provider \"no-such-provider\" is not available in this build"), "{out}");
+    assert!(out.contains("x TOKEN: error: provider \"no-such-provider\" is not available in this build"), "{out}");
+}
+
+fn parse_json(out: &str) -> serde_json::Value { assert!(out.trim_start().starts_with('{'), "{out}"); serde_json::from_str(out).unwrap_or_else(|e| panic!("not one JSON object: {e}: {out}")) }
+
+#[test]
+fn json_status_all_ready_parses_and_fetched_is_null_without_fetch() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("fleet.env"), format!("FLEET_TOKEN={SECRET}\nGITHUB_TOKEN={SECRET}-gh\n")).unwrap();
+    let spec = load(DOTENV_VAULT);
+    let (out, ok) = vault_status_json_core(&spec, dir.path(), &no_env, vec![], false);
+    assert!(ok, "{out}");
+    assert_eq!(out.lines().count(), 1, "{out}");
+    assert!(!out.contains(SECRET), "{out}");
+    let v = parse_json(&out);
+    assert_eq!(v["vaults"][0]["name"], "local");
+    assert_eq!(v["vaults"][0]["provider"], "dotenv");
+    assert_eq!(v["vaults"][0]["ready"], true);
+    assert!(v["vaults"][0]["program"].is_null(), "{out}");
+    assert_eq!(v["vaults"][0]["keys"][0]["name"], "FLEET_TOKEN");
+    assert!(v["vaults"][0]["keys"][0]["fetched"].is_null(), "{out}");
+}
+
+#[test]
+fn json_status_missing_program_is_not_ready_and_names_the_program() {
+    let empty = tempfile::tempdir().unwrap();
+    let env = path_env(empty.path());
+    let spec = hand_built_spec("1password", vec![]);
+    let (out, ok) = vault_status_json_core(&spec, Path::new("."), &env, vec![], false);
+    assert!(!ok, "{out}");
+    let v = parse_json(&out);
+    assert_eq!(v["vaults"][0]["ready"], false);
+    assert_eq!(v["vaults"][0]["program"], "op", "{out}");
+}
+
+#[test]
+fn json_status_fetch_failure_names_the_key_and_marks_it_not_fetched() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("fleet.env"), format!("FLEET_TOKEN={SECRET}\n")).unwrap();
+    let spec = load(DOTENV_VAULT);
+    let (out, ok) = vault_status_json_core(&spec, dir.path(), &no_env, vec![], true);
+    assert!(!ok, "{out}");
+    assert!(!out.contains(SECRET), "{out}");
+    let v = parse_json(&out);
+    assert_eq!(v["vaults"][0]["keys"][0]["fetched"], true);
+    assert_eq!(v["vaults"][0]["keys"][1]["name"], "GH_TOKEN", "{out}");
+    assert_eq!(v["vaults"][0]["keys"][1]["fetched"], false);
+}
+
+#[test]
+fn json_status_fetch_never_contains_the_fetched_value() {
+    let spec = load("\nvault \"cmd\" {\n  provider = \"command\"\n  command  = [\"printf\", \"cmd-s3cr3t-9f2a\"]\n  secrets  = {\n    TOKEN = \"TOKEN\"\n  }\n}\n");
+    let real = |name: &str| std::env::var(name).ok();
+    let (out, ok) = vault_status_json_core(&spec, Path::new("."), &real, vec![], true);
+    assert!(ok, "{out}");
+    let v = parse_json(&out);
+    assert_eq!(v["vaults"][0]["program"], "printf");
+    assert_eq!(v["vaults"][0]["keys"][0]["fetched"], true);
+    assert!(!out.contains("cmd-s3cr3t-9f2a"), "{out}");
+}
+
+#[test]
+fn json_status_no_vaults_is_an_empty_list_and_ok() {
+    let spec = load("");
+    let (out, ok) = vault_status_json_core(&spec, Path::new("."), &no_env, vec![], false);
+    assert!(ok, "{out}");
+    assert_eq!(parse_json(&out)["vaults"], serde_json::json!([]));
+}
+
+fn write_yah(dir: &Path, vault_block: &str) -> std::path::PathBuf { let yah = dir.join("team.yah"); std::fs::write(&yah, format!("yah 1\n{vault_block}{SKELETON_TAIL}")).unwrap(); yah }
+
+fn run_status(yah: &Path, extra: &[&str]) -> std::process::Output { std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["vault", "status"]).arg(yah).args(extra).output().unwrap() }
+
+#[test]
+fn binary_json_status_all_ready_exits_0_with_json_only_on_stdout() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("fleet.env"), format!("FLEET_TOKEN={SECRET}\nGITHUB_TOKEN={SECRET}-gh\n")).unwrap();
+    let yah = write_yah(dir.path(), DOTENV_VAULT);
+    let out = run_status(&yah, &["--json"]);
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(out.stderr.is_empty(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(!stdout.contains(SECRET), "{stdout}");
+    assert_eq!(parse_json(&stdout)["vaults"][0]["ready"], true);
+}
+
+#[test]
+fn binary_status_missing_program_exits_nonzero_naming_the_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let empty = tempfile::tempdir().unwrap();
+    let yah = write_yah(dir.path(), "\nvault \"v\" {\n  provider = \"1password\"\n  secrets  = {\n    TOKEN = \"some-ref\"\n  }\n}\n");
+    let human = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["vault", "status"]).arg(&yah).env("PATH", empty.path()).output().unwrap();
+    assert!(!human.status.success());
+    let combined = format!("{}{}", String::from_utf8_lossy(&human.stdout), String::from_utf8_lossy(&human.stderr));
+    assert!(combined.contains("program op not found"), "{combined}");
+    let json_run = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["vault", "status", "--json"]).arg(&yah).env("PATH", empty.path()).output().unwrap();
+    assert!(!json_run.status.success());
+    let stdout = String::from_utf8(json_run.stdout).unwrap();
+    let v = parse_json(&stdout);
+    assert_eq!(v["vaults"][0]["program"], "op", "{stdout}");
+    assert_eq!(v["vaults"][0]["ready"], false);
+    assert!(!String::from_utf8_lossy(&json_run.stderr).contains('{'), "stderr must be human only: {}", String::from_utf8_lossy(&json_run.stderr));
+}
+
+#[test]
+fn binary_json_fetch_failure_exits_nonzero_naming_the_key() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("fleet.env"), format!("FLEET_TOKEN={SECRET}\n")).unwrap();
+    let yah = write_yah(dir.path(), DOTENV_VAULT);
+    let out = run_status(&yah, &["--json", "--fetch"]);
+    assert!(!out.status.success());
+    let stdout = String::from_utf8(out.stdout).unwrap();
+    assert!(!stdout.contains(SECRET), "{stdout}");
+    let v = parse_json(&stdout);
+    assert_eq!(v["vaults"][0]["keys"][1]["name"], "GH_TOKEN", "{stdout}");
+    assert_eq!(v["vaults"][0]["keys"][1]["fetched"], false);
+    assert!(!String::from_utf8_lossy(&out.stderr).contains('{'), "stderr must be human only: {}", String::from_utf8_lossy(&out.stderr));
 }
 
 #[test]

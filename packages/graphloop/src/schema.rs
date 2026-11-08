@@ -1,4 +1,4 @@
-//! Strict schema validation, cross-reference checks and defaults. OWNER: gl-schema.
+//! Strict schema validation, cross-reference checks and defaults.
 //!
 //! Input: the resolved `ast::File`. Output: `spec::Spec` or all collected `Diagnostics`.
 

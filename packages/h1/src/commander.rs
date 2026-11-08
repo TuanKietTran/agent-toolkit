@@ -67,10 +67,26 @@ struct Lab {
 }
 
 fn home() -> PathBuf {
-    env::var_os("LABCTL_HOME").map(PathBuf::from)
-        .or_else(|| env::var_os("HOME").map(|h| PathBuf::from(h).join(".lab-commander")))
+    home_from(
+        env::var_os("H1_HOME"),
+        env::var_os("LABCTL_HOME"),
+        env::var_os("HOME"),
+    )
+}
+
+fn home_from(
+    h1_home: Option<std::ffi::OsString>,
+    legacy_home: Option<std::ffi::OsString>,
+    home_dir: Option<std::ffi::OsString>,
+) -> PathBuf {
+    h1_home
+        .filter(|value| !value.is_empty())
+        .or_else(|| legacy_home.filter(|value| !value.is_empty()))
+        .map(PathBuf::from)
+        .or_else(|| home_dir.map(|h| PathBuf::from(h).join(".lab-commander")))
         .unwrap_or_else(|| PathBuf::from(".lab-commander"))
 }
+
 fn labs() -> PathBuf { home().join("labs") }
 fn record_path(name: &str) -> PathBuf { labs().join(format!("{name}.json")) }
 fn load(name: &str) -> Result<Lab> {
@@ -184,6 +200,25 @@ mod tests {
         assert!(re.is_match("LAB-CHECKPOINT x"));
         assert!(!re.is_match("prefix LAB-DONE result"));
         assert!(!re.is_match("LAB-DONE"));
+    }
+    #[test]
+    fn home_prefers_h1_home_over_legacy_labctl_home() {
+        assert_eq!(
+            home_from(
+                Some("/tmp/h1-home".into()),
+                Some("/tmp/labctl-home".into()),
+                Some("/tmp/home".into()),
+            ),
+            PathBuf::from("/tmp/h1-home")
+        );
+        assert_eq!(
+            home_from(
+                None,
+                Some("/tmp/labctl-home".into()),
+                Some("/tmp/home".into()),
+            ),
+            PathBuf::from("/tmp/labctl-home")
+        );
     }
     #[test]
     fn stale_markers_before_latest_prompt_are_ignored() {

@@ -52,7 +52,7 @@ h1 console --snapshot --view graph --width 130 --height 30   # one text frame
 
 `labs` (table with role, parent, state, model, activity sparkline), `graph` (commander -> managers -> workers drawn as nodes and edges, plus an output-activity sparkline) and `models`. Keys: `:labs` `:graph` `:models`, `/` filter, `enter` peek, `d` describe, `a` attach in a new window, `m` message, `ctrl-d` stop, `o` sort, `?` help. It is a TUI rather than a GUI on purpose: labs are PTYs that already live in terminal windows, it works over SSH and needs no extra runtime. For a browser view of the same graph (role shapes, activity, token/cost counters, peek/message/stop), see [`packages/lab-gui`](../lab-gui). Roles `builder`, `explorer` and `advisor` (opened together by `lab-team`, see the lab-commander skill) have their own colours in the console.
 
-The graph comes from `open --role ROLE --parent NAME [--model PROVIDER/ID]`. A session opened from inside another one is attached to it automatically (the hosted program gets `H1_SELF`).
+The graph comes from `open --role ROLE --parent NAME [--model PROVIDER/ID]`. A session opened from inside another one is attached to it automatically (the hosted program gets `H1_SELF`). `open --brief FILE [--resume-log FILE] [--new-cmd TEXT] [--ready-regex RE]` also stores those renew settings in the registry — paths and settings only, never file contents or secret values — so the session can later be renewed with its context.
 
 ## All agents on this machine
 
@@ -108,7 +108,46 @@ On Windows, `run` ends a piped stdin with Ctrl-Z and Enter, because a console ig
 h1 doctor   # diagnose rename/migration problems; exit 1 if anything needs attention
 ```
 
-`h1 doctor` prints names and paths only, never registry values: the registry dir in use (`$H1_DIR` if set, else the resolved temp default) and whether it exists, whether the pre-rename registries still hold sessions — the one under the home dir and the one under the temp dir that the pre-rename tool actually used (a single warning line each if so, because those labs will not show in the TUI/GUI), which `h1` and old-named binaries and the `labctl` compatibility shim are on `PATH`, whether the lab-commander skill links resolve, whether the lab-gui port (`$LAB_GUI_PORT`, default 4317) is reachable, and whether any running process is an old-named binary or a lab-gui server started from outside this repo (one warning line per such process, naming its pid and, for lab-gui, its port). The lab-gui port check is informational only (it is started on demand), as are a not-yet-created registry dir, an empty pre-rename registry, and a lab-gui server running from this repo. Exit is 1 when a pre-rename registry still holds sessions, an old-named binary is still on `PATH`, `h1` is missing from `PATH`, a skill link is broken, an old-named process is still running, or a lab-gui server runs from outside this repo; otherwise 0.
+`h1 doctor` prints names and paths only, never registry values: the registry dir in use (`$H1_DIR` if set, else the resolved temp default) and whether it exists, whether the pre-rename registries still hold sessions — the one under the home dir and the one under the temp dir that the pre-rename tool actually used (a single warning line each if so, because those labs will not show in the TUI/GUI), which `h1` and old-named binaries and the `labctl` compatibility shim are on `PATH`, whether the lab-commander skill links resolve, whether the lab-gui port (`$LAB_GUI_PORT`, default 4317) is reachable, and whether any running process is an old-named binary or a lab-gui server started from outside this repo (one warning line per such process, naming its pid and, for lab-gui, its port). The lab-gui port check is informational only (it is started on demand), as are a not-yet-created registry dir, an empty pre-rename registry, and a lab-gui server running from this repo. Exit is 1 when a pre-rename registry still holds sessions, an old-named binary is still on `PATH`, `h1` is missing from `PATH`, a skill link is broken, an old-named process is still running, or a lab-gui server runs from outside this repo; otherwise 0. With `--fix-hints`, after the findings doctor prints a fix-hints section with the exact shell command for each fixable finding (`kill <pid>` for a stale old process, `ln -sfn <this repo>/skills/lab-commander <link path>` for a broken lab-commander skill link, `rm` for the stale old-named binary on `PATH`); those commands are printed only, never executed, and findings with no safe one-line fix (such as an old registry still holding sessions) get no hint.
+
+Doctor output is stable: the status lines below always appear in this order, followed by any process findings (one per matching process, in process-list order), then the fix-hints section (only with `--fix-hints` and only when at least one hint exists), then the verdict line. Paths, counts, pids, subcommand names and ports vary; the wording does not. One verbatim sample per line kind and variant:
+
+- Current registry dir, exists: `registry dir: /tmp/h1 (exists)`
+- Current registry dir, not created yet: `registry dir: /tmp/h1 (not created yet)`
+- Old temp-dir registry still holds sessions (attention): `old registry /tmp/agent-cli-lab still holds 2 sessions: those labs do not show in h1 console/GUI`
+- Old temp-dir registry present but empty: `old registry dir: /tmp/agent-cli-lab (present, 0 sessions)`
+- Old temp-dir registry absent: `old registry dir: /tmp/agent-cli-lab (not present)`
+- Old home-dir registry still holds sessions (attention): `warning: old registry /Users/x/.agent-cli-lab still holds 1 session(s) while /tmp/h1 is in use - old labs will not show in TUI/GUI`
+- Old home-dir registry exists but holds no sessions: `old registry dir: /Users/x/.agent-cli-lab (exists, no sessions)`
+- Old home-dir registry absent: `old registry dir: /Users/x/.agent-cli-lab (not present)`
+- `h1` found on `PATH`: `h1 on PATH: /Users/x/.local/bin/h1`
+- `h1` missing from `PATH` (attention): `h1 on PATH: not found`
+- Old binary still on `PATH` (attention): `old binary agent-cli-lab on PATH: /Users/x/.local/bin/agent-cli-lab (stale, pre-rename)`
+- Old binary not on `PATH`: `old binary agent-cli-lab on PATH: not found`
+- `labctl` shim on `PATH`: `labctl shim on PATH: /Users/x/.local/bin/labctl (compatibility shim, execs h1)`
+- `labctl` shim not on `PATH`: `labctl shim on PATH: not found`
+- Skill link resolves: `skill link /Users/x/.codex/skills/lab-commander: ok`
+- Skill link broken (attention): `skill link /Users/x/.codex/skills/lab-commander: broken`
+- Skill link absent: `skill link /Users/x/.codex/skills/lab-commander: not installed`
+- Lab-gui port reachable: `lab-gui port 4317: reachable`
+- Lab-gui port not reachable: `lab-gui port 4317: not reachable`
+- Old console process (attention): `old console pid 1234 cannot see h1 labs: close it and run h1 console`
+- Other old-binary process (attention): `old process pid 1235 (host) runs the pre-rename binary: restart it as h1`
+- Lab-gui process started from this repo: `lab-gui on port 4317 started from /Users/x/checkout/packages/lab-gui/server.mjs: current (this repo)`
+- Lab-gui process started from outside this repo (attention): `lab-gui on port 4317 started from /other/checkout/packages/lab-gui/server.mjs: restart it if it shows no labs`
+- Verdict, nothing needs attention: `doctor: ok`
+- Verdict, something needs attention (exit 1): `doctor: attention needed`
+
+With `--fix-hints`, each hint is printed on its own line, indented by two spaces, under a header line. The `kill` hint is emitted for an old-binary process and for a lab-gui process started from outside this repo; the `ln -sfn` hint only for a broken lab-commander skill link, with its source copied from a skill link that already resolves; when no skill link resolves, the fallback line replaces the `ln -sfn` hint (at most once); and the warning line is always printed immediately above the `rm` hint for the stale old binary:
+
+```
+fix hints (print only, not executed):
+  kill 1234
+  ln -sfn /Users/x/checkout/skills/lab-commander /Users/x/.codex/skills/lab-commander
+  no working skill link to copy: run skills/lab-commander/install.sh from your checkout
+  only after your lab-commander checkout contains the h1 rename (git pull); the installed labctl and lab-* scripts call the old binary until then
+  rm /Users/x/.local/bin/agent-cli-lab
+```
 
 ## Migration
 

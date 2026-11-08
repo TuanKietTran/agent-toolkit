@@ -1,4 +1,4 @@
-//! Model resolution: system-one decides `model = "system-one"`. OWNER: gl-s1.
+//! Model resolution: system-one decides `model = "system-one"`.
 //!
 //! The data types and the `Picker` trait are SHARED CONTRACT (plan.rs and the manifest consume
 //! `Resolved`). Rules:
@@ -228,7 +228,7 @@ impl Picker for SystemOnePicker {
 
 /// Find `packages/system-one`: `$GRAPHLOOP_SYSTEM_ONE_DIR`, then walking up from the `.yah`
 /// file, then walking up from the executable and the current directory, looking for
-/// `packages/system-one/src/system_one`. OWNER: gl-s1.
+/// `packages/system-one/src/system_one`.
 fn is_system_one_dir(path: &Path) -> bool {
     path.join("src").join("system_one").is_dir()
 }
@@ -375,7 +375,7 @@ fn fallback_resolved(
     }
 }
 
-/// One `Resolved` per harness, in declaration order. OWNER: gl-s1.
+/// One `Resolved` per harness, in declaration order.
 pub fn resolve_all(spec: &Spec, picker: &dyn Picker) -> Result<Vec<Resolved>, Diagnostics> {
     let catalog = catalog_of(spec);
     let mut resolved: Vec<Resolved> = Vec::new();

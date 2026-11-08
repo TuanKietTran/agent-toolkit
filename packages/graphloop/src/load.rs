@@ -1,4 +1,4 @@
-//! The whole front end in one call. OWNER: gl-resolve.
+//! The whole front end in one call.
 
 use std::collections::BTreeMap;
 use std::path::Path;

@@ -1,4 +1,4 @@
-//! Recursive-descent parser. OWNER: gl-syntax.
+//! Recursive-descent parser.
 
 use crate::ast::{self, Expr, ExprKind, Span, StrPart};
 use crate::diag::{Diagnostic, Diagnostics};

@@ -17,22 +17,27 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-/// One adapter: its name, the optional keys a `vault` block may carry for it, and the required ones.
+/// One adapter: its name, the optional keys a `vault` block may carry for it, the required ones,
+/// and the external program it needs on PATH (`""` when it needs none: `dotenv` reads a file,
+/// `env` reads the process environment, and `command` uses the vault block's own argv).
+/// `vault status` readiness is derived from this table: a CLI provider is ready iff its
+/// program (or the configured `command` override for it) is found on PATH.
 pub struct ProviderInfo {
     pub name: &'static str,
     pub keys: &'static [&'static str],
     pub required: &'static [&'static str],
     pub summary: &'static str,
+    pub program: &'static str,
 }
 
 pub const PROVIDERS: &[ProviderInfo] = &[
-    ProviderInfo { name: "dotenv", keys: &["path"], required: &[], summary: "KEY=VALUE file; path is relative to the .yah file (default .env)" },
-    ProviderInfo { name: "env", keys: &[], required: &[], summary: "the process environment" },
-    ProviderInfo { name: "command", keys: &["command"], required: &["command"], summary: "any CLI: an argv list where {ref} and {key} are substituted; the value is its stdout" },
-    ProviderInfo { name: "1password", keys: &["account"], required: &[], summary: "1Password CLI: op read <ref> (ref is an op://vault/item/field URI)" },
-    ProviderInfo { name: "bitwarden", keys: &[], required: &[], summary: "Bitwarden CLI: bw get password|username|notes|uri|totp <item>, or <item>#<field> for a custom field (needs BW_SESSION / bw unlock)" },
-    ProviderInfo { name: "bitwarden-secrets", keys: &[], required: &[], summary: "Bitwarden Secrets Manager CLI: bws secret get <id>; the value is the JSON field value" },
-    ProviderInfo { name: "keychain", keys: &["account"], required: &[], summary: "macOS keychain: security find-generic-password -s <ref> -w" },
+    ProviderInfo { name: "dotenv", keys: &["path"], required: &[], summary: "KEY=VALUE file; path is relative to the .yah file (default .env)", program: "" },
+    ProviderInfo { name: "env", keys: &[], required: &[], summary: "the process environment", program: "" },
+    ProviderInfo { name: "command", keys: &["command"], required: &["command"], summary: "any CLI: an argv list where {ref} and {key} are substituted; the value is its stdout", program: "" },
+    ProviderInfo { name: "1password", keys: &["account"], required: &[], summary: "1Password CLI: op read <ref> (ref is an op://vault/item/field URI)", program: "op" },
+    ProviderInfo { name: "bitwarden", keys: &[], required: &[], summary: "Bitwarden CLI: bw get password|username|notes|uri|totp <item>, or <item>#<field> for a custom field (needs BW_SESSION / bw unlock)", program: "bw" },
+    ProviderInfo { name: "bitwarden-secrets", keys: &[], required: &[], summary: "Bitwarden Secrets Manager CLI: bws secret get <id>; the value is the JSON field value", program: "bws" },
+    ProviderInfo { name: "keychain", keys: &["account"], required: &[], summary: "macOS keychain: security find-generic-password -s <ref> -w", program: "security" },
 ];
 
 pub fn provider(name: &str) -> Option<&'static ProviderInfo> {
@@ -121,6 +126,24 @@ fn kill_process_group(child: &Child) {
 #[cfg(not(unix))]
 fn kill_process_group(_child: &Child) {}
 
+/// `Command::spawn`, retried while the program file is "busy". ETXTBSY (errno 26 on Linux and macOS) is
+/// transient by definition: it appears when the file was written an instant ago and a handle opened for
+/// writing is still alive, for example in a forked child that has not reached `exec` yet. Any other error,
+/// including a missing program, is returned at once.
+fn spawn_retrying(cmd: &mut Command) -> std::io::Result<Child> {
+    #[cfg(unix)]
+    {
+        const ETXTBSY: i32 = 26;
+        for _ in 0..40 {
+            match cmd.spawn() {
+                Err(e) if e.raw_os_error() == Some(ETXTBSY) => std::thread::sleep(Duration::from_millis(25)),
+                other => return other,
+            }
+        }
+    }
+    cmd.spawn()
+}
+
 /// Run `argv` (no shell), return stdout without its trailing newline. This is the ONE shared
 /// failure path for every external vault provider (the `command` arm and the CLI providers
 /// via `run_provider`): on a non-zero exit the error carries the program name and the exit
@@ -140,7 +163,7 @@ pub fn run_command(argv: &[String], extra_env: &[(String, String)], timeout: Dur
         use std::os::unix::process::CommandExt;
         cmd.process_group(0);
     }
-    let mut child = cmd.spawn().map_err(|e| format!("could not run {name}: {e}"))?;
+    let mut child = spawn_retrying(&mut cmd).map_err(|e| format!("could not run {name}: {e}"))?;
     let mut stdout = child.stdout.take().expect("piped stdout");
     let mut stderr = child.stderr.take().expect("piped stderr");
     let out_reader = std::thread::spawn(move || {
