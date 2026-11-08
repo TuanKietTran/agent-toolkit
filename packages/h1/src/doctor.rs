@@ -11,6 +11,11 @@
 //! for each fixable finding (kill a stale process, re-link a broken lab-commander
 //! skill link, remove the stale binary); hints are printed only, never executed,
 //! and findings with no safe one-line fix (either old registry) get no hint.
+//! The re-link source is copied verbatim from a lab-commander skill link that
+//! already resolves (never derived from the cwd, the executable, or a checkout);
+//! when no such link resolves, a fallback line replaces the re-link hint. The
+//! stale-binary `rm` hint is preceded by a warning line, because the installed
+//! labctl/lab-* scripts still call the old binary until their checkout is updated.
 
 use std::{
     env, fs,
@@ -30,6 +35,12 @@ const OLD_BINARY_NAME: &str = "agent-cli-lab";
 /// resolved its registry the same way h1 does, so its real registry is
 /// `<temp dir>/agent-cli-lab`, not the home-dir location (functional literal).
 const OLD_TEMP_REGISTRY_DIR_NAME: &str = "agent-cli-lab";
+/// Warning printed as a hint immediately above the stale-binary `rm` hint (verbatim).
+const RM_OLD_BINARY_WARNING: &str = "only after your lab-commander checkout contains the h1 rename (git pull); the installed labctl and lab-* scripts call the old binary until then";
+/// Printed as a hint instead of any `ln -sfn` line when no lab-commander skill
+/// link resolves to copy the target from (verbatim).
+const NO_WORKING_SKILL_LINK_HINT: &str =
+    "no working skill link to copy: run skills/lab-commander/install.sh from your checkout";
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum LinkState {
@@ -128,6 +139,7 @@ fn assess(inputs: &Inputs) -> Report {
                 "old binary {OLD_BINARY_NAME} on PATH: {} (stale, pre-rename)",
                 path.display()
             ));
+            hints.push(RM_OLD_BINARY_WARNING.to_string());
             hints.push(format!("rm {}", path.display()));
         }
         None => lines.push(format!("old binary {OLD_BINARY_NAME} on PATH: not found")),
@@ -145,14 +157,12 @@ fn assess(inputs: &Inputs) -> Report {
             LinkState::Broken => {
                 attention = true;
                 lines.push(format!("skill link {}: broken", link.display()));
-                if link.file_name().is_some_and(|name| name == "lab-commander")
-                    && let Some(source) = &inputs.skill_source
-                {
-                    hints.push(format!(
-                        "ln -sfn {} {}",
-                        source.display(),
-                        link.display()
-                    ));
+                if link.file_name().is_some_and(|name| name == "lab-commander") {
+                    if let Some(source) = &inputs.skill_source {
+                        hints.push(format!("ln -sfn {} {}", source.display(), link.display()));
+                    } else if !hints.iter().any(|hint| hint == NO_WORKING_SKILL_LINK_HINT) {
+                        hints.push(NO_WORKING_SKILL_LINK_HINT.to_string());
+                    }
                 }
             }
             LinkState::Absent => {
@@ -431,7 +441,6 @@ fn diagnose_inner(
     processes: &[String],
     local_roots: &[PathBuf],
     fix_hints: bool,
-    skill_source: Option<PathBuf>,
 ) -> Report {
     let old_registry_dir = home.join(OLD_REGISTRY_DIR_NAME);
     let old_temp_registry_dir = temp_dir.join(OLD_TEMP_REGISTRY_DIR_NAME);
@@ -444,6 +453,18 @@ fn diagnose_inner(
         home.join(".local").join("bin").join("lab-team"),
         home.join(".local").join("bin").join("lab-watch"),
     ];
+    let skill_links: Vec<(PathBuf, LinkState)> = skill_link_candidates
+        .iter()
+        .map(|link| (link.clone(), link_state(link)))
+        .collect();
+    // The ONLY re-link source: the verbatim target of a lab-commander skill
+    // link that already resolves. Never derived from cwd/current_exe/roots.
+    let skill_source = skill_links
+        .iter()
+        .filter(|(link, state)| {
+            *state == LinkState::Ok && link.file_name().is_some_and(|name| name == "lab-commander")
+        })
+        .find_map(|(link, _)| resolved_link_target(link));
     let inputs = Inputs {
         registry_dir: registry_dir.to_path_buf(),
         registry_exists: registry_dir.is_dir(),
@@ -460,10 +481,7 @@ fn diagnose_inner(
         h1_on_path: find_on_path(path_dirs, "h1"),
         old_binary_on_path: find_on_path(path_dirs, OLD_BINARY_NAME),
         labctl_on_path: find_on_path(path_dirs, "labctl"),
-        skill_links: skill_link_candidates
-            .iter()
-            .map(|link| (link.clone(), link_state(link)))
-            .collect(),
+        skill_links,
         gui_ports: gui_ports.iter().map(|port| (*port, probe(*port))).collect(),
     };
     assess(&inputs)
@@ -492,30 +510,27 @@ fn diagnose(
         processes,
         local_roots,
         false,
-        None,
     )
 }
 
-/// First `<root>/skills/lab-commander` directory under the candidate roots.
-fn skill_source_from_roots(roots: &[PathBuf]) -> Option<PathBuf> {
-    roots
-        .iter()
-        .map(|root| root.join("skills").join("lab-commander"))
-        .find(|candidate| candidate.is_dir())
-}
-
-/// This repo's `skills/lab-commander`, derived from the repo roots doctor
-/// already resolves plus the ancestors of the cwd and of this executable
-/// (never a hard-coded home path).
-fn skill_source_dir(local_roots: &[PathBuf]) -> Option<PathBuf> {
-    let mut roots: Vec<PathBuf> = local_roots.to_vec();
-    if let Ok(cwd) = env::current_dir() {
-        roots.extend(cwd.ancestors().map(Path::to_path_buf));
+/// The verbatim target of a link that already resolves: its stored symlink
+/// target (a relative target resolved against the link's directory), or the
+/// canonical path itself when the path is a real directory/file. This is the
+/// only source a re-link hint may copy; it is never derived from the cwd,
+/// the current executable, or any checkout/worktree root.
+fn resolved_link_target(link: &Path) -> Option<PathBuf> {
+    if let Ok(target) = fs::read_link(link) {
+        if target.is_absolute() {
+            Some(target)
+        } else {
+            link.parent()
+                .map(|parent| normalize_path(&parent.join(&target)))
+        }
+    } else if link.exists() {
+        fs::canonicalize(link).ok()
+    } else {
+        None
     }
-    if let Ok(exe) = env::current_exe() {
-        roots.extend(exe.ancestors().map(Path::to_path_buf));
-    }
-    skill_source_from_roots(&roots)
 }
 
 pub fn run(fix_hints: bool) -> Result<i32> {
@@ -528,7 +543,6 @@ pub fn run(fix_hints: bool) -> Result<i32> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(4317);
     let local_roots = local_gui_roots();
-    let skill_source = skill_source_dir(&local_roots);
     let report = diagnose_inner(
         &crate::session::session_dir(),
         &home,
@@ -539,7 +553,6 @@ pub fn run(fix_hints: bool) -> Result<i32> {
         &process_list(),
         &local_roots,
         fix_hints,
-        skill_source,
     );
     for line in &report.lines {
         println!("{line}");
@@ -640,17 +653,16 @@ mod tests {
         }
     }
 
+    #[cfg(unix)]
     #[test]
-    fn skill_source_from_roots_finds_repo_skill_dir() {
-        let root = temp_root("skillsrc");
-        let repo = root.join("repo");
-        let skill = repo.join("skills").join("lab-commander");
-        fs::create_dir_all(&skill).expect("skill dir");
-        assert_eq!(
-            skill_source_from_roots(&[root.join("nope"), repo.clone()]),
-            Some(skill)
-        );
-        assert_eq!(skill_source_from_roots(&[root.join("nope")]), None);
+    fn resolved_link_target_returns_the_stored_symlink_target() {
+        let root = temp_root("linksrc");
+        let target = root.join("skill-target");
+        fs::create_dir_all(&target).expect("target dir");
+        let link = root.join("lab-commander");
+        std::os::unix::fs::symlink(&target, &link).expect("plant resolving link");
+        assert_eq!(resolved_link_target(&link), Some(target));
+        assert_eq!(resolved_link_target(&root.join("missing")), None);
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -661,6 +673,14 @@ mod tests {
         let registry = root.join("sessions");
         fs::create_dir_all(&registry).expect("registry");
         let home = root.join("home");
+        let skill_source = root.join("skill-target");
+        fs::create_dir_all(&skill_source).expect("skill target");
+        let claude_dir = home.join(".claude").join("skills");
+        fs::create_dir_all(&claude_dir).expect("claude link dir");
+        std::os::unix::fs::symlink(&skill_source, claude_dir.join("lab-commander"))
+            .expect("plant resolving link");
+        let decoy = root.join("repo").join("skills").join("lab-commander");
+        fs::create_dir_all(&decoy).expect("decoy checkout skill dir");
         let link_dir = home.join(".codex").join("skills");
         fs::create_dir_all(&link_dir).expect("link dir");
         let link = link_dir.join("lab-commander");
@@ -673,7 +693,6 @@ mod tests {
         fs::create_dir_all(&bin).expect("bin");
         fs::write(bin.join("h1"), "fake").expect("fake h1");
         fs::write(bin.join(OLD_BINARY_NAME), "fake").expect("stale binary");
-        let skill_source = root.join("repo").join("skills").join("lab-commander");
         let processes: Vec<String> = vec![
             "81921 /Users/x/.local/bin/agent-cli-lab console".to_string(),
             "21800 node /Users/x/Downloads/agent-toolkit/packages/lab-gui/server.mjs --open"
@@ -689,7 +708,6 @@ mod tests {
             &processes,
             &[],
             true,
-            Some(skill_source.clone()),
         );
         assert!(report.attention, "lines: {:?}", report.lines);
         for expected in [
@@ -697,6 +715,7 @@ mod tests {
             "  kill 81921".to_string(),
             "  kill 21800".to_string(),
             format!("  ln -sfn {} {}", skill_source.display(), link.display()),
+            format!("  {RM_OLD_BINARY_WARNING}"),
             format!("  rm {}", bin.join(OLD_BINARY_NAME).display()),
         ] {
             assert!(
@@ -710,7 +729,24 @@ mod tests {
             .iter()
             .filter(|line| line.starts_with("  "))
             .collect();
-        assert_eq!(hint_lines.len(), 4, "hints: {hint_lines:?}");
+        assert_eq!(hint_lines.len(), 5, "hints: {hint_lines:?}");
+        assert!(
+            hint_lines
+                .iter()
+                .all(|line| !line.contains(&decoy.display().to_string())),
+            "exe/cwd-style decoy path in {hint_lines:?}"
+        );
+        let rm_index = report
+            .lines
+            .iter()
+            .position(|line| *line == format!("  rm {}", bin.join(OLD_BINARY_NAME).display()))
+            .expect("rm hint");
+        assert_eq!(
+            report.lines[rm_index - 1],
+            format!("  {RM_OLD_BINARY_WARNING}"),
+            "warning must immediately precede rm: {:?}",
+            report.lines
+        );
         assert!(
             hint_lines
                 .iter()
@@ -736,7 +772,61 @@ mod tests {
             "plain: {:?}",
             plain.lines
         );
-        assert_eq!(report.lines.len(), plain.lines.len() + 5);
+        assert_eq!(report.lines.len(), plain.lines.len() + 6);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fix_hints_without_a_resolving_skill_link_print_the_fallback() {
+        let root = temp_root("hintsnone");
+        let registry = root.join("sessions");
+        fs::create_dir_all(&registry).expect("registry");
+        let home = root.join("home");
+        for host in [".claude", ".codex"] {
+            let dir = home.join(host).join("skills");
+            fs::create_dir_all(&dir).expect("link dir");
+            std::os::unix::fs::symlink(root.join("dead-target"), dir.join("lab-commander"))
+                .expect("plant broken link");
+        }
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("h1"), "fake").expect("fake h1");
+        let report = diagnose_inner(
+            &registry,
+            &home,
+            &root.join("tmp"),
+            &[bin],
+            &[4317],
+            &|_| false,
+            &[],
+            &[],
+            true,
+        );
+        assert!(report.attention, "lines: {:?}", report.lines);
+        assert!(
+            report
+                .lines
+                .iter()
+                .any(|line| line == &format!("  {NO_WORKING_SKILL_LINK_HINT}")),
+            "fallback missing in {:?}",
+            report.lines
+        );
+        assert!(
+            report.lines.iter().all(|line| !line.contains("ln -sfn")),
+            "ln hint in {:?}",
+            report.lines
+        );
+        assert_eq!(
+            report
+                .lines
+                .iter()
+                .filter(|line| line.contains(NO_WORKING_SKILL_LINK_HINT))
+                .count(),
+            1,
+            "fallback exactly once in {:?}",
+            report.lines
+        );
         let _ = fs::remove_dir_all(&root);
     }
 
