@@ -25,12 +25,12 @@ impl EnvFiles {
     /// read is an error; a missing implicit file is not.
     pub fn load(yah_file: &Path, explicit: &[PathBuf], include_implicit: bool) -> Result<Self, String> {
         let mut paths: Vec<PathBuf> = explicit.to_vec();
-        if include_implicit {
-            if let Some(dir) = yah_file.parent() {
-                let implicit = dir.join(".env");
-                if implicit.is_file() {
-                    paths.push(implicit);
-                }
+        if include_implicit
+            && let Some(dir) = yah_file.parent()
+        {
+            let implicit = dir.join(".env");
+            if implicit.is_file() {
+                paths.push(implicit);
             }
         }
         let mut out = EnvFiles::default();

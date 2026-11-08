@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use graphloop::cli::*;
 use graphloop::load::load_str;
-use graphloop::manifest::{Edge, EdgeKind, Node, PickInfo};
+use graphloop::manifest::{Edge, Node, PickInfo};
 use graphloop::plan::{OpenStep, Plan};
 use graphloop::spec::{Part, Templ};
 use graphloop::vault::Vaults;
