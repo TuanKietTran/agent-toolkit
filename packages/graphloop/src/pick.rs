@@ -542,6 +542,7 @@ mod tests {
             harnesses,
             teams: Vec::new(),
             workflows: Vec::new(),
+            vaults: Vec::new(),
             outputs: Vec::new(),
         }
     }

@@ -74,7 +74,11 @@ fn open_calls(log: &Path) -> Vec<String> {
 }
 
 fn up_req<'a>(plan: &'a Plan, home: &Path, manifest_dir: &Path, env: &'a dyn Fn(&str) -> Option<String>) -> UpRequest<'a> {
-    UpRequest { plan, nodes: sample_nodes(), source: "/tmp/team.yah".into(), home: home.to_path_buf(), manifest_dir: manifest_dir.to_path_buf(), run: RUN.into(), now_ms: NOW_MS, env }
+    UpRequest { plan, nodes: sample_nodes(), source: "/tmp/team.yah".into(), home: home.to_path_buf(), manifest_dir: manifest_dir.to_path_buf(), run: RUN.into(), now_ms: NOW_MS, env, vault: &no_vault }
+}
+
+fn no_vault(_: &str, _: &str) -> Result<String, String> {
+    Err("no vault".to_owned())
 }
 
 fn good_env(name: &str) -> Option<String> {

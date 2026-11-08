@@ -120,6 +120,7 @@ fn substitute(templ: &Templ, resolved: &[Resolved], spec: &Spec, line: u32, owne
         match part {
             Part::Lit(text) => push_lit(&mut parts, text.clone()),
             Part::Env(name) => parts.push(Part::Env(name.clone())),
+            Part::Vault(v, k) => parts.push(Part::Vault(v.clone(), k.clone())),
             Part::HarnessModel(name) => {
                 let Some(found) = resolved.iter().find(|r| &r.harness == name) else {
                     return Err(Diagnostics::one(error(
@@ -404,6 +405,7 @@ mod tests {
             harnesses,
             teams: vec![team],
             workflows: Vec::new(),
+            vaults: Vec::new(),
             outputs: Vec::new(),
         }
     }
@@ -587,14 +589,14 @@ mod tests {
     #[test]
     fn render_expands_env() {
         let step = manual_step(vec![Templ(vec![Part::Lit("KEY=".to_owned()), Part::Env("SECRET".to_owned())])]);
-        let ctx = RenderCtx { env: &|name| (name == "SECRET").then(|| "s3cr3t".to_owned()), model: &|_| None };
+        let ctx = RenderCtx { env: &|name| (name == "SECRET").then(|| "s3cr3t".to_owned()), model: &|_| None, vault: &|_, _| Err("no vault".to_owned()) };
         assert_eq!(step.render(&ctx).unwrap(), strings(&["KEY=s3cr3t"]));
     }
 
     #[test]
     fn render_missing_env_errors_and_names_it() {
         let step = manual_step(vec![Templ(vec![Part::Env("SECRET".to_owned())])]);
-        let ctx = RenderCtx { env: &|_| None, model: &|_| None };
+        let ctx = RenderCtx { env: &|_| None, model: &|_| None, vault: &|_, _| Err("no vault".to_owned()) };
         let err = step.render(&ctx).unwrap_err();
         assert!(err.contains("SECRET"), "{err}");
     }
@@ -602,9 +604,9 @@ mod tests {
     #[test]
     fn render_harness_model_part_uses_ctx() {
         let step = manual_step(vec![Templ(vec![Part::HarnessModel("builder".to_owned())])]);
-        let ctx = RenderCtx { env: &|_| None, model: &|name| (name == "builder").then(|| "anthropic/x".to_owned()) };
+        let ctx = RenderCtx { env: &|_| None, model: &|name| (name == "builder").then(|| "anthropic/x".to_owned()), vault: &|_, _| Err("no vault".to_owned()) };
         assert_eq!(step.render(&ctx).unwrap(), strings(&["anthropic/x"]));
-        let ctx_none = RenderCtx { env: &|_| None, model: &|_| None };
+        let ctx_none = RenderCtx { env: &|_| None, model: &|_| None, vault: &|_, _| Err("no vault".to_owned()) };
         assert!(step.render(&ctx_none).unwrap_err().contains("builder"));
     }
 

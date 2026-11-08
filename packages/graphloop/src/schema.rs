@@ -7,8 +7,8 @@ use crate::diag::{suggest, Diagnostic, Diagnostics};
 use crate::spec::*;
 use std::collections::{HashMap, HashSet};
 
-pub const KNOWN_KINDS: &[&str] = &["variable", "defaults", "provider", "model", "system_one", "image", "api", "harness", "team", "workflow", "output"];
-const LABELLED: &[&str] = &["variable", "provider", "model", "api", "harness", "team", "workflow", "output"];
+pub const KNOWN_KINDS: &[&str] = &["variable", "defaults", "provider", "vault", "model", "system_one", "image", "api", "harness", "team", "workflow", "output"];
+const LABELLED: &[&str] = &["variable", "provider", "vault", "model", "api", "harness", "team", "workflow", "output"];
 const SINGLETONS: &[&str] = &["defaults", "system_one", "image"];
 
 type StrRef = (String, Span);
@@ -18,6 +18,10 @@ type TeamRefs = (String, StrRef, Vec<StrRef>);
 struct Cx {
     file: String,
     diags: Diagnostics,
+    /// vault label -> declared `secrets` keys (empty: any KEY is allowed). Pre-scanned from the AST.
+    vault_keys: HashMap<String, Vec<String>>,
+    /// True only while reading an `env` map: `${vault.*}` is allowed there and nowhere else.
+    allow_vault: bool,
 }
 
 impl Cx {
@@ -107,8 +111,24 @@ fn interp_part(cx: &mut Cx, path: &[String], span: Span, harnesses: &[String], k
             return None;
         }
         Some(Part::HarnessModel(path[1].clone()))
+    } else if path.len() == 3 && path[0] == "vault" {
+        let Some(keys) = cx.vault_keys.get(&path[1]).cloned() else {
+            let mut names: Vec<String> = cx.vault_keys.keys().cloned().collect();
+            names.sort();
+            cx.unknown_ref(span, format!("The reference \"vault.{}.{}\" names a vault that is not declared in this file.", path[1], path[2]), &path[1], &names, ctx);
+            return None;
+        };
+        if !cx.allow_vault {
+            cx.err(span, "Vault reference not allowed here", format!("\"${{{}}}\" can only be the value of a key in an \"env\" map. A command line is visible to every process on the machine; an environment variable is not.", path.join(".")), Some(ctx), Some("Put it under env = { NAME = \"${vault.NAME.KEY}\" } and read NAME in the program.".to_owned()));
+            return None;
+        }
+        if !keys.is_empty() && !keys.contains(&path[2]) {
+            cx.unknown_ref(span, format!("The vault \"{}\" does not declare a secret named \"{}\".", path[1], path[2]), &path[2], &keys, ctx);
+            return None;
+        }
+        Some(Part::Vault(path[1].clone(), path[2].clone()))
     } else {
-        cx.err(span, "Unsupported reference", format!("The reference \"${{{}}}\" is not supported here. Valid references are var.<name>, env.<NAME> and harnesses.<label>.model.", path.join(".")), Some(ctx), None);
+        cx.err(span, "Unsupported reference", format!("The reference \"${{{}}}\" is not supported here. Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY> and harnesses.<label>.model.", path.join(".")), Some(ctx), None);
         let _ = key;
         None
     }
@@ -246,8 +266,8 @@ fn enum_value(cx: &mut Cx, a: &crate::ast::Assign, allowed: &[&str], ctx: &str) 
 }
 
 pub fn build(file: &crate::ast::File) -> Result<Spec, Diagnostics> {
-    let mut cx = Cx { file: file.name.clone(), diags: Diagnostics::default() };
-    let mut spec = Spec { version: file.version, file: file.name.clone(), variables: Vec::new(), defaults: Defaults::default(), providers: Vec::new(), models: Vec::new(), system_one: None, image: None, apis: Vec::new(), harnesses: Vec::new(), teams: Vec::new(), workflows: Vec::new(), outputs: Vec::new() };
+    let mut cx = Cx { file: file.name.clone(), diags: Diagnostics::default(), vault_keys: prescan_vaults(file), allow_vault: false };
+    let mut spec = Spec { version: file.version, file: file.name.clone(), variables: Vec::new(), defaults: Defaults::default(), providers: Vec::new(), vaults: Vec::new(), models: Vec::new(), system_one: None, image: None, apis: Vec::new(), harnesses: Vec::new(), teams: Vec::new(), workflows: Vec::new(), outputs: Vec::new() };
     let mut declared: HashMap<String, Vec<String>> = HashMap::new();
     for stmt in &file.stmts {
         if let Stmt::Block(b) = stmt
@@ -297,6 +317,7 @@ pub fn build(file: &crate::ast::File) -> Result<Spec, Diagnostics> {
                     "variable" => parse_variable(&mut cx, block, &mut spec),
                     "defaults" => { if let Some(p) = parse_defaults(&mut cx, block, &mut spec) { defaults_policy = Some(p); } }
                     "provider" => parse_provider(&mut cx, block, &mut spec),
+                    "vault" => parse_vault(&mut cx, block, &mut spec),
                     "model" => { if let Some(r) = parse_model(&mut cx, block, &mut spec) { model_refs.push(r); } }
                     "system_one" => { if let Some(r) = parse_system_one(&mut cx, block, &mut spec) { system_one_ref = Some(r); } }
                     "image" => { if let Some(r) = parse_image(&mut cx, block, &mut spec) { image_ref = Some(r); } }
@@ -420,6 +441,90 @@ fn parse_provider(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
     spec.providers.push(Provider { name: label, provider_type: provider_type.unwrap_or_default(), api_key_env, base_url, line: block.span.line });
 }
 
+/// Vault label -> the KEYs of its `secrets` map, read straight from the AST so references can be
+/// checked before the vault block itself is validated.
+fn prescan_vaults(file: &crate::ast::File) -> HashMap<String, Vec<String>> {
+    let mut out = HashMap::new();
+    for stmt in &file.stmts {
+        if let Stmt::Block(b) = stmt
+            && b.kind == "vault"
+            && let Some(label) = &b.label
+        {
+            let keys = match b.assign("secrets").map(|a| &a.value.kind) {
+                Some(ExprKind::Map(entries)) => entries.iter().map(|e| e.key.clone()).collect(),
+                _ => Vec::new(),
+            };
+            out.insert(label.clone(), keys);
+        }
+    }
+    out
+}
+
+fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
+    let label = block.label.clone().unwrap_or_default();
+    let ctx = block_ctx("vault", Some(&label));
+    let (assigns, _) = collect_body(cx, block, &["provider", "path", "account", "command", "secrets"], &[], &ctx);
+    let provider = match assigns.get("provider") {
+        Some(a) => static_string(cx, a, &ctx).map(|p| (p, a.value.span)),
+        None => { cx.missing(block.span, "provider", &ctx); None }
+    };
+    let mut info = None;
+    if let Some((p, span)) = &provider {
+        match crate::vault::provider(p) {
+            Some(i) => info = Some(i),
+            None => {
+                let names: Vec<String> = crate::vault::provider_names().into_iter().map(str::to_owned).collect();
+                let hint = suggest(p, names.iter().map(String::as_str)).map(|s| format!("Did you mean \"{s}\"?"));
+                cx.err(*span, "Unknown vault provider", format!("The vault provider \"{p}\" is not supported. Available: {}.", names.join(", ")), Some(&ctx), hint);
+            }
+        }
+    }
+    if let Some(info) = info {
+        for key in ["path", "account", "command"] {
+            if let Some(a) = assigns.get(key)
+                && !info.keys.contains(&key)
+            {
+                let accepted = if info.keys.is_empty() { "no extra arguments".to_owned() } else { info.keys.join(", ") };
+                cx.err(a.span, "Unsupported argument", format!("The argument \"{key}\" is not used by the \"{}\" provider, which accepts {accepted}.", info.name), Some(&ctx), None);
+            }
+        }
+        for key in info.required {
+            if !assigns.contains_key(*key) { cx.missing(block.span, key, &ctx); }
+        }
+    }
+    let path = assigns.get("path").and_then(|a| static_string(cx, a, &ctx));
+    let account = assigns.get("account").and_then(|a| static_string(cx, a, &ctx));
+    let command = assigns.get("command").and_then(|a| string_list(cx, a, &ctx));
+    if let (Some(a), Some(list)) = (assigns.get("command"), &command)
+        && list.is_empty()
+    {
+        cx.invalid_value(a.value.span, "command", "Invalid value for attribute \"command\": expected a non-empty list.".to_string(), &ctx);
+    }
+    let mut secrets: Vec<(String, String)> = Vec::new();
+    if let Some(a) = assigns.get("secrets") {
+        match &a.value.kind {
+            ExprKind::Map(entries) => {
+                for e in entries {
+                    if secrets.iter().any(|(k, _)| *k == e.key) {
+                        cx.err(e.span, "Duplicate argument", format!("The secret \"{}\" was already defined.", e.key), Some(&ctx), None);
+                        continue;
+                    }
+                    if let Some(reference) = static_string(cx, e, &ctx) {
+                        let name_like = !reference.is_empty() && reference.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'));
+                        if matches!(info.map(|i| i.name), Some("dotenv" | "env")) && !name_like {
+                            cx.err(e.value.span, "Secrets are never stored", format!("The reference for \"{}\" must be the name of a variable in the {} source, not a value.", e.key, info.map(|i| i.name).unwrap_or("vault")), Some(&ctx), Some("Write the variable name here and keep the value in the .env file or the vault.".to_owned()));
+                            continue;
+                        }
+                        secrets.push((e.key.clone(), reference));
+                    }
+                }
+            }
+            _ => cx.type_err(a.value.span, "secrets", "a map", &ctx),
+        }
+    }
+    spec.vaults.push(Vault { name: label, provider: provider.map(|(p, _)| p).unwrap_or_default(), path, account, command: command.unwrap_or_default(), secrets, line: block.span.line });
+}
+
 fn parse_model(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option<(String, String, Span)> {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("model", Some(&label));
@@ -491,7 +596,9 @@ fn parse_api(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses:
         }
         _ => {}
     }
+    cx.allow_vault = true;
     let env = assigns.get("env").and_then(|a| map_templ(cx, a, harnesses, &ctx)).unwrap_or_default();
+    cx.allow_vault = false;
     spec.apis.push(Api { name: label, api_type: if api_type.as_deref() == Some("http") { ApiType::Http } else { ApiType::Mcp }, command, url, env, line: block.span.line });
 }
 fn parse_open(cx: &mut Cx, block: &crate::ast::Block, harnesses: &[String], hctx: &str) -> Open {
@@ -510,7 +617,9 @@ fn parse_open(cx: &mut Cx, block: &crate::ast::Block, harnesses: &[String], hctx
     let cols = assigns.get("cols").and_then(|a| u16_value(cx, a, &ctx));
     let rows = assigns.get("rows").and_then(|a| u16_value(cx, a, &ctx));
     let cwd = assigns.get("cwd").and_then(|a| expr_as_templ(cx, &a.value, "cwd", harnesses, &ctx));
+    cx.allow_vault = true;
     let env = assigns.get("env").and_then(|a| map_templ(cx, a, harnesses, &ctx)).unwrap_or_default();
+    cx.allow_vault = false;
     let title = assigns.get("title").and_then(|a| expr_as_templ(cx, &a.value, "title", harnesses, &ctx));
     let detached = assigns.get("detached").and_then(|a| bool_value(cx, a, &ctx)).unwrap_or(false);
     Open { command, cols, rows, cwd, env, title, detached }

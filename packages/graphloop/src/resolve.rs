@@ -6,7 +6,7 @@
 //!     neither is an error. A variable default may not reference anything (v1).
 //!   * every `${var.x}` inside a string is spliced in as text (string/number/bool only) and every bare
 //!     `var.x` reference is replaced by the variable's value expression (any type);
-//!   * `env.NAME` and `harnesses.<label>.model` references are LEFT in place (late-bound): they are
+//!   * `env.NAME`, `vault.<label>.<KEY>` and `harnesses.<label>.model` references are LEFT in place (late-bound): they are
 //!     only validated (`env` needs a NAME; `harnesses.<label>.model` needs an existing harness label;
 //!     any other `harnesses.*` path is an error in v1; any other root is an unknown reference);
 //!   * unknown `var.*` names are errors with a "Did you mean" hint when close.
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use crate::ast::{self, Assign, Block, Expr, ExprKind, Span, Stmt, StrPart};
 use crate::diag::{suggest, Diagnostic, Diagnostics};
 
-const VALID_FORMS: &str = "Valid references are var.<name>, env.<NAME> and harnesses.<label>.model.";
+const VALID_FORMS: &str = "Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY> and harnesses.<label>.model.";
 
 fn make_diag(file: &str, span: Span, summary: &str, detail: String, context: Option<&str>, hint: Option<String>) -> Diagnostic {
     let mut d = Diagnostic::error(file, span, summary, detail);
@@ -126,6 +126,7 @@ struct Walker<'a> {
     vars: &'a BTreeMap<String, Expr>,
     declared: &'a [String],
     harnesses: &'a [String],
+    vaults: &'a [String],
     diags: Diagnostics,
 }
 
@@ -147,6 +148,20 @@ impl Walker<'_> {
             Some("var") => unknown(
                 format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"),
                 path.get(1).and_then(|n| did_you_mean(n, self.declared)),
+            ),
+            Some("vault") if path.len() == 3 => {
+                if self.vaults.iter().any(|v| v == &path[1]) {
+                    Class::LateBound
+                } else {
+                    unknown(
+                        format!("The reference \"{joined}\" names vault \"{}\", which is not declared in this file. {VALID_FORMS}", path[1]),
+                        did_you_mean(&path[1], self.vaults),
+                    )
+                }
+            }
+            Some("vault") => unknown(
+                format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"),
+                path.get(1).and_then(|n| did_you_mean(n, self.vaults)),
             ),
             Some("env") if path.len() == 2 => Class::LateBound,
             Some("env") => unknown(format!("\"{joined}\" is not a valid reference. {VALID_FORMS}"), None),
@@ -254,6 +269,15 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>) -> Result<
         })
         .collect();
 
+    let vault_labels: Vec<String> = file
+        .stmts
+        .iter()
+        .filter_map(|s| match s {
+            Stmt::Block(b) if b.kind == "vault" => b.label.clone(),
+            _ => None,
+        })
+        .collect();
+
     let mut diags = Diagnostics::default();
     let mut vars: BTreeMap<String, Expr> = BTreeMap::new();
     let mut declared: Vec<String> = Vec::new();
@@ -329,7 +353,7 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>) -> Result<
     }
 
     // Pass 2: walk every value, substituting and checking references.
-    let mut walker = Walker { file: &file_name, vars: &vars, declared: &declared, harnesses: &harness_labels, diags: Diagnostics::default() };
+    let mut walker = Walker { file: &file_name, vars: &vars, declared: &declared, harnesses: &harness_labels, vaults: &vault_labels, diags: Diagnostics::default() };
     for stmt in &mut file.stmts {
         let is_variable = matches!(stmt, Stmt::Block(b) if b.kind == "variable");
         if is_variable {

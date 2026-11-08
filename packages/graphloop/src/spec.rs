@@ -18,12 +18,18 @@ pub enum Part {
     Env(String),
     /// `${harnesses.NAME.model}`: the model `pick` resolved for harness NAME (`provider/id`).
     HarnessModel(String),
+    /// `${vault.NAME.KEY}`: a secret fetched from the `vault "NAME"` block's provider only when a lab
+    /// is opened. Allowed only in `env` maps, so the value reaches the program through its
+    /// environment and never through a command line.
+    Vault(String, String),
 }
 
 pub struct RenderCtx<'a> {
     pub env: &'a dyn Fn(&str) -> Option<String>,
     /// harness name -> `provider/id`
     pub model: &'a dyn Fn(&str) -> Option<String>,
+    /// (vault name, key) -> secret value. The error text must never contain a secret.
+    pub vault: &'a dyn Fn(&str, &str) -> Result<String, String>,
 }
 
 impl Templ {
@@ -35,7 +41,13 @@ impl Templ {
         self.0.iter().all(|p| matches!(p, Part::Lit(_)))
     }
 
-    /// Text with late-bound parts shown as `${env.NAME}` / `${harnesses.NAME.model}`. Safe to print.
+    /// True when the text holds a `${vault.*}` part, so it must travel in the environment.
+    pub fn has_vault(&self) -> bool {
+        self.0.iter().any(|p| matches!(p, Part::Vault(..)))
+    }
+
+    /// Text with late-bound parts shown as `${env.NAME}` / `${harnesses.NAME.model}` /
+    /// `${vault.NAME.KEY}`. Safe to print.
     pub fn display(&self) -> String {
         self.0
             .iter()
@@ -43,6 +55,7 @@ impl Templ {
                 Part::Lit(s) => s.clone(),
                 Part::Env(n) => format!("${{env.{n}}}"),
                 Part::HarnessModel(h) => format!("${{harnesses.{h}.model}}"),
+                Part::Vault(v, k) => format!("${{vault.{v}.{k}}}"),
             })
             .collect()
     }
@@ -57,6 +70,7 @@ impl Templ {
                 Part::HarnessModel(h) => {
                     out.push_str(&(ctx.model)(h).ok_or_else(|| format!("no model resolved for harness {h:?}"))?)
                 }
+                Part::Vault(v, k) => out.push_str(&(ctx.vault)(v, k)?),
             }
         }
         Ok(out)
@@ -89,6 +103,7 @@ pub struct Spec {
     pub variables: Vec<Variable>,
     pub defaults: Defaults,
     pub providers: Vec<Provider>,
+    pub vaults: Vec<Vault>,
     pub models: Vec<Model>,
     pub system_one: Option<SystemOne>,
     pub image: Option<Image>,
@@ -129,6 +144,25 @@ pub struct Provider {
     /// The environment variable NAME, not its value.
     pub api_key_env: Option<String>,
     pub base_url: Option<String>,
+    pub line: u32,
+}
+
+/// `vault "label" { provider, path, account, command, secrets }`: where `${vault.label.KEY}`
+/// secrets come from. Holds configuration only, never a value. `provider` selects an adapter in
+/// `crate::vault` (`dotenv`, `env`, `command`, ...); `secrets` optionally maps each KEY to the
+/// provider-side reference (an `op://` path, a Bitwarden item, a variable name, ...).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Vault {
+    pub name: String,
+    pub provider: String,
+    /// `path`: dotenv file, relative to the `.yah` file.
+    pub path: Option<String>,
+    /// `account`: provider account or server (for example a 1Password account).
+    pub account: Option<String>,
+    /// `command`: argv template for the `command` provider; `{ref}` and `{key}` are substituted.
+    pub command: Vec<String>,
+    /// KEY -> provider-side reference. Empty means any KEY is allowed and the KEY is the reference.
+    pub secrets: Vec<(String, String)>,
     pub line: u32,
 }
 
@@ -256,6 +290,9 @@ impl Spec {
     }
     pub fn model(&self, label: &str) -> Option<&Model> {
         self.models.iter().find(|m| m.name == label)
+    }
+    pub fn vault(&self, label: &str) -> Option<&Vault> {
+        self.vaults.iter().find(|v| v.name == label)
     }
     pub fn provider(&self, label: &str) -> Option<&Provider> {
         self.providers.iter().find(|p| p.name == label)

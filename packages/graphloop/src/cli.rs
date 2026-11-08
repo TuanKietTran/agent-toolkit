@@ -171,7 +171,9 @@ pub fn parse_list_names(text: &str) -> Result<HashSet<String>, String> {
 
 pub trait LabRunner {
     fn list_names(&self) -> Result<HashSet<String>, String>;
-    fn open(&self, argv: &[String], log_path: &Path) -> Result<(), String>;
+    /// `env` is passed in the process environment of `h1 open` (and so reaches the hosted program);
+    /// secrets travel only this way, never in `argv`.
+    fn open(&self, argv: &[String], env: &[(String, String)], log_path: &Path) -> Result<(), String>;
     fn stop(&self, name: &str) -> Result<(), String>;
     fn console_snapshot(&self) -> Result<String, String>;
 }
@@ -192,10 +194,10 @@ impl ProcessRunner {
 
 impl LabRunner for ProcessRunner {
     fn list_names(&self) -> Result<HashSet<String>, String> { parse_list_names(&self.run_capture(&["list", "--json"])?) }
-    fn open(&self, argv: &[String], log_path: &Path) -> Result<(), String> {
+    fn open(&self, argv: &[String], env: &[(String, String)], log_path: &Path) -> Result<(), String> {
         let file = std::fs::File::create(log_path).map_err(|e| format!("create {}: {e}", log_path.display()))?;
         let file_err = file.try_clone().map_err(|e| format!("clone {}: {e}", log_path.display()))?;
-        let status = std::process::Command::new(&self.bin).args(argv).stdout(std::process::Stdio::from(file)).stderr(std::process::Stdio::from(file_err)).status().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
+        let status = std::process::Command::new(&self.bin).args(argv).envs(env.iter().cloned()).stdout(std::process::Stdio::from(file)).stderr(std::process::Stdio::from(file_err)).status().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
         if status.success() { Ok(()) } else { Err(format!("h1 open failed ({status}); see {}", log_path.display())) }
     }
     fn stop(&self, name: &str) -> Result<(), String> { self.run_capture(&["stop", "-n", name]).map(|_| ()) }
@@ -237,6 +239,8 @@ pub struct UpRequest<'a> {
     pub run: String,
     pub now_ms: u64,
     pub env: &'a dyn Fn(&str) -> Option<String>,
+    /// `${vault.NAME.KEY}` lookup (see `crate::vault::Vaults`). Errors never contain a secret.
+    pub vault: &'a dyn Fn(&str, &str) -> Result<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -245,12 +249,32 @@ pub struct UpOutcome { pub run: String, pub run_dir: PathBuf, pub manifest_path:
 pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, String> {
     let models: HashMap<String, String> = req.nodes.iter().map(|n| (n.harness.clone(), n.model.clone())).collect();
     let model_fn = |h: &str| models.get(h).cloned();
-    let mut rendered: Vec<Vec<String>> = Vec::new();
+    // Render every command BEFORE opening anything: a secret that cannot be fetched stops the run
+    // with no lab opened. An `--env NAME=VALUE` pair whose value holds a `${vault.*}` or `${env.*}`
+    // part is not put on the command line (every process can read argv); it is passed to
+    // `h1 open` in its process environment, which the hosted program inherits.
+    let mut rendered: Vec<(Vec<String>, Vec<(String, String)>)> = Vec::new();
+    let mut secret_values: Vec<String> = Vec::new();
     for step in &req.plan.steps {
-        let ctx = RenderCtx { env: req.env, model: &model_fn };
+        let ctx = RenderCtx { env: req.env, model: &model_fn, vault: req.vault };
         let mut argv = Vec::new();
-        for t in &step.argv { argv.push(t.render(&ctx).map_err(|e| format!("harness {}: {e}", step.harness))?); }
-        rendered.push(argv);
+        let mut secret_env: Vec<(String, String)> = Vec::new();
+        let mut i = 0;
+        while i < step.argv.len() {
+            let t = &step.argv[i];
+            let secret_pair = t.display() == "--env" && step.argv.get(i + 1).is_some_and(|n| n.has_vault() || n.0.iter().any(|p| matches!(p, crate::spec::Part::Env(_))));
+            if secret_pair {
+                let pair = step.argv[i + 1].render(&ctx).map_err(|e| format!("harness {}: {}", step.harness, crate::vault::scrub(&e, &secret_values)))?;
+                let (name, value) = pair.split_once('=').ok_or_else(|| format!("harness {}: malformed env entry", step.harness))?;
+                secret_values.push(value.to_owned());
+                secret_env.push((name.to_owned(), value.to_owned()));
+                i += 2;
+                continue;
+            }
+            argv.push(t.render(&ctx).map_err(|e| format!("harness {}: {}", step.harness, crate::vault::scrub(&e, &secret_values)))?);
+            i += 1;
+        }
+        rendered.push((argv, secret_env));
     }
     let live = runner.list_names()?;
     for step in &req.plan.steps {
@@ -262,13 +286,14 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
     let manifest = build_manifest(req.plan, req.nodes.clone(), &req.source, &req.run, &trace_dir, req.now_ms);
     let manifest_path = write_manifest_to(&manifest, &req.manifest_dir)?;
     let mut opened: Vec<String> = Vec::new();
-    for (step, argv) in req.plan.steps.iter().zip(rendered.iter()) {
+    for (step, (argv, secret_env)) in req.plan.steps.iter().zip(rendered.iter()) {
         let log_path = run_dir.join(format!("open-{}.log", step.name));
-        match runner.open(argv, &log_path) {
+        match runner.open(argv, secret_env, &log_path) {
             Ok(()) => { let _ = std::fs::remove_file(&log_path); opened.push(step.name.clone()); }
             Err(e) => {
                 for name in opened.iter().rev() { let _ = runner.stop(name); }
                 let _ = std::fs::remove_file(&manifest_path);
+                let e = crate::vault::scrub(&e, &secret_values);
                 let _ = std::fs::write(run_dir.join("error.log"), format!("open {} failed: {e}\n", step.name));
                 return Err(format!("open failed for {}: {e}", step.name));
             }
@@ -452,8 +477,11 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             let nodes = build_nodes(&spec.harnesses, &plan, &resolved).map_err(|e| err(&e))?;
             let runner = ProcessRunner::from_env();
             let env_fn = |name: &str| std::env::var(name).ok();
-            let req = UpRequest { plan: &plan, nodes, source: absolute_string(&args.file), home, manifest_dir: crate::manifest::dir(), run, now_ms: now_ms(), env: &env_fn };
-            up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&e))
+            let base_dir = std::path::Path::new(&absolute_string(&args.file)).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+            let vaults = crate::vault::Vaults::new(&spec.vaults, base_dir, &env_fn);
+            let vault_fn = |vault: &str, key: &str| vaults.get(vault, key);
+            let req = UpRequest { plan: &plan, nodes, source: absolute_string(&args.file), home, manifest_dir: crate::manifest::dir(), run, now_ms: now_ms(), env: &env_fn, vault: &vault_fn };
+            up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values())))
         }
         Cmd::Down { file, run, purge } => {
             let manifests = Manifest::list();
