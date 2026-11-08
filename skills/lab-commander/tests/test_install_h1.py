@@ -43,6 +43,29 @@ class InstallH1Tests(unittest.TestCase):
                 self.assertEqual(link.resolve(), tool.resolve(), link)
             self.assertTrue((home / ".local/bin/labctl").is_symlink())
 
+    def test_created_tool_links_exact_set_and_h1_era_contents(self):
+        expected = {"labctl", "lab-clean", "lab-gui", "lab-team", "lab-watch"}
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp) / "home"
+            result = run_install(home, cwd=tmp)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            created = {p.name for p in (home / ".local/bin").iterdir()}
+            self.assertEqual(created, expected)
+            for name in expected:
+                link = home / ".local/bin" / name
+                self.assertTrue(link.is_symlink(), link)
+                self.assertEqual(link.resolve(), (SKILL / "bin" / name).resolve(), link)
+            for path in home.rglob("*"):
+                self.assertNotIn(LEGACY_BIN, path.name)
+        legacy_underscore = "_".join(["agent", "cli", "lab"])
+        for name in expected:
+            text = (SKILL / "bin" / name).read_text()
+            self.assertNotIn(LEGACY_BIN, text, name)
+            self.assertNotIn(legacy_underscore, text, name)
+        for name in ("labctl", "lab-clean", "lab-team", "lab-watch"):
+            self.assertIn("h1", (SKILL / "bin" / name).read_text(), name)
+        self.assertIn("packages/lab-gui/server.mjs", (SKILL / "bin/lab-gui").read_text())
+
     def test_labctl_execs_h1(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
