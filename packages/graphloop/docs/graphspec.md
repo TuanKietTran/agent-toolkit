@@ -33,7 +33,7 @@ comment       := "//" .*
 - Top-level blocks only (nested blocks allowed inside schema-defined values)
 - Identifiers: `[a-zA-Z_][a-zA-Z0-9_-]*`
 - Strings: double-quoted or raw backticks
-- Interpolation: `${env.NAME}` `${var.name}` `${harnesses.builder.model}`
+- Interpolation: `${env.NAME}` `${var.name}` `${harnesses.builder.model}` `${defaults.log_dir}` and, inside harness-shaped blocks, `${name}` `${parent}` `${role}` `${member}`
 - Booleans: `true` / `false` only
 - Null: `null`
 - Trailing commas allowed
@@ -51,6 +51,8 @@ comment       := "//" .*
 | `system_one` | 0..1 | system-one model-pick policy |
 | `image` | 0..1 | image generation & vision |
 | `api` | 0..n | MCP / HTTP tools |
+| `prototype` | 0..n | reusable harness templates (see Templates and derivation) |
+| `group` | 0..n | harnesses stamped from a prototype, one per member name |
 | `harness` | 0..n | named agent harnesses (kind = h1) |
 | `team` | 0..n | orchestration teams / graphs |
 | `workflow` | 0..n | higher-level multi-step flows |
@@ -160,6 +162,8 @@ Strict mode (vault: "Strict mode: unknown keys or missing required fields = erro
 | --- | --- | --- | --- |
 | `model_policy` | string | no | — |
 | `sandbox` | string | no | — |
+| `worktree_root` | template | no | — — **extension**: base directory for per-harness working trees, read as `${defaults.worktree_root}` |
+| `log_dir` | template | no | — — **extension**: base directory for per-harness logs, read as `${defaults.log_dir}` |
 
 ### `provider "<name>"` (0..n)
 
@@ -205,13 +209,14 @@ Strict mode (vault: "Strict mode: unknown keys or missing required fields = erro
 
 | Key | Type | Required | Default |
 | --- | --- | --- | --- |
-| `kind` | string | yes | — (v1: must be `"h1"`) |
-| `role` | string | yes | — |
+| `prototype` | string (a `prototype` label) | no | — — **extension**: start from that template; own keys win |
+| `kind` | string | yes | — (v1: must be `"h1"`; may come from the prototype) |
+| `role` | string | yes | — (may come from the prototype) |
 | `parent` | string (a `harness` label) | no | — |
-| `model` | string (a `model` label, or `"system-one"`) | yes | — |
+| `model` | string (a `model` label, or `"system-one"`) | yes | — (may come from the prototype) |
 | `tools` | list of string (`api` labels) | no | `[]` |
 | `complexity` | string | no | — — **extension**: hint for system-one |
-| `open` | block (below) | yes | — |
+| `open` | block (below) | yes | — (may come from the prototype, merged key by key) |
 
 ### `open { ... }` (inside `harness`, exactly 1)
 
@@ -233,7 +238,9 @@ Strict mode (vault: "Strict mode: unknown keys or missing required fields = erro
 | Key | Type | Required | Default |
 | --- | --- | --- | --- |
 | `root` | string (a `harness` label) | yes | — |
-| `members` | list of string (`harness` labels) | yes | — |
+| `members` | list of string (`harness` labels) | no | derived: every harness reachable from `root` through parent edges (see Templates and derivation) |
+| `include` | list of string (glob over `harness` labels) | no | `[]` — **extension**: adds every matching harness to the members |
+| `exclude` | list of string (glob over `harness` labels) | no | `[]` — **extension**: removes matching harnesses from the members (never the root) |
 | `graph` | bool | no | `false` |
 
 ### `workflow "<name>"` (0..n)
@@ -311,7 +318,7 @@ Reproduced from the contract's "Launching" section:
 2. `model = "system-one"` is resolved by `packages/system-one`, with fallback only as defined in the `system_one` block.
 3. The `team` block is the graph: nodes are harnesses, edges are `parent` plus `root -> member`. There is no other graph definition.
 4. Loops stay inside h1; Graphloop adds no second loop runner.
-5. Graphs are small and explicit: every node and edge is written in the file, nothing is generated or discovered at run time.
+5. Graphs are static: every node and edge is fixed when the file is loaded. `prototype`, `group`, `include` and derived `members` are expanded at load time, deterministically and without reading the machine, so `check`, `plan`, `graph` and the run manifest always show the same fully expanded nodes. Nothing is generated or discovered while a run is live.
 6. One trace per run: with recording on, every session of the run records into the run's single trace directory.
 7. `image` and `api` blocks are tools, not prompt text: they are handed to harnesses as tools and are never inlined into a prompt.
 
@@ -356,6 +363,114 @@ This package ships editor support for the graphspec / yah language under `editor
 - `editors/README.md` — installation and scope notes.
 
 Examples live under `examples/` (`team.yah`, `research-team.yah`, `demo.yah`) and illustrate the declaration forms above. The package overview, including how this document, the editor support, and the examples fit together, is in the package `README.md`.
+
+# Templates and derivation
+
+Extension to version 1 that removes repeated names and paths. It adds no new runtime concept: loading expands everything below into plain `harness` blocks and plain `team.members`, and every later stage (resolve, schema validation, plan, manifest) sees only the expanded result. A file that uses none of it behaves exactly as before.
+
+Expansion order: `group` → `prototype` merge → `${name}`/`${parent}`/`${role}`/`${member}` substitution → team membership → the usual resolve and schema validation.
+
+## `prototype "<name>"` (0..n)
+
+A harness with every key optional and no `parent`. It may carry `extends = "<prototype label>"` to build on another prototype (cycles are an error). Keys are exactly the `harness` keys; `open` is the same block.
+
+```yah
+prototype "worker" {
+  kind  = "h1"
+  role  = "worker"
+  model = "muse"
+  open {
+    detached = true
+    command  = ["pi", "--provider", "muse", "--model", "muse", "--no-session"]
+    env      = { FLEET_RUN_TOKEN = "${vault.fleet.FLEET_RUN_TOKEN}" }
+  }
+}
+
+harness "w-prov" {
+  prototype = "worker"
+  parent    = "cmdr-vault"
+  open {
+    title = "${name}: vault providers"
+    cwd   = "${defaults.worktree_root}/${name}"
+  }
+}
+```
+
+Merge rule (prototype, then the consuming block on top; the consumer always wins):
+
+- scalar keys: the consumer's value replaces the prototype's;
+- `list` values (`command`, `tools`): replaced whole, never concatenated;
+- `map` values (`env`) and the `open` block: merged key by key, consumer's key wins;
+- a key set to `null` in the consumer removes the inherited key.
+
+Required keys are checked after the merge, so a prototype may leave `role` unset for the consumer to supply. A prototype that no harness or group uses is valid and ignored. `graphloop check` reports an unknown prototype label with a `Did you mean ...?` hint.
+
+## Name interpolation
+
+Inside `harness`, `group` and `prototype` blocks (including their `open` block), these resolve at expansion time:
+
+| Form | Value |
+| --- | --- |
+| `${name}` | the harness label being defined (for a group member: prefix + member) |
+| `${parent}` | the label of the harness's `parent`; an error if it has none |
+| `${role}` | the harness's `role` after merge |
+| `${member}` | inside a `group` only: the bare member name, without the prefix |
+
+Templates written in a prototype are substituted against the harness that uses the prototype, not against the prototype. These forms are errors in any other block. `${name}` is the label, before `--prefix`; session naming (Semantics) still applies afterwards, including the 40-character limit.
+
+## `group "<name>"` (0..n)
+
+Stamps one harness per member from a prototype, with a shared parent.
+
+| Key | Type | Required | Default |
+| --- | --- | --- | --- |
+| `prototype` | string (a `prototype` label) | yes | — |
+| `parent` | string (a `harness` label) | no | — |
+| `prefix` | string | no | `""` — each harness label is `prefix` + member |
+| `members` | list of string | yes | — |
+| `open`, `model`, `role`, `tools`, `complexity` | as in `harness` | no | override the prototype for every member |
+
+```yah
+group "vault-workers" {
+  prototype = "worker"
+  parent    = "cmdr-vault"
+  prefix    = "w-"
+  members   = ["prov", "envf", "docs", "alias"]
+  open {
+    cwd = "${defaults.worktree_root}/${name}"
+  }
+}
+```
+
+The example defines `w-prov`, `w-envf`, `w-docs` and `w-alias`, in member order. A generated label that collides with an explicit `harness` or another group's label is an error, with both locations. Members are listed in the file; a group never reads the disk or the environment to decide who exists.
+
+## Derived team membership
+
+`team.members` is optional. When omitted, the members are every harness reachable from `root` by following `parent` edges downward (the root's children, their children, and so on). `include` adds every harness whose label matches one of its globs (`*` any run of characters, `?` one character; case-sensitive; the whole label must match). `exclude` then removes matches. An explicit `members` list is unioned with the derived set, so listing it stays valid but is no longer needed. The `root` is always a member and is never excluded.
+
+A member with no parent still gets the member edge `root -> member` (Semantics, Edges), so an `include`d parentless harness hangs off the root. Order is declaration order, with generated group harnesses at the position of their `group` block.
+
+```yah
+team "fleet" {
+  root    = "claude"
+  graph   = true
+  include = ["cmdr-*"]
+}
+```
+
+## `defaults` paths
+
+`worktree_root` and `log_dir` give derived locations one home: `cwd = "${defaults.worktree_root}/${name}"` ties a directory to a label without repeating either. `${defaults.<key>}` may be used in any template; an unset key is an error at resolve time, like an unset `var`.
+
+A status board does not need to list logs. Under the same `log_dir`, a harness can run `sh -c "cd ${defaults.log_dir} && tail -n 3 -F *.log"`; the glob is expanded by the shell at run time, so adding or removing a worker needs no edit here.
+
+## Errors added
+
+- unknown or cyclic `prototype` / `extends`;
+- `${parent}` in a harness with no parent; `${member}` outside a group; any name form outside harness-shaped blocks;
+- label collision between harnesses and generated group harnesses;
+- `include`/`exclude` glob that matches no harness (warning, not error, for `include`; error for an `exclude` that names the root);
+- unset `${defaults.<key>}`.
 
 # Secret vaults
 
