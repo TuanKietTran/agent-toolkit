@@ -1,4 +1,4 @@
-//! Side-effect-free preview test (pv-qa #5).
+//! Side-effect-free preview test.
 //!
 //! The contract in `src/preview.rs`: producing a preview NEVER spawns a
 //! process (system-one included), never writes a run manifest, never

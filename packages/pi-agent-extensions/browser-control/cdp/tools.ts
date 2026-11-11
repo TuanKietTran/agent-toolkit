@@ -1,4 +1,4 @@
-// Tools layer for the CDP browser-control extension (bc_tools).
+// Tools layer for the CDP browser-control extension (the tools layer).
 // Registers the 13 contract tools; every call delegates to controller.call(agent, name, params)
 // with params passed through verbatim. Results are mapped, never thrown: OkResult -> text
 // content (+ image block for screenshot); StopResult/ErrorResult -> text = message,

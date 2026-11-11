@@ -1,12 +1,12 @@
 // Shared contract of the CDP browser-control extension. Types and constants only.
-// bc_cdp implements the controller side, bc_tools the pi tools, bc_qa the tests.
+// the controller implements the controller side, the tools layer the pi tools, the test suite the tests.
 // All three code against this file; do not change it without telling the manager.
 
 // ---- Layout (all under packages/pi-agent-extensions/browser-control/cdp/) ----
-// bc_cdp:   client.ts (CDP over WebSocket), controller.ts, ownership.ts, detector.ts,
+// the controller:   client.ts (CDP over WebSocket), controller.ts, ownership.ts, detector.ts,
 //           guard.ts, pacing.ts, snapshot.ts, launch.ts
-// bc_tools: index.ts (default export), tools.ts, README.md, package.json "pi.extensions" entry
-// bc_qa:    fixture/ (page.html + server.ts), tests/*.test.ts, package.json "test" script entry
+// the tools layer: index.ts (default export), tools.ts, README.md, package.json "pi.extensions" entry
+// the test suite:    fixture/ (page.html + server.ts), tests/*.test.ts, package.json "test" script entry
 
 export const TOOL_NAMES = [
   "tabs_list", "tab_open", "tab_close", "navigate", "snapshot", "click",

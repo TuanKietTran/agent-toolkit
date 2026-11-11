@@ -6,7 +6,7 @@ import { FAST_PACING } from '../contract.ts';
 // The contract fixes PacingOptions/FAST_PACING and the semantics (serialized mutex,
 // random delay in [min,max] before each action, minimum gap between actions, injectable
 // sleep/random) but does not name the pacer export. makePacer resolves whichever
-// factory/class bc_cdp shipped; runAction resolves its run/wait/delay/acquire method.
+// factory/class the controller shipped; runAction resolves its run/wait/delay/acquire method.
 // If neither exists this file fails loudly, which is the intended phase-2 signal.
 function makePacer(opts: object): any {
   const ns: any = pacingNs as any;

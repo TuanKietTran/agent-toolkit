@@ -1,6 +1,6 @@
-// CDP browser-control extension entry (bc_tools). Default export per cdp/contract.ts.
+// CDP browser-control extension entry (the tools layer). Default export per cdp/contract.ts.
 // The controller is created lazily on first use: no browser connection at load time.
-// bc_cdp's controller.ts currently exports ControllerImpl; createController is also
+// the controller's controller.ts currently exports ControllerImpl; createController is also
 // accepted so either shape works after the branches merge.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Controller } from "./contract.ts";

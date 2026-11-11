@@ -1,7 +1,7 @@
 # CDP browser control (tools layer)
 
 Pi tools layer for the CDP browser-control extension, per `contract.ts` (do not change
-the contract without telling the manager). bc_cdp owns the controller side
+the contract without telling the manager). the controller owns the controller side
 (`controller.ts`, `client.ts`, `ownership.ts`, `detector.ts`, `guard.ts`, `pacing.ts`,
 `snapshot.ts`, `launch.ts`); this layer owns only registration and result mapping.
 
@@ -26,6 +26,6 @@ for `screenshot`). `StopResult` / `ErrorResult` -> text content = `message` and
 
 ## /bc command
 - `/bc status` — connection, agent id, owned tabs, active halt.
-- `/bc launch` — launch Brave via bc_cdp's `launchBrave` (never auto-called by a tool), then connect.
+- `/bc launch` — launch Brave via the controller's `launchBrave` (never auto-called by a tool), then connect.
 - `/bc assign <tabId> [agent]` — user-initiated assignment of an existing tab.
 - `/bc resume` — clear the detector halt after the user has handled a block.
