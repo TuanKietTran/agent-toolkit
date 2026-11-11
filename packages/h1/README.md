@@ -289,3 +289,16 @@ See [`specs/`](specs/) for prioritized problems and acceptance criteria.
 ## Commander skill
 
 [`../../skills/lab-commander`](../../skills/lab-commander) documents the `h1` CLI. `labctl` is a compatibility shim that execs `h1`. Run `skills/lab-commander/install.sh` to install the Rust binary and link the skill plus `labctl`, `lab-watch`, and `lab-clean`; the common `skills/install.py` installer handles skill and executable links, not Rust binary installation. The shell installer invokes the binary installation step before delegating to the common installer.
+
+## Resources
+
+A run can record the things it creates, so they can be listed and freed together instead of leaking:
+
+```sh
+$ h1 alloc worktree ./wt --run run1
+$ h1 alloc port 45991 --run run1
+$ h1 resources --run run1
+$ h1 gc --run run1
+```
+
+`alloc` records a `worktree|clone|tmp|port|proc` value against `--run` in `$H1_DIR/resources.json`. `h1 resources` lists the live ones with their owner run and age, and `h1 release|gc [--run R]` frees them: directory paths are removed, a proc pid is killed, and a port is record-only. Stopping a session releases its run automatically, and `h1 doctor` flags resources leaked from dead runs.

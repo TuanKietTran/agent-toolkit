@@ -924,6 +924,9 @@ pub(crate) fn stop(args: StopArgs) -> Result<i32> {
             .as_deref()
             .map_or_else(|| socket.display().to_string(), str::to_owned)
     );
+    if let Some(name) = &args.connection.name {
+        crate::resources::release(&crate::session::session_dir(), Some(name.as_str()));
+    }
     Ok(0)
 }
 
