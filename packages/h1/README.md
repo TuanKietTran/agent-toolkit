@@ -61,7 +61,7 @@ h1 relation remove consumer depends_on producer
 - **Events** are a host's own state changes: `started`, `asking`, `stalled`, `idle`, `exited` (detail carries `exit_code`), `closed` (the last event of a session) and `relation_ended`. `event subscribe (-n APP... | --all) [--kind K,K] [--count N] [--timeout-ms MS]` streams them; a new subscriber first gets the current state replayed as one event. A `relation_ended` event is delivered to the receiving session, with detail `{"ended": <name>, "relation": <kind>, "role": "from"|"to"}` (the role of the ended session in that edge).
 - **Relations** are typed edges: `parent`, `supervises`, `depends_on`, `pairs_with` (symmetric). `relation add FROM KIND TO [--cascade]` is sent to `from` and mirrored to `to`. When a host ends it releases its edges to its peers: they drop the edge, raise `relation_ended`, and stop their children on `--cascade` parent edges (cascade is only meaningful for `parent`). In the console, `r` toggles a relations overlay on the graph view and `:events` is the events pane.
 
-[`../graphloop/examples/signals-team.yah`](../graphloop/examples/signals-team.yah) brings the `producer`/`consumer` pair above up as one team.
+[`examples/signals-pair.yah`](examples/signals-pair.yah) brings the `producer`/`consumer` pair above up as one team.
 
 ## Console (k9s-style TUI)
 
