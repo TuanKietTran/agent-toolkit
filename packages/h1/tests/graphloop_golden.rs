@@ -15,6 +15,12 @@
 //! read-only: nothing is opened. Until sg-merge lands the fold in
 //! this binary the test fails on `unrecognized subcommand 'check'`:
 //! no gating, by design.
+//!
+//! The signals example lives in this crate as
+//! `examples/signals-pair.yah` (team `pair`, checked by the
+//! graphloop binary in sg-qa); it joins `EXAMPLES` with a
+//! regenerated golden when sg-merge re-points this test at the
+//! folded examples directory.
 
 use std::{
     fs,
@@ -24,14 +30,7 @@ use std::{
 
 /// Every graphloop example, by stem. Single source of truth: a new
 /// example is added here together with its golden in `tests/golden/`.
-const EXAMPLES: &[&str] = &[
-    "demo",
-    "renewable-team",
-    "research-team",
-    "signals-team",
-    "team",
-    "vault",
-];
+const EXAMPLES: &[&str] = &["demo", "renewable-team", "research-team", "team", "vault"];
 
 fn binary() -> &'static str {
     env!("CARGO_BIN_EXE_h1")
