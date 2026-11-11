@@ -28,9 +28,9 @@ async function assertManifestEntries(base, entries) {
 }
 
 test("source and built manifests resolve every declared extension", async () => {
-  const requiredFeatures = ["./touchbar-usage/index.ts", "./browser-control/index.ts", "./claude-cli/index.ts", "./muse-proxy/index.ts", "./opencode-cli/index.ts"];
-  assert.equal(sourceManifest.pi.extensions.length, 9);
-  assert.equal(builtManifest.pi.extensions.length, 9);
+  const requiredFeatures = ["./touchbar-usage/index.ts", "./browser-control/index.ts", "./browser-control/cdp/index.ts", "./claude-cli/index.ts", "./muse-proxy/index.ts", "./opencode-cli/index.ts"];
+  assert.equal(sourceManifest.pi.extensions.length, 10);
+  assert.equal(builtManifest.pi.extensions.length, 10);
   for (const entry of requiredFeatures) {
     assert.equal(sourceManifest.pi.extensions.filter((item) => item === entry).length, 1, `${entry} must be declared once`);
   }
