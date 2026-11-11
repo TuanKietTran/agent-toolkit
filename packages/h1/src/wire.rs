@@ -17,7 +17,7 @@
 //!
 //! Commands (names fixed):
 //!   h1 signal emit [-n FROM] (--to APP | --all) NAME [--type T] [--data JSON | --text TEXT]
-//!   h1 signal listen -n APP [--name N] [--type T] [--count N] [--timeout-ms MS]
+//!   h1 signal listen -n APP [--signal N] [--type T] [--count N] [--timeout-ms MS]
 //!   h1 event subscribe (-n APP... | --all) [--kind K,K] [--count N] [--timeout-ms MS]
 //!   h1 relation add FROM KIND TO [--cascade]
 //!   h1 relation list [-n APP] [--json]

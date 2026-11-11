@@ -105,6 +105,7 @@ enum View {
     Graph,
     Models,
     Agents,
+    Events,
 }
 
 impl View {
@@ -114,6 +115,7 @@ impl View {
             "graph" | "g" | "topology" | "tree" | "xray" => Some(View::Graph),
             "models" | "model" | "m" => Some(View::Models),
             "agents" | "all" | "fleet" | "everyone" => Some(View::Agents),
+            "events" | "event" | "e" => Some(View::Events),
             _ => None,
         }
     }
@@ -123,6 +125,7 @@ impl View {
             View::Graph => "graph",
             View::Models => "models",
             View::Agents => "agents",
+            View::Events => "events",
         }
     }
 }
@@ -904,6 +907,9 @@ struct App {
     agents: AgentsFeed,
     agents_table: TableState,
     overlay: crate::graphspec::Overlay,
+    events: crate::relations::EventsFeed,
+    relations: Vec<crate::wire::Edge>,
+    show_relations: bool,
 }
 
 impl App {
@@ -926,6 +932,9 @@ impl App {
             agents: AgentsFeed::default(),
             agents_table: TableState::default(),
             overlay: crate::graphspec::Overlay::default(),
+            events: crate::relations::EventsFeed::default(),
+            relations: Vec::new(),
+            show_relations: false,
         }
     }
 
@@ -967,6 +976,9 @@ impl App {
             all.push(planned_probe(info));
         }
         self.labs = arrange_with(&all, &self.history, &self.overlay);
+        let names: Vec<String> = live_names.iter().map(|name| (*name).to_owned()).collect();
+        self.events.sync(&names);
+        self.relations = crate::relations::current_edges();
         self.reselect();
     }
 
@@ -1293,13 +1305,18 @@ impl App {
                         View::Labs => View::Graph,
                         View::Graph => View::Models,
                         View::Models => View::Agents,
-                        View::Agents => View::Labs,
+                        View::Agents => View::Events,
+                        View::Events => View::Labs,
                     };
                 }
                 KeyCode::Char('1') => self.view = View::Labs,
                 KeyCode::Char('2') => self.view = View::Graph,
                 KeyCode::Char('3') => self.view = View::Models,
                 KeyCode::Char('4') => self.view = View::Agents,
+                KeyCode::Char('5') => self.view = View::Events,
+                KeyCode::Char('r') if self.view == View::Graph => {
+                    self.show_relations = !self.show_relations
+                }
                 KeyCode::Down | KeyCode::Char('j') => self.step(1),
                 KeyCode::Up | KeyCode::Char('k') => self.step(-1),
                 KeyCode::PageDown => self.step(10),
@@ -1350,7 +1367,15 @@ fn draw(frame: &mut Frame, app: &mut App) {
     }
     match app.view {
         View::Labs => draw_labs(frame, main, app),
+        View::Graph if app.show_relations => {
+            let rows = (app.relations.len() as u16 + 2).clamp(3, 10);
+            let [graph, relations] =
+                Layout::vertical([Constraint::Min(8), Constraint::Length(rows)]).areas(main);
+            draw_graph_view(frame, graph, app);
+            draw_relations(frame, relations, app);
+        }
         View::Graph => draw_graph_view(frame, main, app),
+        View::Events => draw_events(frame, main, app),
         View::Models => draw_models(frame, main, app),
         View::Agents => draw_agents(frame, main, app),
     }
@@ -1443,6 +1468,7 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             vec![
                 key_hint("↑↓", "Prev/next lab"),
                 key_hint("←→", "Parent/child"),
+                key_hint("r", "Relations"),
                 key_hint("tab", "Next view"),
                 key_hint(":", "Command"),
                 key_hint("?", "Help"),
@@ -1458,6 +1484,19 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             ],
             vec![
                 key_hint("/", "Filter"),
+                key_hint(":", "Command"),
+                key_hint("tab", "Next view"),
+                key_hint("?", "Help"),
+                key_hint("q", "Quit"),
+            ],
+        ),
+        View::Events => (
+            vec![
+                key_hint("1", "Labs"),
+                key_hint("2", "Graph"),
+                key_hint("5", "Events"),
+            ],
+            vec![
                 key_hint(":", "Command"),
                 key_hint("tab", "Next view"),
                 key_hint("?", "Help"),
@@ -1920,6 +1959,50 @@ impl App {
         self.agents_table
             .select(Some((current + delta).clamp(0, total as isize - 1) as usize));
     }
+}
+
+/// The relations overlay under the graph (`r`): one line per declared edge.
+fn draw_relations(frame: &mut Frame, area: Rect, app: &App) {
+    let block = titled_block("relations", app.relations.len(), app.relations.len(), "");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let lines: Vec<Line> = if app.relations.is_empty() {
+        vec![Line::from(Span::styled(
+            "no relations (h1 relation add FROM KIND TO)",
+            Style::default().fg(GRAY),
+        ))]
+    } else {
+        app.relations
+            .iter()
+            .map(|edge| {
+                Line::from(Span::styled(
+                    crate::relations::edge_text(edge),
+                    Style::default().fg(PURPLE),
+                ))
+            })
+            .collect()
+    };
+    frame.render_widget(Paragraph::new(lines), inner);
+}
+
+/// The events pane (`:events`, `5`): the newest events of every running session.
+fn draw_events(frame: &mut Frame, area: Rect, app: &App) {
+    let block = titled_block("events", app.labs.len(), app.labs.len(), "");
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let recent = app.events.recent(inner.height as usize);
+    let lines: Vec<Line> = if recent.is_empty() {
+        vec![Line::from(Span::styled(
+            "no events yet (state changes of running sessions appear here)",
+            Style::default().fg(GRAY),
+        ))]
+    } else {
+        recent
+            .into_iter()
+            .map(|text| Line::from(Span::styled(text, Style::default().fg(Color::White))))
+            .collect()
+    };
+    frame.render_widget(Paragraph::new(lines), inner);
 }
 
 fn draw_agents(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -2448,7 +2531,7 @@ fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_help(frame: &mut Frame, area: Rect) {
-    let rect = centered(area, 74, 27);
+    let rect = centered(area, 74, 28);
     frame.render_widget(Clear, rect);
     let section = |t: &str| {
         Line::from(Span::styled(
@@ -2469,7 +2552,11 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         section("Navigation"),
         row("j k ↑ ↓", "move the cursor"),
         row("g / G", "top / bottom of the table"),
-        row("tab  1 2 3 4", "labs / graph / models / all agents"),
+        row(
+            "tab  1 2 3 4 5",
+            "labs / graph / models / all agents / events",
+        ),
+        row("r", "relations overlay under the graph"),
         row("← → (graph)", "jump to the parent / first child"),
         Line::from(""),
         section("Actions on the lab under the cursor"),
@@ -2824,6 +2911,34 @@ mod tests {
     }
 
     #[test]
+    fn relations_overlay_lists_edges_under_the_graph_and_events_pane_renders() {
+        use crate::wire::{Edge, RelationKind};
+        let mut app = App::new(View::Graph, 1000);
+        app.apply(fleet());
+        // `apply` asks live hosts; the fleet is fake, so set the edges the overlay shows.
+        app.relations = vec![Edge {
+            from: "mgr1".into(),
+            kind: RelationKind::Supervises,
+            to: "w2".into(),
+            cascade: false,
+        }];
+        let before = render_text(&mut app, 150, 44).unwrap();
+        assert!(!before.contains("mgr1 supervises w2"));
+        app.show_relations = true;
+        let text = render_text(&mut app, 150, 44).unwrap();
+        assert!(
+            text.contains("relations[1]") || text.contains("relations(all)[1]"),
+            "{text}"
+        );
+        assert!(text.contains("mgr1 supervises w2"), "{text}");
+        app.view = View::Events;
+        let text = render_text(&mut app, 150, 44).unwrap();
+        assert!(text.contains("events("), "{text}");
+        assert!(text.contains("no events yet"), "{text}");
+        assert_eq!(View::parse("events"), Some(View::Events));
+    }
+
+    #[test]
     fn graph_view_shows_full_model_and_tag_inside_manifest_node_boxes() {
         let manifest: crate::graphspec::Manifest = serde_json::from_str(
             r#"{ "version": 1, "run": "run-1", "team": "alpha", "source": "team.yah", "root": "dry-a", "created_ms": 1,
@@ -3118,6 +3233,8 @@ mod tests {
         let mut app = App::new(View::Labs, 1000);
         app.key(key('4'));
         assert_eq!(app.view, View::Agents);
+        app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
+        assert_eq!(app.view, View::Events);
         app.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE));
         assert_eq!(app.view, View::Labs);
         app.key(key(':'));
