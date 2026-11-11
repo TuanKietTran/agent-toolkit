@@ -11,6 +11,11 @@
 //! for each fixable finding (kill a stale process, re-link a broken lab-commander
 //! skill link, remove the stale binary); hints are printed only, never executed,
 //! and findings with no safe one-line fix (either old registry) get no hint.
+//! It also prints the two system-one lines from `yah::pick::doctor_report`
+//! (where system-one was found, or that it was not found, plus a sample pick);
+//! those lines are informational only, never attention. With
+//! `--set-system-one <dir>` it first validates and stores that system-one
+//! package directory via `yah::pick::store_system_one_dir`, then diagnoses.
 //! The re-link source is copied verbatim from a lab-commander skill link that
 //! already resolves (never derived from the cwd, the executable, or a checkout);
 //! when no such link resolves, a fallback line replaces the re-link hint. The
@@ -68,6 +73,7 @@ struct Inputs {
     local_roots: Vec<PathBuf>,
     fix_hints: bool,
     skill_source: Option<PathBuf>,
+    system_one_lines: Vec<String>,
 }
 
 pub struct Report {
@@ -185,6 +191,9 @@ fn assess(inputs: &Inputs) -> Report {
                 "not reachable"
             }
         ));
+    }
+    for line in &inputs.system_one_lines {
+        lines.push(line.clone());
     }
     for finding in process_findings(&inputs.processes, &inputs.local_roots) {
         attention |= finding.attention;
@@ -464,6 +473,7 @@ fn diagnose_inner(
     processes: &[String],
     local_roots: &[PathBuf],
     fix_hints: bool,
+    system_one_lines: &[String],
 ) -> Report {
     let old_registry_dir = home.join(OLD_REGISTRY_DIR_NAME);
     let old_temp_registry_dir = temp_dir.join(OLD_TEMP_REGISTRY_DIR_NAME);
@@ -502,6 +512,7 @@ fn diagnose_inner(
         local_roots: local_roots.to_vec(),
         fix_hints,
         skill_source,
+        system_one_lines: system_one_lines.to_vec(),
         h1_on_path: find_on_path(path_dirs, "h1"),
         old_binary_on_path: find_on_path(path_dirs, OLD_BINARY_NAME),
         labctl_on_path: find_on_path(path_dirs, "labctl"),
@@ -534,6 +545,7 @@ fn diagnose(
         processes,
         local_roots,
         false,
+        &[],
     )
 }
 
@@ -557,7 +569,11 @@ fn resolved_link_target(link: &Path) -> Option<PathBuf> {
     }
 }
 
-pub fn run(fix_hints: bool) -> Result<i32> {
+pub fn run(fix_hints: bool, set_system_one: Option<&Path>) -> Result<i32> {
+    if let Some(dir) = set_system_one {
+        crate::yah::pick::store_system_one_dir(dir)?;
+        println!("system-one: stored {}", dir.display());
+    }
     let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let path_dirs: Vec<PathBuf> = env::var_os("PATH")
         .map(|path| env::split_paths(&path).collect())
@@ -567,6 +583,7 @@ pub fn run(fix_hints: bool) -> Result<i32> {
         .and_then(|value| value.parse().ok())
         .unwrap_or(4317);
     let local_roots = local_gui_roots();
+    let system_one_lines = crate::yah::pick::doctor_report(None);
     let report = diagnose_inner(
         &crate::session::session_dir(),
         &home,
@@ -577,6 +594,7 @@ pub fn run(fix_hints: bool) -> Result<i32> {
         &process_list(),
         &local_roots,
         fix_hints,
+        &system_one_lines,
     );
     for line in &report.lines {
         println!("{line}");
@@ -665,6 +683,42 @@ mod tests {
     }
 
     #[test]
+    fn system_one_lines_are_informational_only() {
+        let root = temp_root("sysone");
+        let registry = root.join("sessions");
+        fs::create_dir_all(&registry).expect("registry");
+        let home = root.join("home");
+        fs::create_dir_all(&home).expect("home");
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).expect("bin");
+        fs::write(bin.join("h1"), "fake").expect("fake h1");
+        let sys_lines = vec!["system-one: not found (looked: H1_SYSTEM_ONE_DIR (unset))".to_string(), "system-one sample pick: claude-sonnet-5-5 (via fallback: system-one unavailable: boom)".to_string()];
+        let report = diagnose_inner(
+            &registry,
+            &home,
+            &root.join("tmp"),
+            &[bin],
+            &[4317],
+            &|_| false,
+            &[],
+            &[],
+            false,
+            &sys_lines,
+        );
+        assert!(!report.attention, "lines: {:?}", report.lines);
+        assert!(
+            report
+                .lines
+                .windows(2)
+                .any(|w| w[0] == sys_lines[0] && w[1] == sys_lines[1]),
+            "lines: {:?}",
+            report.lines
+        );
+        assert_eq!(report.lines.last().map(String::as_str), Some("doctor: ok"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn doctor_help_states_what_it_checks() {
         use clap::CommandFactory;
         let command = crate::Cli::command();
@@ -672,7 +726,15 @@ mod tests {
             .find_subcommand("doctor")
             .expect("doctor subcommand is wired into the CLI");
         let help = doctor.clone().render_long_help().to_string();
-        for needle in ["registry", "PATH", "skill links", "lab-gui", "--fix-hints"] {
+        for needle in [
+            "registry",
+            "PATH",
+            "skill links",
+            "lab-gui",
+            "--fix-hints",
+            "system-one",
+            "--set-system-one",
+        ] {
             assert!(help.contains(needle), "help missing {needle:?}: {help}");
         }
     }
@@ -704,6 +766,11 @@ mod tests {
             "skill link /Users/x/.codex/skills/lab-commander: not installed",
             "lab-gui port 4317: reachable",
             "lab-gui port 4317: not reachable",
+            "system-one: found at /Users/x/system-one",
+            "system-one: not found (looked: H1_SYSTEM_ONE_DIR (unset))",
+            "system-one sample pick: claude-haiku-5-5 (via system-one: test-rule test reason)",
+            "system-one sample pick: claude-sonnet-5-5 (via fallback: system-one chose unknown model claude-unknown-0)",
+            "system-one sample pick: claude-sonnet-5-5 (via fallback: system-one unavailable: boom)",
             "old console pid 1234 cannot see h1 labs: close it and run h1 console",
             "old process pid 1235 (host) runs the pre-rename binary: restart it as h1",
             "lab-gui on port 4317 started from /Users/x/checkout/packages/lab-gui/server.mjs: current (this repo)",
@@ -780,6 +847,7 @@ mod tests {
             &processes,
             &[],
             true,
+            &[],
         );
         assert!(report.attention, "lines: {:?}", report.lines);
         for expected in [
@@ -874,6 +942,7 @@ mod tests {
             &[],
             &[],
             true,
+            &[],
         );
         assert!(report.attention, "lines: {:?}", report.lines);
         assert!(

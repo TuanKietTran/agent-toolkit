@@ -134,7 +134,7 @@ On Windows, `run` ends a piped stdin with Ctrl-Z and Enter, because a console ig
 h1 doctor   # diagnose rename/migration problems; exit 1 if anything needs attention
 ```
 
-`h1 doctor` prints names and paths only, never registry values: the registry dir in use (`$H1_DIR` if set, else the resolved temp default) and whether it exists, whether the pre-rename registries still hold sessions — the one under the home dir and the one under the temp dir that the pre-rename tool actually used (a single warning line each if so, because those labs will not show in the TUI/GUI), which `h1` and old-named binaries and the `labctl` compatibility shim are on `PATH`, whether the lab-commander skill links resolve, whether the lab-gui port (`$LAB_GUI_PORT`, default 4317) is reachable, and whether any running process is an old-named binary or a lab-gui server started from outside this repo (one warning line per such process, naming its pid and, for lab-gui, its port). The lab-gui port check is informational only (it is started on demand), as are a not-yet-created registry dir, an empty pre-rename registry, and a lab-gui server running from this repo. Exit is 1 when a pre-rename registry still holds sessions, an old-named binary is still on `PATH`, `h1` is missing from `PATH`, a skill link is broken, an old-named process is still running, or a lab-gui server runs from outside this repo; otherwise 0. With `--fix-hints`, after the findings doctor prints a fix-hints section with the exact shell command for each fixable finding (`kill <pid>` for a stale old process, `ln -sfn <this repo>/skills/lab-commander <link path>` for a broken lab-commander skill link, `rm` for the stale old-named binary on `PATH`); those commands are printed only, never executed, and findings with no safe one-line fix (such as an old registry still holding sessions) get no hint.
+`h1 doctor` prints names and paths only, never registry values: the registry dir in use (`$H1_DIR` if set, else the resolved temp default) and whether it exists, whether the pre-rename registries still hold sessions — the one under the home dir and the one under the temp dir that the pre-rename tool actually used (a single warning line each if so, because those labs will not show in the TUI/GUI), which `h1` and old-named binaries and the `labctl` compatibility shim are on `PATH`, whether the lab-commander skill links resolve, whether the lab-gui port (`$LAB_GUI_PORT`, default 4317) is reachable, and whether any running process is an old-named binary or a lab-gui server started from outside this repo (one warning line per such process, naming its pid and, for lab-gui, its port). The lab-gui port check is informational only (it is started on demand), as are a not-yet-created registry dir, an empty pre-rename registry, and a lab-gui server running from this repo. Exit is 1 when a pre-rename registry still holds sessions, an old-named binary is still on `PATH`, `h1` is missing from `PATH`, a skill link is broken, an old-named process is still running, or a lab-gui server runs from outside this repo; otherwise 0. With `--fix-hints`, after the findings doctor prints a fix-hints section with the exact shell command for each fixable finding (`kill <pid>` for a stale old process, `ln -sfn <this repo>/skills/lab-commander <link path>` for a broken lab-commander skill link, `rm` for the stale old-named binary on `PATH`); those commands are printed only, never executed, and findings with no safe one-line fix (such as an old registry still holding sessions) get no hint. Doctor also prints two system-one lines (where the system-one package was found, or that it was not found and where it looked, plus a sample pick against a small catalog, falling back to `claude-sonnet-5-5` when system-one is unavailable or chooses an unknown model); those lines are informational only and never affect the exit code. With `--set-system-one <dir>`, doctor first validates `<dir>` as a system-one package directory (it must contain `src/system_one`) and stores it in the h1 config directory for later picks, printing `system-one: stored <dir>`, then runs the normal diagnosis; an invalid directory is an error and nothing is stored.
 
 Doctor output is stable: the status lines below always appear in this order, followed by any process findings (one per matching process, in process-list order), then the fix-hints section (only with `--fix-hints` and only when at least one hint exists), then the verdict line. Paths, counts, pids, subcommand names and ports vary; the wording does not. One verbatim sample per line kind and variant:
 
@@ -157,6 +157,11 @@ Doctor output is stable: the status lines below always appear in this order, fol
 - Skill link absent: `skill link /Users/x/.codex/skills/lab-commander: not installed`
 - Lab-gui port reachable: `lab-gui port 4317: reachable`
 - Lab-gui port not reachable: `lab-gui port 4317: not reachable`
+- System-one found: `system-one: found at /Users/x/system-one`
+- System-one not found: `system-one: not found (looked: H1_SYSTEM_ONE_DIR (unset))`
+- Sample pick via system-one: `system-one sample pick: claude-haiku-5-5 (via system-one: test-rule test reason)`
+- Sample pick, fallback on unknown model: `system-one sample pick: claude-sonnet-5-5 (via fallback: system-one chose unknown model claude-unknown-0)`
+- Sample pick, fallback when unavailable: `system-one sample pick: claude-sonnet-5-5 (via fallback: system-one unavailable: boom)`
 - Old console process (attention): `old console pid 1234 cannot see h1 labs: close it and run h1 console`
 - Other old-binary process (attention): `old process pid 1235 (host) runs the pre-rename binary: restart it as h1`
 - Lab-gui process started from this repo: `lab-gui on port 4317 started from /Users/x/checkout/packages/lab-gui/server.mjs: current (this repo)`
@@ -194,6 +199,23 @@ Move the data directory to its new location:
 ```sh
 mv ~/.agent-cli-lab ~/.h1
 ```
+
+### From graphloop
+
+The standalone `graphloop` binary is gone: its Graphspec (`.yah`) commands are now subcommands of `h1`, with the same arguments and flags — replace `graphloop` with `h1`:
+
+| Before | After |
+|---|---|
+| `graphloop check FILE` | `h1 check FILE` |
+| `graphloop plan FILE` | `h1 plan FILE` |
+| `graphloop graph FILE` | `h1 graph FILE` |
+| `graphloop up FILE` | `h1 up FILE` |
+| `graphloop down RUN` | `h1 down RUN` |
+| `graphloop vault status FILE` | `h1 vault status FILE` |
+| `graphloop runs` | `h1 runs` |
+| `graphloop trace RUN` | `h1 trace RUN` |
+
+Your `.yah` files need no changes. The Graphspec document and the examples stay where they were, under `packages/graphloop/docs/` and `packages/graphloop/examples/`; only the binary merged.
 
 ## Build and test
 

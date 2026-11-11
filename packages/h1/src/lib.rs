@@ -11,6 +11,7 @@ mod keys;
 mod preview;
 mod session;
 mod state;
+pub mod yah;
 #[cfg(windows)]
 mod windows_killer;
 
@@ -110,6 +111,10 @@ enum Commands {
     Close(commander::CloseArgs),
     /// Resume a lab from recent ledger notes.
     Resume(commander::ResumeArgs),
+    /// Graphspec (.yah) team commands, formerly the graphloop binary:
+    /// check, fmt, plan, graph, up, down, vault, runs, trace.
+    #[command(flatten)]
+    Yah(crate::yah::cli::Cmd),
 }
 
 #[derive(Debug, Args)]
@@ -532,6 +537,9 @@ struct DoctorArgs {
     /// Also print the exact shell command that would fix each fixable finding (print only, never executed).
     #[arg(long)]
     fix_hints: bool,
+    /// Validate DIR as a system-one package directory and store it for later picks, then diagnose.
+    #[arg(long, value_name = "DIR")]
+    set_system_one: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]
@@ -618,7 +626,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
         },
         Commands::Stop(args) => commands::stop(args),
         Commands::Console(args) => console::run(args),
-        Commands::Doctor(args) => doctor::run(args.fix_hints),
+        Commands::Doctor(args) => doctor::run(args.fix_hints, args.set_system_one.as_deref()),
         Commands::Agents(args) => agents::run(args),
         Commands::Key(args) => commands::key(args),
         Commands::Wait(args) => match args.lab_name {
@@ -634,6 +642,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
         Commands::Resume(args) => commander::resume(args),
         Commands::Renew(args) => commands::renew(args),
         Commands::Recover(args) => commands::recover(args),
+        Commands::Yah(cmd) => Ok(crate::yah::cli::run(cmd)),
     }
 }
 
