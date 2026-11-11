@@ -642,7 +642,7 @@ fn absolute_string(path: &Path) -> String {
 struct Cli { #[command(subcommand)] command: Cmd }
 
 #[derive(Args, Debug)]
-struct FileArgs {
+pub struct FileArgs {
     /// Path to a .yah (Graphspec) file
     file: PathBuf,
     /// Team to use (default: the only team in the file)
@@ -666,7 +666,7 @@ struct FileArgs {
 }
 
 #[derive(Subcommand, Debug)]
-enum Cmd {
+pub enum Cmd {
     /// Validate a .yah file
     Check { #[command(flatten)] args: FileArgs },
     /// Print a .yah file in canonical format
@@ -697,7 +697,7 @@ enum Cmd {
 }
 
 #[derive(Subcommand, Debug)]
-enum VaultCmd {
+pub enum VaultCmd {
     /// One line per declared secret key: vault, provider, key name; never fetches, never spawns a provider
     List {
         /// Path to a .yah (Graphspec) file
@@ -726,8 +726,8 @@ enum VaultCmd {
     },
 }
 
-fn dispatch(cli: Cli) -> Result<String, String> {
-    match cli.command {
+pub fn dispatch(command: Cmd) -> Result<String, String> {
+    match command {
         Cmd::Check { args } => { load_env_files(&args)?; let spec = load_spec(&args.file, &args.var)?; Ok(format!("{}\n", check_line(spec.harnesses.len(), spec.teams.len()))) }
         Cmd::Fmt { file, check, write } => fmt_file(&file, check, write),
         Cmd::Plan { args, json } => {
@@ -803,14 +803,27 @@ fn dispatch(cli: Cli) -> Result<String, String> {
     }
 }
 
-/// Process exit code: 0 ok, 1 error (2 is clap's usage error).
-pub fn main() -> i32 {
-    let cli = match Cli::try_parse() { Ok(c) => c, Err(e) => { let code = e.exit_code(); let _ = e.print(); return code; } };
-    match dispatch(cli) {
-        Ok(out) => { print!("{out}"); 0 }
+/// Run one parsed command with `main`'s exact output/exit semantics: output
+/// to stdout, exit 0; errors to stderr, exit 1. Callers (h1's `execute`) must
+/// return this code as-is rather than wrapping it in their own error
+/// reporting, so the `graphloop: ` prefix and the vault-status
+/// JSON-on-stdout-on-failure behaviour survive.
+pub fn run(command: Cmd) -> i32 {
+    match dispatch(command) {
+        Ok(out) => { print!("{out}"); let _ = std::io::stdout().flush(); 0 }
         Err(msg) => { eprint!("{msg}"); if !msg.ends_with('\n') { eprintln!(); } 1 }
     }
 }
+
+/// Process exit code: 0 ok, 1 error (2 is clap's usage error).
+/// Parses `args` (argv[0] included) with the "graphloop" clap parser;
+/// the deprecated `graphloop` shim bin calls this.
+pub fn main_from<I: IntoIterator<Item = std::ffi::OsString>>(args: I) -> i32 {
+    let cli = match Cli::try_parse_from(args) { Ok(c) => c, Err(e) => { let code = e.exit_code(); let _ = e.print(); return code; } };
+    run(cli.command)
+}
+
+pub fn main() -> i32 { main_from(std::env::args_os()) }
 
 #[cfg(test)]
 mod tests {
