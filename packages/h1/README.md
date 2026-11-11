@@ -114,6 +114,43 @@ Keys: `kind`, `exe_names`, `script_keywords`, `argv_keywords`, `interpreters`, `
 
 Scan platform support: live-verified on macOS. On Linux the same `ps` table is used, with working directories read from `/proc/<pid>/cwd` instead of `lsof`; that path is not yet live-verified. The scan relies on `ps`, so it is not supported on Windows (the rest of the CLI is, see below).
 
+## Agents: start and adopt
+
+The four agent CLIs that `agents` reports as startable have their own start commands. Each one starts the program in an h1 session, with the same hosting as `open`, attached in its own window unless `--detached` is given. The session is named after the kind unless `-n` says otherwise, and `--cwd DIR` sets where the program starts:
+
+```sh
+$ h1 claude                       # a session named claude, attached
+$ h1 pi -n research               # a session named research
+$ h1 opencode --cwd /work/repo    # started in /work/repo
+$ h1 codex --detached             # hosted but not attached: for scripts and tests
+```
+
+Anything after `--` is passed through to the program untouched:
+
+```sh
+$ h1 claude -- --model opus       # runs claude --model opus
+$ h1 pi -- --no-session           # runs pi --no-session
+```
+
+An agent that is already running outside h1 can be brought in with `h1 adopt <PID|NAME>`, where the target is a pid or the exact name `h1 agents` reports; `h1 attach --agent <PID|NAME>` is the same operation through `attach`. A foreign process has no h1 PTY, so adopt does not take the process over: it starts a new h1 session (named with `-n`, or `adopt-<kind>-<pid>`) in the agent's working directory, running that kind's resume command for the session the agent already has:
+
+| Kind | With a recorded session id | Without one |
+|---|---|---|
+| `claude` | `claude --resume <id>` | cannot be adopted: no recorded session id |
+| `pi` | `pi --session <id>` | `pi --continue` |
+| `opencode` | `opencode --session <id>` | `opencode --continue` |
+| `codex` | `codex resume <id>` | `codex resume --last` |
+
+```sh
+$ h1 adopt 12345                  # resume the agent with pid 12345 in a new session
+$ h1 adopt research --detached    # by name, hosted but not attached
+$ h1 attach --agent 12345         # the same, through attach
+```
+
+Only those four kinds can be adopted: adopting any other detected kind fails with `<kind> cannot be adopted: only claude, pi, opencode and codex support resume`. A target that matches nothing fails saying no running agent matches it, and a name that matches more than one agent fails listing the matching pids; use a pid instead. If the target is already an h1 lab, adopt prints that it is already hosted by h1 and attaches to it instead of resuming.
+
+The original process keeps running: adopt never kills or signals it, and the new session resumes its conversation while the old one is still alive. For `claude`, exit the original process first, so the two do not both write to the same session.
+
 ## Recoverable sessions
 
 A lab can remember how to pick its work back up after you start it over with `/new`, without you pasting the brief again. `open` (and `host`) store **paths and settings only**, never file contents and never secret values:
