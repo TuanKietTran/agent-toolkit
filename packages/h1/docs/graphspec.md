@@ -270,7 +270,7 @@ A parentless member `reviewer` of the same team would add `commander -> reviewer
 
 - **Session naming.** Each harness becomes one h1 session named after its label, optionally prefixed: `--prefix P` names sessions `P-<label>`, which keeps teams from colliding. Session names must match `[A-Za-z0-9._-]`, be at most 40 characters, and not start with `.`.
 - **Model resolution.** `model = "system-one"` is resolved by system-one (`packages/system-one`) at plan time, using the harness's `role` and `complexity` hint. If system-one cannot decide or cannot be located, the resolved model is the `system_one.fallback` model — that fallback, and only that fallback, as defined in the `system_one` block. A pinned `model = "<label>"` is never re-decided.
-- **How the model reaches the program.** Only through interpolation: `open.command` (and `cwd`/`env`/`title`) may embed one of two model forms. `${harnesses.<label>.model}` is replaced by the resolved model in `provider_type/id` form (e.g. `anthropic/claude-sonnet-5-5`) — use it for programs that take a provider-qualified model; Graphloop itself passes that form to `h1 open --model`. `${harnesses.<label>.model_id}` is replaced by the bare model id (e.g. `claude-sonnet-5-5`) — use it when the program already knows the provider, as with `pi --provider claude-cli --model ${harnesses.<label>.model_id}` in `examples/research-team.yah` and `examples/team.yah`. Graphloop does not inject the model any other way.
+- **How the model reaches the program.** Only through interpolation: `open.command` (and `cwd`/`env`/`title`) may embed one of two model forms. `${harnesses.<label>.model}` is replaced by the resolved model in `provider_type/id` form (e.g. `anthropic/claude-sonnet-5-5`) — use it for programs that take a provider-qualified model; h1 itself passes that form to `h1 open --model`. `${harnesses.<label>.model_id}` is replaced by the bare model id (e.g. `claude-sonnet-5-5`) — use it when the program already knows the provider, as with `pi --provider claude-cli --model ${harnesses.<label>.model_id}` in `examples/research-team.yah` and `examples/team.yah`. h1 does not inject the model any other way.
 - **`workflow` in v1.** `workflow` blocks are parsed, validated and listed, but not executed in v1. Loops live inside h1 (see Orchestration rules).
 
 ## Error format
@@ -314,10 +314,10 @@ Illustrative excerpt:
 
 Reproduced from the contract's "Launching" section:
 
-1. Every harness is started via `h1 open ... --model <resolved>` — Graphloop never starts a harness program directly.
+1. Every harness is started via `h1 open ... --model <resolved>` — h1 never starts a harness program directly.
 2. `model = "system-one"` is resolved by `packages/system-one`, with fallback only as defined in the `system_one` block.
 3. The `team` block is the graph: nodes are harnesses, edges are `parent` plus `root -> member`. There is no other graph definition.
-4. Loops stay inside h1; Graphloop adds no second loop runner.
+4. Loops stay inside h1; h1 adds no second loop runner.
 5. Graphs are static: every node and edge is fixed when the file is loaded. `prototype`, `group`, `include` and derived `members` are expanded at load time, deterministically and without reading the machine, so `check`, `plan`, `graph` and the run manifest always show the same fully expanded nodes. Nothing is generated or discovered while a run is live.
 6. One trace per run: with recording on, every session of the run records into the run's single trace directory.
 7. `image` and `api` blocks are tools, not prompt text: they are handed to harnesses as tools and are never inlined into a prompt.

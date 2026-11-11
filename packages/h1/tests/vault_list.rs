@@ -1,4 +1,4 @@
-//! Integration tests for `graphloop vault list` (`h1::yah::cli::vault_list_core`).
+//! Integration tests for `h1 vault list` (`h1::yah::cli::vault_list_core`).
 //!
 //! Contract: a pure declaration inventory — one `<vault>\t<provider>\t<key>` line per
 //! declared secret key, sorted by vault then key; a vault with no `secrets` map prints

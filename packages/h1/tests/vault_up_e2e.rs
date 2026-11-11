@@ -1,4 +1,4 @@
-//! H1 (hardening backlog): end-to-end `graphloop up` against a fake `h1` for EVERY vault
+//! H1 (hardening backlog): end-to-end `h1 up` against a fake `h1` for EVERY vault
 //! provider in `PROVIDERS`. Per provider, wired through its fake CLI / fixture:
 //! (1) the fake h1 was invoked to open the lab;
 //! (2) the fake secret IS present in the recorded environment of the lab invocation;
@@ -213,7 +213,7 @@ fn run_one(provider: &str) {
         vault: &vault_fn,
     };
     let out = up_core(&req, &ProcessRunner { bin })
-        .unwrap_or_else(|e| panic!("{provider}: graphloop up failed: {e}"));
+        .unwrap_or_else(|e| panic!("{provider}: h1 up failed: {e}"));
     let argv = std::fs::read_to_string(&argv_log).unwrap_or_default();
     assert!(
         argv.contains("open") && argv.contains("-n alpha"),

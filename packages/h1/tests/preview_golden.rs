@@ -1,4 +1,4 @@
-//! Golden tests for `graphloop preview`.
+//! Golden tests for `h1 preview`.
 //!
 //! Goldens: `tests/fixtures/preview/<example-stem>.json`, one per file in
 //! `examples/`. Hand-derived from the shared contract in `src/preview.rs`

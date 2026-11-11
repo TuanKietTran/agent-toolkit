@@ -1,4 +1,4 @@
-//! Integration tests for the graphloop CLI cores.
+//! Integration tests for the h1 CLI cores.
 //!
 //! The cores are driven with a hand-built `Plan`/`Resolved` and a fake
 //! `h1`: a small sh script that logs its argv, answers `list --json`

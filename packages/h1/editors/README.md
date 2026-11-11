@@ -11,7 +11,7 @@
 {
   "name": "graphspec-yah",
   "version": "0.1.0",
-  "publisher": "graphloop",
+  "publisher": "h1",
   "engines": { "vscode": "^1.80.0" },
   "contributes": {
     "languages": [{ "id": "yah", "extensions": [".yah"], "configuration": "./language-configuration.json" }],

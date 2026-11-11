@@ -1,6 +1,6 @@
 //! Tolerant reader for Graphspec run manifests (`<session_dir>/graphs/*.json`, version 1).
 //!
-//! The manifest is the contract between `graphloop` (writer) and this console (reader): a team
+//! The manifest is the contract between `h1` (writer) and this console (reader): a team
 //! of labs declared in a `.yah` file, the concrete model system-one picked for each node, and
 //! the edges between them. Readers tolerate unknown fields, missing fields and unreadable or
 //! foreign-version files; a manifest is only shown while at least one of its nodes is a live

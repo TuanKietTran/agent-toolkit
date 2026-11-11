@@ -1,4 +1,4 @@
-//! Integration tests for `graphloop vault status` (`h1::yah::cli::vault_status_core`).
+//! Integration tests for `h1 vault status` (`h1::yah::cli::vault_status_core`).
 //!
 //! Contract: without `--fetch` only presence is checked and no provider runs; with
 //! `--fetch` each declared key is fetched. Either way one line is printed per vault and
@@ -167,19 +167,19 @@ fn command_status_checks_the_program_and_fetch_never_prints_the_value() {
 #[test]
 fn command_status_with_a_missing_program_is_not_ready() {
     let spec = load(
-        "\nvault \"cmd\" {\n  provider = \"command\"\n  command  = [\"graphloop-no-such-program-9f2a\"]\n  secrets  = {\n    TOKEN = \"TOKEN\"\n  }\n}\n",
+        "\nvault \"cmd\" {\n  provider = \"command\"\n  command  = [\"yah-no-such-program-9f2a\"]\n  secrets  = {\n    TOKEN = \"TOKEN\"\n  }\n}\n",
     );
     let real = |name: &str| std::env::var(name).ok();
     let (out, ok) = vault_status_core(&spec, Path::new("."), &real, vec![], false);
     assert!(!ok, "{out}");
     assert!(
         out.contains(
-            "vault cmd (command): not ready: program graphloop-no-such-program-9f2a not found"
+            "vault cmd (command): not ready: program yah-no-such-program-9f2a not found"
         ),
         "{out}"
     );
     assert!(
-        out.contains("cmd TOKEN: error: program graphloop-no-such-program-9f2a not found"),
+        out.contains("cmd TOKEN: error: program yah-no-such-program-9f2a not found"),
         "{out}"
     );
 }
@@ -276,17 +276,17 @@ fn cli_provider_command_override_replaces_its_program_for_readiness() {
     assert!(out.contains("vault v (1password): ready\n"), "{out}");
     assert!(out.contains("v TOKEN: ok\n"), "{out}");
     // A missing override program is the one named, not the provider's own `op`.
-    let spec = hand_built_spec("1password", vec!["graphloop-no-such-program-9f2a".into()]);
+    let spec = hand_built_spec("1password", vec!["yah-no-such-program-9f2a".into()]);
     let (out, ok) = vault_status_core(&spec, Path::new("."), &real, vec![], false);
     assert!(!ok, "{out}");
     assert!(
         out.contains(
-            "vault v (1password): not ready: program graphloop-no-such-program-9f2a not found"
+            "vault v (1password): not ready: program yah-no-such-program-9f2a not found"
         ),
         "{out}"
     );
     assert!(
-        out.contains("v TOKEN: error: program graphloop-no-such-program-9f2a not found"),
+        out.contains("v TOKEN: error: program yah-no-such-program-9f2a not found"),
         "{out}"
     );
     assert!(!out.contains("not available in this build"), "{out}");

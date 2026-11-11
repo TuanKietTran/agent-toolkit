@@ -1,9 +1,9 @@
 //! Secret vaults: where `${vault.NAME.KEY}` values come from.
 //!
 //! A `vault "NAME" { provider = ... }` block only describes WHERE a secret lives. Nothing is read
-//! at parse, check or plan time: the value is fetched when `graphloop up` opens a lab, held in
+//! at parse, check or plan time: the value is fetched when `h1 up` opens a lab, held in
 //! memory for that run, handed to the program through its ENVIRONMENT (never a command line, which
-//! every process on the machine can read) and scrubbed from every message graphloop prints.
+//! every process on the machine can read) and scrubbed from every message h1 prints.
 //!
 //! Adapters are listed in [`PROVIDERS`]; `schema` validates a vault block against that table, so
 //! adding an adapter means one table row plus one arm in [`Vaults::fetch`].
@@ -95,7 +95,7 @@ pub fn provider_names() -> Vec<&'static str> {
 const MIN_SCRUB_LEN: usize = 3;
 
 /// Provider/command output larger than this is rejected, so a broken or hostile CLI cannot make
-/// graphloop buffer unbounded output in memory.
+/// h1 buffer unbounded output in memory.
 const MAX_OUTPUT_BYTES: usize = 1 << 20;
 
 /// Replace every known secret value in `text` with `***`.

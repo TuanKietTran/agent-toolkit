@@ -1,4 +1,4 @@
-//! The run manifest: the contract between `graphloop` (writer) and the readers
+//! The run manifest: the contract between `h1` (writer) and the readers
 //! (`h1 console`, `lab-gui`). SHARED CONTRACT, JSON, version 1.
 //!
 //! Location: `<session dir>/graphs/<run>.json`, where `<session dir>` is exactly what

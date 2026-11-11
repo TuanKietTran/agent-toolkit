@@ -1,7 +1,7 @@
 //! The console's preview view: a planned team drawn with the live graph's widgets, every node
 //! dim (`planned`), warnings in red, a side panel for the selected node and a diff against the
 //! running labs. Loading is read-only: a `.json` preview is read, anything else is turned into
-//! one by running `graphloop preview FILE` (`$GRAPHLOOP_BIN`, else `graphloop`). It never opens,
+//! one by running `h1 preview FILE` (`$H1_BIN`, else this executable). It never opens,
 //! stops or writes anything.
 
 use super::*;
@@ -24,15 +24,20 @@ pub(super) struct Diff {
     pub would_stop: Vec<String>,
 }
 
-/// Read a preview from `arg`: a `.json` file directly, otherwise through `graphloop preview`.
+/// Read a preview from `arg`: a `.json` file directly, otherwise through `h1 preview`.
 pub(super) fn load_source(arg: &str) -> Result<Preview, String> {
     if arg.ends_with(".json") {
         return preview::load(Path::new(arg));
     }
-    let program = env::var("GRAPHLOOP_BIN")
+    let program = env::var("H1_BIN")
         .ok()
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| "graphloop".to_owned());
+        .or_else(|| {
+            env::current_exe()
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| "h1".to_owned());
     let output = Command::new(&program)
         .args(["preview", arg])
         .stdin(std::process::Stdio::null())
@@ -43,7 +48,7 @@ pub(super) fn load_source(arg: &str) -> Result<Preview, String> {
         let first = text
             .lines()
             .find(|l| !l.trim().is_empty())
-            .unwrap_or("graphloop preview failed");
+            .unwrap_or("h1 preview failed");
         return Err(first.trim().to_owned());
     }
     preview::parse(&String::from_utf8_lossy(&output.stdout))

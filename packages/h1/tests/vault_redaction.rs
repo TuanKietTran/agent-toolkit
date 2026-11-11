@@ -1,7 +1,7 @@
 //! H2 (hardening backlog): provider failure redaction. A failing external provider CLI must
 //! never echo the secret it was fetching — not on stderr, not in malformed stdout, not before
 //! a timeout. Surfaces: the fetch itself (`Vaults::get`, the path `vault status --fetch`
-//! calls) and `graphloop up` (`up_core` against a fake h1). Every failure must be clean:
+//! calls) and `h1 up` (`up_core` against a fake h1). Every failure must be clean:
 //! an error naming the provider, no secret anywhere in the error / argv / written files,
 //! and no lab opened.
 //!
@@ -510,7 +510,7 @@ fn d_provider_command_string_is_never_rendered() {
         !err.contains("--token"),
         "command: command string leaked into fetch error: {err}"
     );
-    // `graphloop up` via the fake h1: same clean failure, no lab opened, no file written.
+    // `h1 up` via the fake h1: same clean failure, no lab opened, no file written.
     let run = run_up(dir.path(), &[marker_vault], Duration::from_secs(5));
     let up_err = assert_up_clean(&run, "command", MARKER_CMD);
     assert!(

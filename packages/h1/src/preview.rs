@@ -1,6 +1,6 @@
-//! Tolerant reader for Graphloop preview documents (`graphloop preview` JSON, version 1).
+//! Tolerant reader for h1 preview documents (`h1 preview` JSON, version 1).
 //!
-//! The preview is the contract between `graphloop preview` (writer) and this console
+//! The preview is the contract between `h1 preview` (writer) and this console
 //! (reader, `h1 console --preview`): a dry run of a team — nodes in plan order with
 //! resolved/pinned/pending models, declaration-order env (values as written, secret-looking
 //! literals already masked to `***` by the writer), the printable `h1 open ...` command per

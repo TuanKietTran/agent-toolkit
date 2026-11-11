@@ -1,6 +1,6 @@
 //! Executable docs: every fenced block in docs/graphspec.md whose info
 //! string is exactly `yah check` must be a complete .yah file that
-//! passes `graphloop check`. Fragments stay ```yah and are skipped.
+//! passes `h1 check`. Fragments stay ```yah and are skipped.
 
 use std::fs;
 use std::path::PathBuf;
@@ -41,7 +41,7 @@ fn graphspec_yah_check_blocks_pass_check() {
     );
 
     let dir = std::env::temp_dir().join(format!(
-        "graphloop-docs-check-{}-{}",
+        "yah-docs-check-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -62,7 +62,7 @@ fn graphspec_yah_check_blocks_pass_check() {
             .unwrap();
         if !out.status.success() {
             failure = Some(format!(
-                "block {n} failed `graphloop check`: {}",
+                "block {n} failed `h1 check`: {}",
                 String::from_utf8_lossy(&out.stderr)
             ));
             break;

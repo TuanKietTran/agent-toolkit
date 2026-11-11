@@ -10,7 +10,7 @@ yah 1
 //                    exist (preview stats literal cwd paths).
 //
 // The third, unknown_model, cannot: a harness that names a model
-// label with no matching model block fails `graphloop check` -
+// label with no matching model block fails `h1 check` -
 // schema validation rejects the unknown reference and the file does
 // not load at all, so no preview document is ever produced for it.
 // The contract's `unknown` model_status / `unknown_model` warning
@@ -19,7 +19,7 @@ yah 1
 //   harness "ghost" { kind = "h1" role = "lead" model = "ghost"
 //                     open { command = ["cat"] } }
 //
-// The hosted program is plain cat, so even `graphloop up` on this
+// The hosted program is plain cat, so even `h1 up` on this
 // file would run no model.
 
 variable "note" {

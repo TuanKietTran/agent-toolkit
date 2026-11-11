@@ -309,7 +309,7 @@ mod tests {
         let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let mut dirs = vec![manifest.join("examples"), manifest.join("tests/fixtures")];
         // Optional extra corpus (for example a directory of diagnostic fixtures): never required, never located by walking up the tree.
-        if let Some(extra) = std::env::var_os("GRAPHLOOP_EXTRA_YAH_DIR") {
+        if let Some(extra) = std::env::var_os("YAH_EXTRA_DIR") {
             dirs.push(std::path::PathBuf::from(extra));
         }
         let (mut checked, mut excluded) = (0usize, 0usize);

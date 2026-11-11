@@ -1,4 +1,4 @@
-//! The preview document: the contract between `graphloop preview` (writer) and `h1 console
+//! The preview document: the contract between `h1 preview` (writer) and `h1 console
 //! --preview` (reader, which keeps its own tolerant copy of these types). SHARED CONTRACT, JSON,
 //! version 1.
 //!

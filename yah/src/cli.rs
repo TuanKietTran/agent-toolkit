@@ -1069,8 +1069,8 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn graphloop_home() -> PathBuf {
-    if let Some(home) = std::env::var_os("GRAPHLOOP_HOME").filter(|v| !v.is_empty()) {
+fn h1_home() -> PathBuf {
+    if let Some(home) = std::env::var_os("H1_HOME").filter(|v| !v.is_empty()) {
         return PathBuf::from(home);
     }
     if let Some(home) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
@@ -1145,7 +1145,7 @@ fn build_picker(spec: &Spec, yah_file: &Path) -> Box<dyn Picker> {
     let location = crate::pick::locate_system_one_detailed(Some(yah_file));
     match location.dir.clone() {
         Some(dir) => Box::new(crate::pick::SystemOnePicker {
-            python: std::env::var("GRAPHLOOP_PYTHON")
+            python: std::env::var("H1_PYTHON")
                 .ok()
                 .filter(|v| !v.is_empty())
                 .unwrap_or_else(|| "python3".to_string()),
@@ -1378,7 +1378,7 @@ pub fn dispatch(command: Cmd) -> Result<String, String> {
         }
         Cmd::Up { args, dry_run } => {
             let (spec, team, resolved) = load_and_resolve(&args)?;
-            let home = graphloop_home();
+            let home = h1_home();
             let run = new_run_id(&team.name);
             let trace_dir = home.join("runs").join(&run).join("trace");
             let opts = PlanOpts {
@@ -1492,7 +1492,7 @@ pub fn dispatch(command: Cmd) -> Result<String, String> {
                 &manifest,
                 &runner,
                 &crate::manifest::dir(),
-                &graphloop_home(),
+                &h1_home(),
                 purge,
             )
             .map_err(|e| err(&e))

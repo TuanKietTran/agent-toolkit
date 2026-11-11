@@ -62,7 +62,7 @@ pub(crate) struct ConsoleArgs {
     /// Agent registry written by the observer (default: $H1_AGENTS, then ~/.h1/agents.json).
     #[arg(long, value_name = "PATH")]
     agents: Option<PathBuf>,
-    /// Preview a team without deploying it: a .yah file (via `graphloop preview`) or a preview .json.
+    /// Preview a team without deploying it: a .yah file (via `h1 preview`) or a preview .json.
     #[arg(long, value_name = "FILE")]
     preview: Option<String>,
     /// Width of the --snapshot frame.

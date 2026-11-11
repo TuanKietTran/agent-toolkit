@@ -1,4 +1,4 @@
-# Graphloop architecture
+# h1 architecture
 
 How a `.yah` file becomes a running lab, and where each decision is made. Every claim here
 names the code that implements it; if the code changes, this file changes in the same commit.

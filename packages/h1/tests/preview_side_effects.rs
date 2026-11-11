@@ -8,7 +8,7 @@
 //!
 //! - `H1_BIN` and a `system-one` on PATH are fakes that append every
 //!   invocation to a log file; the log must not exist after the run.
-//! - `GRAPHLOOP_HOME`, `H1_DIR` and `HOME` point at paths that are never
+//! - `H1_HOME`, `H1_DIR` and `HOME` point at paths that are never
 //!   created beforehand; they must still not exist after the run.
 //! - The spec references a dotenv vault whose file holds a fake sentinel
 //!   secret and an `${env.*}` var whose process value is a second fake
@@ -87,7 +87,7 @@ fn preview_spawns_nothing_writes_nothing_and_fetches_nothing() {
     let out = Command::new(env!("CARGO_BIN_EXE_h1"))
         .args(["preview", "preview-se.yah"])
         .current_dir(root)
-        .env("GRAPHLOOP_HOME", &home)
+        .env("H1_HOME", &home)
         .env("H1_DIR", &h1_dir)
         .env("H1_BIN", bin_dir.join("h1"))
         .env("HOME", &fake_home)
@@ -145,7 +145,7 @@ fn preview_spawns_nothing_writes_nothing_and_fetches_nothing() {
         "preview spawned a process: {}",
         std::fs::read_to_string(&log).unwrap_or_default()
     );
-    assert!(!home.exists(), "preview created GRAPHLOOP_HOME");
+    assert!(!home.exists(), "preview created H1_HOME");
     assert!(!h1_dir.exists(), "preview created H1_DIR");
     assert!(!fake_home.exists(), "preview touched HOME");
     assert_eq!(tree(root), before, "preview changed the file tree");

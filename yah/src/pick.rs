@@ -102,7 +102,7 @@ pub struct SystemOnePicker {
 
 impl Picker for SystemOnePicker {
     fn pick(&self, request: &PickRequest) -> anyhow::Result<PickDecision> {
-        let python = match std::env::var("GRAPHLOOP_PYTHON") {
+        let python = match std::env::var("H1_PYTHON") {
             Ok(p) if !p.trim().is_empty() => p,
             _ if !self.python.trim().is_empty() => self.python.clone(),
             _ => "python3".to_string(),
@@ -227,7 +227,7 @@ impl Picker for SystemOnePicker {
     }
 }
 
-/// Find `packages/system-one`, in order: `$H1_SYSTEM_ONE_DIR`, `$GRAPHLOOP_SYSTEM_ONE_DIR`,
+/// Find `packages/system-one`, in order: `$H1_SYSTEM_ONE_DIR`, `$H1_SYSTEM_ONE_DIR`,
 /// walking up from the `.yah` file, next to the executable (`<exe dir>/system-one`,
 /// `<exe dir>/../system-one`, `<exe dir>/../share/h1/system-one`), the path stored in
 /// `<config dir>/system-one-dir`, then walking up from the executable and the current
@@ -260,7 +260,7 @@ pub struct SystemOneLocation {
 }
 
 /// Pure search core (no process env / exe / cwd reads) so tests do not race on env vars.
-/// Order: `$H1_SYSTEM_ONE_DIR`, `$GRAPHLOOP_SYSTEM_ONE_DIR`, upward from the `.yah`
+/// Order: `$H1_SYSTEM_ONE_DIR`, `$H1_SYSTEM_ONE_DIR`, upward from the `.yah`
 /// file, next to the exe, the stored dir, then `extra_starts` (exe, cwd) upward.
 pub fn locate_system_one_from(
     h1_env_val: Option<&str>,
@@ -274,7 +274,7 @@ pub fn locate_system_one_from(
     let mut env_invalid: Option<String> = None;
     for (name, raw_opt) in [
         ("H1_SYSTEM_ONE_DIR", h1_env_val),
-        ("GRAPHLOOP_SYSTEM_ONE_DIR", legacy_env_val),
+        ("H1_SYSTEM_ONE_DIR", legacy_env_val),
     ] {
         if let Some(raw) = raw_opt.filter(|v| !v.is_empty()) {
             looked.push(format!("{name}={raw}"));
@@ -438,7 +438,7 @@ pub fn store_system_one_dir_in(config_dir: &Path, dir: &Path) -> anyhow::Result<
 
 pub fn locate_system_one_detailed(yah_file: Option<&Path>) -> SystemOneLocation {
     let h1_env_val = std::env::var("H1_SYSTEM_ONE_DIR").ok();
-    let legacy_env_val = std::env::var("GRAPHLOOP_SYSTEM_ONE_DIR").ok();
+    let legacy_env_val = std::env::var("H1_SYSTEM_ONE_DIR").ok();
     let mut starts: Vec<PathBuf> = Vec::new();
     let mut exe_dir: Option<PathBuf> = None;
     if let Ok(exe) = std::env::current_exe() {
@@ -477,7 +477,7 @@ pub fn system_one_not_found_reason(location: &SystemOneLocation) -> String {
     let looked = location.looked.join(", ");
     match &location.env_invalid {
         Some(raw) => format!(
-            "system-one not found: env override {raw:?} is not a system-one package directory (no src/system_one); looked in {looked}; set H1_SYSTEM_ONE_DIR (or GRAPHLOOP_SYSTEM_ONE_DIR) to a valid system-one package directory"
+            "system-one not found: env override {raw:?} is not a system-one package directory (no src/system_one); looked in {looked}; set H1_SYSTEM_ONE_DIR (or H1_SYSTEM_ONE_DIR) to a valid system-one package directory"
         ),
         None => format!(
             "system-one not found: looked in {looked} for packages/system-one; set H1_SYSTEM_ONE_DIR to the system-one package directory"
@@ -559,7 +559,7 @@ pub fn doctor_report(yah_file: Option<&Path>) -> Vec<String> {
     match &location.dir {
         Some(dir) => {
             let picker = SystemOnePicker {
-                python: std::env::var("GRAPHLOOP_PYTHON")
+                python: std::env::var("H1_PYTHON")
                     .ok()
                     .filter(|v| !v.is_empty())
                     .unwrap_or_else(|| "python3".to_string()),
@@ -1259,7 +1259,7 @@ mod tests {
         let reason = system_one_not_found_reason(&loc);
         assert!(!reason.contains('\n'), "reason must be one line: {reason}");
         assert!(reason.contains("system-one not found"), "{reason}");
-        assert!(reason.contains("GRAPHLOOP_SYSTEM_ONE_DIR"), "{reason}");
+        assert!(reason.contains("H1_SYSTEM_ONE_DIR"), "{reason}");
         assert!(
             reason.contains(&yah.parent().unwrap().to_string_lossy().to_string()),
             "reason must say where it looked: {reason}"
@@ -1277,7 +1277,7 @@ mod tests {
         let reason2 = system_one_not_found_reason(&loc2);
         assert!(!reason2.contains('\n'), "{reason2}");
         assert!(
-            reason2.contains("GRAPHLOOP_SYSTEM_ONE_DIR") && reason2.contains("bogus"),
+            reason2.contains("H1_SYSTEM_ONE_DIR") && reason2.contains("bogus"),
             "invalid env must be named in fallback reason: {reason2}"
         );
     }

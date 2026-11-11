@@ -2,7 +2,7 @@ yah 1
 
 // vault.yah - secrets without secret values: a dotenv vault declares
 // where a token lives, and a harness env map references it as
-// ${vault.NAME.KEY}. The value is fetched only at graphloop up time,
+// ${vault.NAME.KEY}. The value is fetched only at h1 up time,
 // held in memory, and passed in the process environment (never argv).
 // The hosted program is plain cat, so trying it opens no model.
 

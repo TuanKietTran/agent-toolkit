@@ -258,23 +258,6 @@ Move the data directory to its new location:
 mv ~/.agent-cli-lab ~/.h1
 ```
 
-### From graphloop
-
-The standalone `graphloop` binary is gone: its Graphspec (`.yah`) commands are now subcommands of `h1`, with the same arguments and flags — replace `graphloop` with `h1`:
-
-| Before | After |
-|---|---|
-| `graphloop check FILE` | `h1 check FILE` |
-| `graphloop plan FILE` | `h1 plan FILE` |
-| `graphloop graph FILE` | `h1 graph FILE` |
-| `graphloop up FILE` | `h1 up FILE` |
-| `graphloop down RUN` | `h1 down RUN` |
-| `graphloop vault status FILE` | `h1 vault status FILE` |
-| `graphloop runs` | `h1 runs` |
-| `graphloop trace RUN` | `h1 trace RUN` |
-
-Your `.yah` files need no changes. The language lives in the `yah` crate (`yah/`) and its reference is `packages/h1/docs/graphspec.md`; graphloop is retired.
-
 ## Build and test
 
 ```sh

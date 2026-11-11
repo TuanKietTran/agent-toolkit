@@ -486,7 +486,7 @@ pub fn build(
     })
 }
 
-/// Manifest for a plan (what `graphloop up` writes). `source` is the absolute path of the .yah.
+/// Manifest for a plan (what `h1 up` writes). `source` is the absolute path of the .yah.
 pub fn manifest(
     spec: &Spec,
     plan: &Plan,
