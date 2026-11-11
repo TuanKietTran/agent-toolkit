@@ -29,21 +29,23 @@ graphloop down examples/demo.yah
 - `src/` — the crate: `lexer.rs` / `parser.rs` (tokens, recursive-descent parser), `resolve.rs` / `load.rs` (substitution, references, pipeline glue), `schema.rs` (strict validation), `pick.rs` (system-one resolution), `plan.rs` (team -> open steps, edges, manifest), `cli.rs` (`check|plan|graph|up|down|runs|trace`), plus the shared-contract modules `ast.rs`, `spec.rs`, `diag.rs`, `manifest.rs`.
 - `docs/graphspec.md` — the Graphspec specification.
 - `editors/` — TextMate grammar (`yah.tmLanguage.json`), `language-configuration.json`, install notes (`README.md`), and the dependency-free validator `check.mjs`.
-- `examples/` — `team.yah` (commander -> builder), `research-team.yah` (planner with researcher / builder / reviewer), `demo.yah` (harmless detached `cat` labs), `renewable-team.yah` (builder with `brief` / `resume_log` / `auto_rearm` renew fields), `vault.yah` (a dotenv vault referenced from an env map), `preview.yah` (lead -> worker pair that exercises every field `graphloop preview` reports).
+- `examples/` — `team.yah` (commander -> builder), `research-team.yah` (planner with researcher / builder / reviewer), `demo.yah` (harmless detached `cat` labs), `renewable-team.yah` (builder with `brief` / `resume_log` / `auto_rearm` renew fields), `vault.yah` (a dotenv vault referenced from an env map), `preview.yah` (lead -> worker pair that exercises every field `graphloop preview` reports), `preview-demo.yah` (a preview that deliberately warns: an empty variable and a missing cwd, in a file that still loads).
 - `tests/fixtures/canonical.yah` — the canonical example the grammar checks run against.
 
-## Preview
+## Previewing a team
 
-`graphloop preview examples/preview.yah` prints, as JSON, what `graphloop up` would open for a team — without opening anything: no sessions are started, no files are written, and no run manifest is created. Vault and environment values are never fetched, so a preview is safe to run anywhere, including in tests.
+`graphloop preview examples/preview.yah` prints, as JSON, what `graphloop up` would open for a team — without opening anything: no sessions are started, no process is spawned (system-one included), no files are written, and no run manifest is created. Vault secrets are never fetched and `${env.*}` references are never expanded, so a preview is safe to run anywhere, including in tests, and is deterministic: same file, same output.
 
-The document is versioned and stable enough to golden-test:
+The document is versioned (version 1) and stable enough to golden-test — `tests/fixtures/preview/` holds one golden per file in `examples/`:
 
-- Top level: `version`, `source`, `team`, `root`, `nodes`, `edges`, `warnings`.
-- Each node: `name`, `harness`, `role`, `parent`, the resolved `model`, the `open_command` argv, `cwd`, and `env`.
-- `env` entries carry only `key` and `masked`: `masked` is true when the value is late-bound (`${vault.*}` or `${env.*}`). Env values never appear in preview output at all.
-- Non-fatal findings — for example a vault whose provider is not ready — are collected in `warnings` instead of failing the preview; hard errors fail exactly as `check` does.
+- Top level: `version`, `team`, `source`, `root`, `prefix`, `nodes`, `edges`, `warnings`.
+- Each node: `name`, `harness`, `role`, `parent`, `requested_model`, `model`, `model_label`, `model_status`, `tools`, `cwd`, `env`, and `open_command` (the printable `h1 open ...` string). A pinned node names its catalog label and concrete `provider/id`; a `system-one` node stays `pending` with `model: null` — preview never asks system-one to choose.
+- `env` entries carry `key`, `value`, `source` (`literal` / `env` / `vault` / `mixed`) and `masked`. `value` is the template as written: literals in full, `${env.*}` / `${vault.*}` shown as references. The one exception is a literal whose key looks secret-bearing (it contains `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `PASSWD`): its value is replaced by `***` and `masked` is true.
+- Non-fatal findings are collected in `warnings` (sorted by node, then code) instead of failing the preview; hard errors fail exactly as `check` does. Codes include `empty_variable` (a variable that resolves to an empty string), `missing_cwd` (a literal cwd that does not exist) and `unknown_model` (a model label outside the catalog — reachable when a preview is built from a spec in code; a `.yah` file that names an unknown model fails `check`, so it never reaches preview).
 
-The `h1` console can render the same preview as a planned graph (its `--preview` mode), so the JSON and the picture never drift.
+`examples/preview-demo.yah` is the warning case on purpose: an empty variable and a missing cwd, in a file that still loads. Its header shows the `unknown_model` shape as a comment, for the reason above.
+
+The `h1` console can render the same document as a planned graph (its `--preview` mode), so the JSON and the picture never drift. In the console, `P` loads a preview file and `o` sorts; the full preview-mode key list is in the h1 README's "Preview mode" section.
 
 ## Secrets
 

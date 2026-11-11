@@ -54,6 +54,10 @@ h1 console --snapshot --view graph --width 130 --height 30   # one text frame
 
 The graph comes from `open --role ROLE --parent NAME [--model PROVIDER/ID]`. A session opened from inside another one is attached to it automatically (the hosted program gets `H1_SELF`). `open --brief FILE [--resume-log FILE] [--new-cmd TEXT] [--ready-regex RE]` also stores those renew settings in the registry — paths and settings only, never file contents or secret values — so the session can later be renewed with its context.
 
+### Preview mode
+
+`h1 console --preview FILE` renders a `graphloop preview` document (see "Previewing a team" in the graphloop README) as a planned graph: the team as it would open, drawn alongside any live labs, with the preview's warnings shown in red. Loading a preview is a pure read — nothing is started, stopped, or written. Preview-mode keys: `P` loads a preview file, `p` toggles the preview overlay, `enter` shows the selected node's `open_command` and env, `u` shows the would-up summary (what would start, what is already running, what would stop), `o` sorts, `q` leaves preview mode.
+
 ## All agents on this machine
 
 ```sh
