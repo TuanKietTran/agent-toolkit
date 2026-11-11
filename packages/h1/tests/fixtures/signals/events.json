@@ -1,0 +1,16 @@
+{
+  "description": "Wire fixtures for events (contract: packages/h1/src/wire.rs in the manager worktree). Event/Frame/Request shapes are verbatim wire JSON. ts_ms and seq are placeholders: tests compare them only for presence and monotonic increase, never exact values. For relation_ended, app is the session that RECEIVES the event and detail.role is the role of the ENDED session in that edge.",
+  "subscribe_request_filtered": { "op": "event_subscribe", "kinds": ["exited", "relation_ended"], "replay": false },
+  "subscribe_request_replay": { "op": "event_subscribe", "kinds": [], "replay": true },
+  "lifecycle_frames": [
+    { "frame": "event", "kind": "started", "app": "consumer", "ts_ms": 1, "seq": 1 },
+    { "frame": "event", "kind": "idle", "app": "consumer", "ts_ms": 2, "seq": 2 },
+    { "frame": "event", "kind": "exited", "app": "consumer", "ts_ms": 3, "seq": 3, "detail": { "exit_code": 0 } },
+    { "frame": "event", "kind": "closed", "app": "consumer", "ts_ms": 4, "seq": 4 },
+    { "frame": "end" }
+  ],
+  "relation_ended_frames": [
+    { "frame": "event", "kind": "relation_ended", "app": "consumer", "ts_ms": 5, "seq": 5, "detail": { "ended": "producer", "relation": "parent", "role": "from" } },
+    { "frame": "event", "kind": "relation_ended", "app": "consumer", "ts_ms": 6, "seq": 6, "detail": { "ended": "producer", "relation": "depends_on", "role": "to" } }
+  ]
+}
