@@ -5,8 +5,8 @@
 //! may span lines, no escapes); raw backtick strings; numbers; `{ } [ ] = , .`.
 //! The header is lexed as the identifier `yah` followed by a number.
 
-use crate::ast::Span;
-use crate::diag::{Diagnostic, Diagnostics};
+use crate::yah::ast::Span;
+use crate::yah::diag::{Diagnostic, Diagnostics};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tok {
@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn canonical_fixture_lexes_to_eof() {
-        let src = include_str!("../tests/fixtures/canonical.yah");
+        let src = include_str!("../../tests/fixtures/canonical.yah");
         let t = toks(src);
         assert_eq!(t.last().unwrap().tok, Tok::Eof);
         assert!(t.len() > 50);

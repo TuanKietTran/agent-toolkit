@@ -8,8 +8,8 @@
 //! Adapters are listed in [`PROVIDERS`]; `schema` validates a vault block against that table, so
 //! adding an adapter means one table row plus one arm in [`Vaults::fetch`].
 
-use crate::diag::suggest;
-use crate::spec::Vault;
+use crate::yah::diag::suggest;
+use crate::yah::spec::Vault;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::Read;

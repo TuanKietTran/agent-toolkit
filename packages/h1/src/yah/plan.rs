@@ -9,11 +9,11 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::ast::Span;
-use crate::diag::{Diagnostic, Diagnostics};
-use crate::manifest::{Edge, EdgeKind, Manifest, Node, PickInfo};
-use crate::pick::Resolved;
-use crate::spec::{Part, RenderCtx, Spec, Team, Templ};
+use crate::yah::ast::Span;
+use crate::yah::diag::{Diagnostic, Diagnostics};
+use crate::yah::manifest::{Edge, EdgeKind, Manifest, Node, PickInfo};
+use crate::yah::pick::Resolved;
+use crate::yah::spec::{Part, RenderCtx, Spec, Team, Templ};
 
 #[derive(Debug, Clone, Default)]
 pub struct PlanOpts {
@@ -228,7 +228,7 @@ pub fn build(spec: &Spec, team: &str, resolved: &[Resolved], opts: &PlanOpts) ->
     }
 
     // In declaration order of spec.harnesses.
-    let nodes: Vec<&crate::spec::Harness> = spec.harnesses.iter().filter(|h| in_team(&h.name)).collect();
+    let nodes: Vec<&crate::yah::spec::Harness> = spec.harnesses.iter().filter(|h| in_team(&h.name)).collect();
     let prefix = opts.prefix.as_deref();
 
     for harness in &nodes {
@@ -266,9 +266,9 @@ pub fn build(spec: &Spec, team: &str, resolved: &[Resolved], opts: &PlanOpts) ->
     }
 
     // Stable topological sort: parents before children, otherwise declaration order.
-    let mut remaining: Vec<&crate::spec::Harness> = nodes.clone();
+    let mut remaining: Vec<&crate::yah::spec::Harness> = nodes.clone();
     let mut emitted: HashSet<&str> = HashSet::new();
-    let mut ordered: Vec<&crate::spec::Harness> = Vec::new();
+    let mut ordered: Vec<&crate::yah::spec::Harness> = Vec::new();
     while !remaining.is_empty() {
         let ready = remaining.iter().position(|h| match &h.parent {
             None => true,
@@ -377,7 +377,7 @@ pub fn manifest(spec: &Spec, plan: &Plan, resolved: &[Resolved], source: &str, o
         })
         .collect();
     Manifest {
-        version: crate::manifest::VERSION,
+        version: crate::yah::manifest::VERSION,
         run: opts.run.clone(),
         team: plan.team.clone(),
         source: source.to_owned(),
@@ -392,8 +392,8 @@ pub fn manifest(spec: &Spec, plan: &Plan, resolved: &[Resolved], source: &str, o
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pick::Via;
-    use crate::spec::{Harness, ModelRef, Open};
+    use crate::yah::pick::Via;
+    use crate::yah::spec::{Harness, ModelRef, Open};
 
     fn harness(name: &str, role: &str, parent: Option<&str>, line: u32) -> Harness {
         Harness {

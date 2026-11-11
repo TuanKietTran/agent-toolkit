@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 
-use crate::ast::{ExprKind, Stmt};
+use crate::yah::ast::{ExprKind, Stmt};
 
 /// Declared names in one file, in declaration order.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -23,7 +23,7 @@ pub struct Scope {
 }
 
 impl Scope {
-    pub fn build(file: &crate::ast::File) -> Scope {
+    pub fn build(file: &crate::yah::ast::File) -> Scope {
         let mut scope = Scope::default();
         for stmt in &file.stmts {
             let Stmt::Block(block) = stmt else { continue };
@@ -49,7 +49,7 @@ impl Scope {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Assign, Block, Expr, File, Span};
+    use crate::yah::ast::{Assign, Block, Expr, File, Span};
 
     fn block(kind: &str, label: &str, body: Vec<Stmt>) -> Stmt {
         Stmt::Block(Block { kind: kind.to_string(), label: Some(label.to_string()), body, span: Span::default(), leading: Vec::new(), trailing: None })

@@ -11,7 +11,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
-use crate::vault::parse_dotenv;
+use crate::yah::vault::parse_dotenv;
 
 /// The merged contents of every loaded env file. First occurrence of a name wins.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

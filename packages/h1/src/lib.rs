@@ -10,6 +10,7 @@ mod ipc;
 mod keys;
 mod session;
 mod state;
+pub mod yah;
 #[cfg(windows)]
 mod windows_killer;
 
@@ -109,6 +110,10 @@ enum Commands {
     Close(commander::CloseArgs),
     /// Resume a lab from recent ledger notes.
     Resume(commander::ResumeArgs),
+    /// Graphspec (.yah) team commands, formerly the graphloop binary:
+    /// check, fmt, plan, graph, up, down, vault, runs, trace.
+    #[command(flatten)]
+    Yah(crate::yah::cli::Cmd),
 }
 
 #[derive(Debug, Args)]
@@ -633,6 +638,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
         Commands::Resume(args) => commander::resume(args),
         Commands::Renew(args) => commands::renew(args),
         Commands::Recover(args) => commands::recover(args),
+        Commands::Yah(cmd) => Ok(crate::yah::cli::run(cmd)),
     }
 }
 

@@ -14,7 +14,7 @@
 //! Invariants: `print(parse(src))` re-parses to the same AST ignoring spans,
 //! and printing is idempotent.
 
-use crate::ast::{Assign, Block, Expr, ExprKind, File, Stmt, StrPart};
+use crate::yah::ast::{Assign, Block, Expr, ExprKind, File, Stmt, StrPart};
 
 /// Render `file` in canonical form. Always ends with exactly one newline.
 pub fn print(file: &File) -> String {
@@ -196,8 +196,8 @@ fn number_text(n: f64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::Span;
-    use crate::parser::parse;
+    use crate::yah::ast::Span;
+    use crate::yah::parser::parse;
 
     fn strip(file: &mut File) {
         for stmt in &mut file.stmts {
@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn canonical_fixture_round_trips() {
-        round_trip(include_str!("../tests/fixtures/canonical.yah"));
+        round_trip(include_str!("../../tests/fixtures/canonical.yah"));
     }
 
     #[test]
