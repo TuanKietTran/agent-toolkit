@@ -274,7 +274,10 @@ team "t" { root = "boss" }
         let w2 = spec.harness("workers-2").expect("member 2");
         assert_eq!(w2.parent.as_deref(), Some("boss"));
         assert_eq!(w2.role, "worker");
-        assert_eq!(spec.team("t").unwrap().members, vec!["workers-1", "workers-2"]);
+        assert_eq!(
+            spec.team("t").unwrap().members,
+            vec!["workers-1", "workers-2"]
+        );
         assert_eq!(spec.pools[0].max, Some(4));
     }
 
@@ -295,7 +298,11 @@ team "t" { root = "boss" }
             .replace("pool = \"workers\" model", "pool = \"ghost\" model")
             .replace("can_ask = [\"ask\"]", "can_ask = [\"zzz\"]");
         let d = load_str("p.yah", &bad, &no_overrides()).unwrap_err();
-        let all: String = d.0.iter().map(|x| x.summary.clone()).collect::<Vec<_>>().join("|");
+        let all: String =
+            d.0.iter()
+                .map(|x| x.summary.clone())
+                .collect::<Vec<_>>()
+                .join("|");
         assert!(all.contains("Unknown reference"), "{all}");
         assert!(d.0.len() >= 3, "{all}");
     }
@@ -307,7 +314,12 @@ team "t" { root = "boss" }
             "pool \"sub\" { prototype = \"w\" parent = \"workers-1\" min = 1 }\nteam \"t\"",
         );
         let spec = load_str("p.yah", &src, &no_overrides()).expect("loads");
-        assert!(spec.team("t").unwrap().members.contains(&"sub-1".to_string()));
+        assert!(
+            spec.team("t")
+                .unwrap()
+                .members
+                .contains(&"sub-1".to_string())
+        );
     }
 
     #[test]
@@ -326,6 +338,120 @@ team "t" { root = "boss" }
         let spec = load_str("p.yah", &src, &no_overrides()).expect("loads");
         let m = &spec.team("t").unwrap().members;
         assert!(m.contains(&"workers-1".to_string()));
-        assert!(!m.contains(&"loner".to_string()), "no parent chain to the root");
+        assert!(
+            !m.contains(&"loner".to_string()),
+            "no parent chain to the root"
+        );
+    }
+
+    #[test]
+    fn service_full_fields_and_defaults() {
+        let src = "yah 1\nservice \"api\" {\n command = [\"python3\", \"-m\", \"http.server\"]\n cwd = \"/srv/api\"\n env = { PORT = \"8080\", MODE = \"dev\" }\n singleton = true\n restart = \"on-failure\"\n max_restarts = 3\n backoff_ms = 500\n health = \"http://127.0.0.1:8080/health\"\n health_interval_ms = 5000\n}\nservice \"db\" { command = \"postgres\" }\n";
+        let spec = load_str("s.yah", src, &no_overrides()).expect("services load");
+        assert_eq!(spec.services.len(), 2);
+        let api = &spec.services[0];
+        assert_eq!(api.name, "api");
+        assert_eq!(api.command, vec!["python3", "-m", "http.server"]);
+        assert_eq!(api.cwd.as_deref(), Some("/srv/api"));
+        assert_eq!(
+            api.env,
+            vec![
+                ("PORT".to_string(), "8080".to_string()),
+                ("MODE".to_string(), "dev".to_string())
+            ]
+        );
+        assert!(api.singleton);
+        assert_eq!(api.restart, "on-failure");
+        assert_eq!(api.max_restarts, Some(3));
+        assert_eq!(api.backoff_ms, Some(500));
+        assert_eq!(api.health.as_deref(), Some("http://127.0.0.1:8080/health"));
+        assert_eq!(api.health_interval_ms, Some(5000));
+        let db = &spec.services[1];
+        assert_eq!(db.name, "db");
+        assert_eq!(db.command, vec!["postgres"]);
+        assert_eq!(db.cwd, None);
+        assert!(db.env.is_empty());
+        assert!(!db.singleton);
+        assert_eq!(db.restart, "never");
+        assert_eq!(db.max_restarts, None);
+        assert_eq!(db.backoff_ms, None);
+        assert_eq!(db.health, None);
+        assert_eq!(db.health_interval_ms, None);
+    }
+
+    #[test]
+    fn can_use_lands_in_uses_and_pool_members_inherit_prototype_can_use() {
+        let src = POOLED
+            .replace("open { command = [\"pi\"] detached = true }", "can_use = [\"cache\"]\n  open { command = [\"pi\"] detached = true }")
+            .replace("can_ask = [\"ask\"]", "can_use = [\"db\", \"cache\", \"db\"]")
+            .replace("team \"t\"", "service \"cache\" { command = [\"redis-server\"] }\nservice \"db\" { command = \"postgres\" }\nteam \"t\"");
+        let spec = load_str("p.yah", &src, &no_overrides()).expect("loads");
+        assert_eq!(spec.services.len(), 2);
+        assert_eq!(
+            spec.uses,
+            vec![
+                ("workers-1".to_string(), "cache".to_string()),
+                ("workers-2".to_string(), "cache".to_string()),
+                ("scout".to_string(), "db".to_string()),
+                ("scout".to_string(), "cache".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn service_missing_command_is_an_error() {
+        let d = err_diags("yah 1\nservice \"x\" {\n cwd = \"/tmp\"\n}\n");
+        assert!(
+            d.0.iter()
+                .any(|x| x.summary == "Missing required argument"
+                    && x.detail.contains("\"command\"")),
+            "{d:?}"
+        );
+    }
+
+    #[test]
+    fn service_bad_restart_is_an_error() {
+        let d =
+            err_diags("yah 1\nservice \"x\" {\n command = \"run\"\n restart = \"sometimes\"\n}\n");
+        assert!(
+            d.0.iter()
+                .any(|x| x.summary == "Invalid value" && x.detail.contains("sometimes")),
+            "{d:?}"
+        );
+    }
+
+    #[test]
+    fn service_bad_health_scheme_is_an_error() {
+        let d = err_diags(
+            "yah 1\nservice \"x\" {\n command = \"run\"\n health = \"localhost:8080\"\n}\n",
+        );
+        assert!(
+            d.0.iter()
+                .any(|x| x.summary == "Invalid value" && x.detail.contains("health")),
+            "{d:?}"
+        );
+    }
+
+    #[test]
+    fn unknown_can_use_service_is_an_error() {
+        let bad = POOLED.replace("can_ask = [\"ask\"]", "can_use = [\"zzz\"]");
+        let d = load_str("p.yah", &bad, &no_overrides()).unwrap_err();
+        assert!(
+            d.0.iter()
+                .any(|x| x.summary == "Unknown reference" && x.detail.contains("zzz")),
+            "{d:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_service_label_is_an_error() {
+        let d = err_diags(
+            "yah 1\nservice \"dup\" { command = \"a\" }\nservice \"dup\" { command = \"b\" }\n",
+        );
+        assert!(
+            d.0.iter()
+                .any(|x| x.summary == "Duplicate block" && x.detail.contains("dup")),
+            "{d:?}"
+        );
     }
 }

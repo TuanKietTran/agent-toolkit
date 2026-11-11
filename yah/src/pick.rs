@@ -862,7 +862,9 @@ mod tests {
             prototypes: Vec::new(),
             pools: Vec::new(),
             decisions: Vec::new(),
+            services: Vec::new(),
             asks: Vec::new(),
+            uses: Vec::new(),
         }
     }
 

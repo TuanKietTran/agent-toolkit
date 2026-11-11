@@ -132,8 +132,12 @@ pub struct Spec {
     /// `pool` blocks: N workers cut from a prototype (already expanded into harnesses).
     pub pools: Vec<Pool>,
     pub decisions: Vec<Decision>,
+    /// `service` blocks: long-running local processes the lab governs.
+    pub services: Vec<Service>,
     /// `(harness, decision)` pairs from `can_ask`.
     pub asks: Vec<(String, String)>,
+    /// `(harness, service)` pairs from `can_use`.
+    pub uses: Vec<(String, String)>,
 }
 
 /// `variable "name" { type, default, description }`. `value` is the effective value after
@@ -184,6 +188,24 @@ pub struct Decision {
     pub input: serde_json::Value,
     pub output: serde_json::Value,
     pub constraints: serde_json::Value,
+    pub line: u32,
+}
+
+/// `service "label" { command, cwd, env, singleton, restart, max_restarts, backoff_ms, health, health_interval_ms }`:
+/// a long-running local process the lab governs (list/start/stop/status/logs, restart/backoff/health),
+/// not a harness or team member. `restart` is `never` | `on-failure` | `always`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Service {
+    pub name: String,
+    pub command: Vec<String>,
+    pub cwd: Option<String>,
+    pub env: Vec<(String, String)>,
+    pub singleton: bool,
+    pub restart: String,
+    pub max_restarts: Option<u32>,
+    pub backoff_ms: Option<u64>,
+    pub health: Option<String>,
+    pub health_interval_ms: Option<u64>,
     pub line: u32,
 }
 

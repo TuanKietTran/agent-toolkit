@@ -24,10 +24,22 @@ pub const KNOWN_KINDS: &[&str] = &[
     "prototype",
     "pool",
     "decision",
+    "service",
 ];
 const LABELLED: &[&str] = &[
-    "variable", "provider", "vault", "model", "api", "harness", "team", "workflow", "output",
-    "prototype", "pool", "decision",
+    "variable",
+    "provider",
+    "vault",
+    "model",
+    "api",
+    "harness",
+    "team",
+    "workflow",
+    "output",
+    "prototype",
+    "pool",
+    "decision",
+    "service",
 ];
 const SINGLETONS: &[&str] = &["defaults", "system_one", "image"];
 
@@ -465,12 +477,7 @@ fn json_value(cx: &mut Cx, e: &Expr, key: &str, ctx: &str) -> Option<serde_json:
     }
 }
 
-fn enum_value(
-    cx: &mut Cx,
-    a: &crate::ast::Assign,
-    allowed: &[&str],
-    ctx: &str,
-) -> Option<String> {
+fn enum_value(cx: &mut Cx, a: &crate::ast::Assign, allowed: &[&str], ctx: &str) -> Option<String> {
     let v = static_string(cx, a, ctx)?;
     if allowed.contains(&v.as_str()) {
         Some(v)
@@ -493,10 +500,7 @@ fn enum_value(
     }
 }
 
-pub fn build(
-    file: &crate::ast::File,
-    scope: &crate::scope::Scope,
-) -> Result<Spec, Diagnostics> {
+pub fn build(file: &crate::ast::File, scope: &crate::scope::Scope) -> Result<Spec, Diagnostics> {
     let mut cx = Cx {
         file: file.name.clone(),
         diags: Diagnostics::default(),
@@ -521,7 +525,9 @@ pub fn build(
         prototypes: Vec::new(),
         pools: Vec::new(),
         decisions: Vec::new(),
+        services: Vec::new(),
         asks: Vec::new(),
+        uses: Vec::new(),
     };
     let mut seen_labelled: HashSet<(String, String)> = HashSet::new();
     let mut seen_single: HashSet<String> = HashSet::new();
@@ -541,6 +547,7 @@ pub fn build(
         })
         .collect();
     let mut ask_refs: Vec<(String, StrRef)> = Vec::new();
+    let mut use_refs: Vec<(String, StrRef)> = Vec::new();
     let mut pool_refs: Vec<(String, Option<StrRef>, Option<StrRef>)> = Vec::new();
     let mut decision_refs: Vec<(String, Option<StrRef>, Option<StrRef>)> = Vec::new();
     // MARKER_STATE
@@ -637,14 +644,26 @@ pub fn build(
                     }
                     "api" => parse_api(&mut cx, block, &mut spec, &scope.harnesses),
                     "harness" => {
-                        let eff = effective_harness(&mut cx, block, &protos, &mut ask_refs);
+                        let eff = effective_harness(
+                            &mut cx,
+                            block,
+                            &protos,
+                            &mut ask_refs,
+                            &mut use_refs,
+                        );
                         if let Some(r) = parse_harness(&mut cx, &eff, &mut spec, &scope.harnesses) {
                             harness_refs.push(r);
                         }
                     }
                     "prototype" => {
                         let n = spec.harnesses.len();
-                        let plain = effective_harness(&mut cx, block, &HashMap::new(), &mut Vec::new());
+                        let plain = effective_harness(
+                            &mut cx,
+                            block,
+                            &HashMap::new(),
+                            &mut Vec::new(),
+                            &mut Vec::new(),
+                        );
                         if let Some(mut r) =
                             parse_harness(&mut cx, &plain, &mut spec, &scope.harnesses)
                         {
@@ -652,13 +671,20 @@ pub fn build(
                             harness_refs.push(r);
                         }
                         spec.harnesses.truncate(n);
-                        spec.prototypes.push(block.label.clone().unwrap_or_default());
+                        spec.prototypes
+                            .push(block.label.clone().unwrap_or_default());
                     }
                     "pool" => {
                         if let Some((pool, refs)) = parse_pool(&mut cx, block) {
                             for i in 1..=pool.min {
                                 let synth = synth_member(block, &pool, i);
-                                let eff = effective_harness(&mut cx, &synth, &protos, &mut ask_refs);
+                                let eff = effective_harness(
+                                    &mut cx,
+                                    &synth,
+                                    &protos,
+                                    &mut ask_refs,
+                                    &mut use_refs,
+                                );
                                 if let Some(r) =
                                     parse_harness(&mut cx, &eff, &mut spec, &scope.harnesses)
                                 {
@@ -673,6 +699,11 @@ pub fn build(
                         if let Some((d, refs)) = parse_decision(&mut cx, block) {
                             decision_refs.push((d.name.clone(), refs.0, refs.1));
                             spec.decisions.push(d);
+                        }
+                    }
+                    "service" => {
+                        if let Some(s) = parse_service(&mut cx, block) {
+                            spec.services.push(s);
                         }
                     }
                     "team" => {
@@ -862,6 +893,20 @@ pub fn build(
             spec.asks.push((h.clone(), d.clone()));
         }
     }
+    let service_labels: Vec<String> = spec.services.iter().map(|s| s.name.clone()).collect();
+    for (h, (s, span)) in &use_refs {
+        if !service_labels.contains(s) {
+            cx.unknown_ref(
+                *span,
+                format!("The harness \"{h}\" can_use an unknown service \"{s}\"."),
+                s,
+                &service_labels,
+                &block_ctx("harness", Some(h)),
+            );
+        } else if !spec.uses.contains(&(h.clone(), s.clone())) {
+            spec.uses.push((h.clone(), s.clone()));
+        }
+    }
     for (label, proto, parent) in &pool_refs {
         let ctx = block_ctx("pool", Some(label));
         if let Some((p, s)) = proto
@@ -1027,13 +1072,25 @@ fn parse_defaults(
     let (assigns, _) = collect_body(
         cx,
         block,
-        &["model_policy", "sandbox", "worktree_root", "status_dir", "target_dir"],
+        &[
+            "model_policy",
+            "sandbox",
+            "worktree_root",
+            "status_dir",
+            "target_dir",
+        ],
         &[],
         &ctx,
     );
-    spec.defaults.worktree_root = assigns.get("worktree_root").and_then(|a| static_string(cx, a, &ctx));
-    spec.defaults.status_dir = assigns.get("status_dir").and_then(|a| static_string(cx, a, &ctx));
-    spec.defaults.target_dir = assigns.get("target_dir").and_then(|a| static_string(cx, a, &ctx));
+    spec.defaults.worktree_root = assigns
+        .get("worktree_root")
+        .and_then(|a| static_string(cx, a, &ctx));
+    spec.defaults.status_dir = assigns
+        .get("status_dir")
+        .and_then(|a| static_string(cx, a, &ctx));
+    spec.defaults.target_dir = assigns
+        .get("target_dir")
+        .and_then(|a| static_string(cx, a, &ctx));
     let mut policy = None;
     if let Some(a) = assigns.get("model_policy")
         && let Some(v) = static_string(cx, a, &ctx)
@@ -1295,11 +1352,7 @@ fn parse_system_one(
     });
     fallback_ref
 }
-fn parse_image(
-    cx: &mut Cx,
-    block: &crate::ast::Block,
-    spec: &mut Spec,
-) -> Option<(String, Span)> {
+fn parse_image(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option<(String, Span)> {
     let ctx = block_ctx("image", None);
     let (assigns, _) = collect_body(cx, block, &["provider", "generate", "vision"], &[], &ctx);
     let mut provider_ref = None;
@@ -1398,12 +1451,7 @@ fn parse_api(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses:
         line: block.span.line,
     });
 }
-fn parse_open(
-    cx: &mut Cx,
-    block: &crate::ast::Block,
-    harnesses: &[String],
-    hctx: &str,
-) -> Open {
+fn parse_open(cx: &mut Cx, block: &crate::ast::Block, harnesses: &[String], hctx: &str) -> Open {
     let ctx = format!("{hctx} > open");
     let (assigns, _) = collect_body(
         cx,
@@ -1681,12 +1729,7 @@ fn parse_workflow(
     });
     team_ref.map(|r| (label, r))
 }
-fn parse_output(
-    cx: &mut Cx,
-    block: &crate::ast::Block,
-    spec: &mut Spec,
-    harnesses: &[String],
-) {
+fn parse_output(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses: &[String]) {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("output", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["value", "description"], &[], &ctx);
@@ -1765,19 +1808,21 @@ fn synth_member(block: &crate::ast::Block, pool: &Pool, i: u32) -> crate::ast::B
 }
 
 /// Fold `prototype` into a harness block: the prototype's keys fill what the harness leaves out
-/// (`open` merges key by key), then `prototype` and `can_ask` are stripped so the ordinary
-/// harness parser sees a complete block. `can_ask` names go to `asks`.
+/// (`open` merges key by key), then `prototype`, `can_ask` and `can_use` are stripped so the ordinary
+/// harness parser sees a complete block. `can_ask` names go to `asks`, `can_use` names to `uses`.
 fn effective_harness(
     cx: &mut Cx,
     block: &crate::ast::Block,
     protos: &HashMap<String, &crate::ast::Block>,
     asks: &mut Vec<(String, StrRef)>,
+    uses: &mut Vec<(String, StrRef)>,
 ) -> crate::ast::Block {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("harness", Some(&label));
     let mut own: Vec<Stmt> = Vec::new();
     let mut proto_name: Option<StrRef> = None;
     let mut own_has_ask = false;
+    let mut own_has_use = false;
     for st in &block.body {
         match st {
             Stmt::Assign(a) if a.key == "prototype" => {
@@ -1791,11 +1836,20 @@ fn effective_harness(
                     asks.push((label.clone(), (d, a.span)));
                 }
             }
+            Stmt::Assign(a) if a.key == "can_use" => {
+                own_has_use = true;
+                for s in string_list(cx, a, &ctx).unwrap_or_default() {
+                    uses.push((label.clone(), (s, a.span)));
+                }
+            }
             other => own.push(other.clone()),
         }
     }
     let Some((pname, pspan)) = proto_name else {
-        return crate::ast::Block { body: own, ..block.clone() };
+        return crate::ast::Block {
+            body: own,
+            ..block.clone()
+        };
     };
     let Some(proto) = protos.get(&pname) else {
         let cands: Vec<String> = protos.keys().cloned().collect();
@@ -1806,7 +1860,10 @@ fn effective_harness(
             &cands,
             &ctx,
         );
-        return crate::ast::Block { body: own, ..block.clone() };
+        return crate::ast::Block {
+            body: own,
+            ..block.clone()
+        };
     };
     let own_keys: HashSet<String> = own
         .iter()
@@ -1826,6 +1883,13 @@ fn effective_harness(
                 if !own_has_ask {
                     for d in string_list(cx, a, &ctx).unwrap_or_default() {
                         asks.push((label.clone(), (d, a.span)));
+                    }
+                }
+            }
+            Stmt::Assign(a) if a.key == "can_use" => {
+                if !own_has_use {
+                    for s in string_list(cx, a, &ctx).unwrap_or_default() {
+                        uses.push((label.clone(), (s, a.span)));
                     }
                 }
             }
@@ -1858,7 +1922,10 @@ fn effective_harness(
             _ => body.push(st),
         }
     }
-    crate::ast::Block { body, ..block.clone() }
+    crate::ast::Block {
+        body,
+        ..block.clone()
+    }
 }
 
 type PoolRefs = (Option<StrRef>, Option<StrRef>);
@@ -1877,22 +1944,60 @@ fn uint_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<u32> {
     }
 }
 
+fn u64_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<u64> {
+    match &a.value.kind {
+        ExprKind::Num(v) if v.fract() == 0.0 && *v >= 0.0 && *v <= 9007199254740991.0 => {
+            Some(*v as u64)
+        }
+        ExprKind::Num(v) => {
+            cx.invalid_value(
+                a.value.span,
+                &a.key,
+                format!(
+                    "Invalid value for attribute \"{}\": expected a non-negative integer, got {v}.",
+                    a.key
+                ),
+                ctx,
+            );
+            None
+        }
+        _ => {
+            cx.type_err(a.value.span, &a.key, "a number", ctx);
+            None
+        }
+    }
+}
+
 fn parse_pool(cx: &mut Cx, block: &crate::ast::Block) -> Option<(Pool, PoolRefs)> {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("pool", Some(&label));
     let (assigns, _) = collect_body(
         cx,
         block,
-        &["prototype", "parent", "min", "max", "idle_ttl", "constraints"],
+        &[
+            "prototype",
+            "parent",
+            "min",
+            "max",
+            "idle_ttl",
+            "constraints",
+        ],
         &[],
         &ctx,
     );
-    let proto = assigns.get("prototype").and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
+    let proto = assigns
+        .get("prototype")
+        .and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
     if proto.is_none() && !assigns.contains_key("prototype") {
         cx.missing(block.span, "prototype", &ctx);
     }
-    let parent = assigns.get("parent").and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
-    let min = assigns.get("min").and_then(|a| uint_value(cx, a, &ctx)).unwrap_or(1);
+    let parent = assigns
+        .get("parent")
+        .and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
+    let min = assigns
+        .get("min")
+        .and_then(|a| uint_value(cx, a, &ctx))
+        .unwrap_or(1);
     let max = assigns.get("max").and_then(|a| uint_value(cx, a, &ctx));
     if let Some(m) = max
         && m < min
@@ -1905,7 +2010,9 @@ fn parse_pool(cx: &mut Cx, block: &crate::ast::Block) -> Option<(Pool, PoolRefs)
             None,
         );
     }
-    let idle_ttl = assigns.get("idle_ttl").and_then(|a| static_string(cx, a, &ctx));
+    let idle_ttl = assigns
+        .get("idle_ttl")
+        .and_then(|a| static_string(cx, a, &ctx));
     let constraints = assigns
         .get("constraints")
         .and_then(|a| json_value(cx, &a.value, "constraints", &ctx))
@@ -1933,8 +2040,12 @@ fn parse_decision(cx: &mut Cx, block: &crate::ast::Block) -> Option<(Decision, P
         &[],
         &ctx,
     );
-    let pool = assigns.get("pool").and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
-    let model = assigns.get("model").and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
+    let pool = assigns
+        .get("pool")
+        .and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
+    let model = assigns
+        .get("model")
+        .and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
     let val = |k: &str, cx: &mut Cx| {
         assigns
             .get(k)
@@ -1952,4 +2063,141 @@ fn parse_decision(cx: &mut Cx, block: &crate::ast::Block) -> Option<(Decision, P
     };
     Some((d, (pool, model)))
 }
+fn parse_service(cx: &mut Cx, block: &crate::ast::Block) -> Option<Service> {
+    let label = block.label.clone().unwrap_or_default();
+    let ctx = block_ctx("service", Some(&label));
+    let (assigns, _) = collect_body(
+        cx,
+        block,
+        &[
+            "command",
+            "cwd",
+            "env",
+            "singleton",
+            "restart",
+            "max_restarts",
+            "backoff_ms",
+            "health",
+            "health_interval_ms",
+        ],
+        &[],
+        &ctx,
+    );
+    let mut command: Vec<String> = Vec::new();
+    match assigns.get("command") {
+        Some(a) => {
+            let v = match &a.value.kind {
+                ExprKind::Str(_) => static_string(cx, a, &ctx).map(|s| vec![s]),
+                ExprKind::List(_) => string_list(cx, a, &ctx),
+                _ => {
+                    cx.type_err(
+                        a.value.span,
+                        "command",
+                        "a string or a list of strings",
+                        &ctx,
+                    );
+                    None
+                }
+            };
+            match v {
+                Some(list) if !list.is_empty() => command = list,
+                Some(_) => cx.invalid_value(
+                    a.value.span,
+                    "command",
+                    "Invalid value for attribute \"command\": expected a non-empty list."
+                        .to_string(),
+                    &ctx,
+                ),
+                None => {}
+            }
+        }
+        None => cx.missing(block.span, "command", &ctx),
+    }
+    let cwd = assigns.get("cwd").and_then(|a| static_string(cx, a, &ctx));
+    let mut env: Vec<(String, String)> = Vec::new();
+    if let Some(a) = assigns.get("env") {
+        match &a.value.kind {
+            ExprKind::Map(entries) => {
+                for e in entries {
+                    if env.iter().any(|(k, _)| *k == e.key) {
+                        cx.err(
+                            e.span,
+                            "Duplicate argument",
+                            format!("The env var \"{}\" was already defined.", e.key),
+                            Some(&ctx),
+                            None,
+                        );
+                        continue;
+                    }
+                    if let Some(v) = static_string(cx, e, &ctx) {
+                        env.push((e.key.clone(), v));
+                    }
+                }
+            }
+            _ => cx.type_err(a.value.span, "env", "a map", &ctx),
+        }
+    }
+    let singleton = assigns
+        .get("singleton")
+        .and_then(|a| bool_value(cx, a, &ctx))
+        .unwrap_or(false);
+    let restart = assigns
+        .get("restart")
+        .and_then(|a| static_string(cx, a, &ctx))
+        .unwrap_or_else(|| "never".to_string());
+    if !matches!(restart.as_str(), "never" | "on-failure" | "always") {
+        let span = assigns
+            .get("restart")
+            .map(|a| a.value.span)
+            .unwrap_or(block.span);
+        cx.err(
+            span,
+            "Invalid value",
+            format!("The service \"{label}\" has an unknown restart \"{restart}\": expected \"never\", \"on-failure\" or \"always\"."),
+            Some(&ctx),
+            None,
+        );
+    }
+    let max_restarts = assigns
+        .get("max_restarts")
+        .and_then(|a| uint_value(cx, a, &ctx));
+    let backoff_ms = assigns
+        .get("backoff_ms")
+        .and_then(|a| u64_value(cx, a, &ctx));
+    let health = assigns
+        .get("health")
+        .and_then(|a| static_string(cx, a, &ctx));
+    if let Some(h) = &health
+        && !(h.starts_with("http://") || h.starts_with("https://") || h.starts_with("tcp:"))
+    {
+        let span = assigns
+            .get("health")
+            .map(|a| a.value.span)
+            .unwrap_or(block.span);
+        cx.err(
+            span,
+            "Invalid value",
+            format!("The service \"{label}\" has an invalid health \"{h}\": expected an http://, https:// or tcp: address."),
+            Some(&ctx),
+            None,
+        );
+    }
+    let health_interval_ms = assigns
+        .get("health_interval_ms")
+        .and_then(|a| u64_value(cx, a, &ctx));
+    Some(Service {
+        name: label,
+        command,
+        cwd,
+        env,
+        singleton,
+        restart,
+        max_restarts,
+        backoff_ms,
+        health,
+        health_interval_ms,
+        line: block.span.line,
+    })
+}
+
 // MARKER_PARSERS
