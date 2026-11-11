@@ -11,11 +11,11 @@
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use graphloop::cli::{ProcessRunner, UpRequest, up_core};
-use graphloop::manifest::{Edge, Node, PickInfo};
-use graphloop::plan::{OpenStep, Plan};
-use graphloop::spec::{Part, Templ, Vault};
-use graphloop::vault::{PROVIDERS, Vaults};
+use h1::yah::cli::{ProcessRunner, UpRequest, up_core};
+use h1::yah::manifest::{Edge, Node, PickInfo};
+use h1::yah::plan::{OpenStep, Plan};
+use h1::yah::spec::{Part, Templ, Vault};
+use h1::yah::vault::{PROVIDERS, Vaults};
 
 type EnvFn = Box<dyn Fn(&str) -> Option<String>>;
 

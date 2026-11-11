@@ -11,8 +11,8 @@ use std::process::{Command, Stdio};
 #[cfg(unix)]
 use std::time::{Duration, Instant};
 
-use graphloop::spec::Vault;
-use graphloop::vault::{parse_dotenv, scrub, Vaults};
+use h1::yah::spec::Vault;
+use h1::yah::vault::{parse_dotenv, scrub, Vaults};
 
 fn vault(provider: &str) -> Vault {
     Vault { name: "v".into(), provider: provider.into(), path: None, account: None, command: Vec::new(), secrets: Vec::new(), line: 1 }

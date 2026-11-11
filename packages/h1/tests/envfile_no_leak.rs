@@ -55,7 +55,7 @@ struct Iso {
 }
 
 fn run_cli(iso: &Iso, args: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_graphloop"))
+    Command::new(env!("CARGO_BIN_EXE_h1"))
         .args(args)
         .env("GRAPHLOOP_HOME", &iso.home)
         .env("H1_DIR", &iso.h1_dir)

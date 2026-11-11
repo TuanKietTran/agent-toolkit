@@ -13,8 +13,8 @@
 use std::collections::BTreeSet;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use graphloop::diag::Diagnostics;
-use graphloop::parser::parse;
+use h1::yah::diag::Diagnostics;
+use h1::yah::parser::parse;
 
 /// Recovery collects at most this many syntax diagnostics in one parse.
 const MAX_DIAGNOSTICS: usize = 20;

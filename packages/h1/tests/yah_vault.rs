@@ -10,12 +10,12 @@ use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use graphloop::cli::*;
-use graphloop::load::load_str;
-use graphloop::manifest::{Edge, Node, PickInfo};
-use graphloop::plan::{OpenStep, Plan};
-use graphloop::spec::{Part, Templ};
-use graphloop::vault::Vaults;
+use h1::yah::cli::*;
+use h1::yah::load::load_str;
+use h1::yah::manifest::{Edge, Node, PickInfo};
+use h1::yah::plan::{OpenStep, Plan};
+use h1::yah::spec::{Part, Templ};
+use h1::yah::vault::Vaults;
 
 const SECRET: &str = "s3cr3t-token-9f2a";
 
@@ -66,7 +66,7 @@ team "t" {
 }
 "#;
 
-fn load(src: &str) -> Result<graphloop::spec::Spec, String> {
+fn load(src: &str) -> Result<h1::yah::spec::Spec, String> {
     load_str("t.yah", src, &BTreeMap::new()).map_err(|d| d.0.iter().map(|x| format!("{}: {} {}", x.line, x.summary, x.detail)).collect::<Vec<_>>().join("\n"))
 }
 

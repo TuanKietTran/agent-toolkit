@@ -1,4 +1,4 @@
-//! Integration tests for `graphloop vault status` (`graphloop::cli::vault_status_core`).
+//! Integration tests for `graphloop vault status` (`h1::yah::cli::vault_status_core`).
 //!
 //! Contract: without `--fetch` only presence is checked and no provider runs; with
 //! `--fetch` each declared key is fetched. Either way one line is printed per vault and
@@ -8,9 +8,9 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use graphloop::cli::{vault_status_core, vault_status_json_core};
-use graphloop::load::load_str;
-use graphloop::spec::{Spec, Vault};
+use h1::yah::cli::{vault_status_core, vault_status_json_core};
+use h1::yah::load::load_str;
+use h1::yah::spec::{Spec, Vault};
 
 const SECRET: &str = "s3cr3t-token-9f2a";
 
@@ -277,7 +277,7 @@ fn json_status_no_vaults_is_an_empty_list_and_ok() {
 
 fn write_yah(dir: &Path, vault_block: &str) -> std::path::PathBuf { let yah = dir.join("team.yah"); std::fs::write(&yah, format!("yah 1\n{vault_block}{SKELETON_TAIL}")).unwrap(); yah }
 
-fn run_status(yah: &Path, extra: &[&str]) -> std::process::Output { std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["vault", "status"]).arg(yah).args(extra).output().unwrap() }
+fn run_status(yah: &Path, extra: &[&str]) -> std::process::Output { std::process::Command::new(env!("CARGO_BIN_EXE_h1")).args(["vault", "status"]).arg(yah).args(extra).output().unwrap() }
 
 #[test]
 fn binary_json_status_all_ready_exits_0_with_json_only_on_stdout() {
@@ -297,11 +297,11 @@ fn binary_status_missing_program_exits_nonzero_naming_the_program() {
     let dir = tempfile::tempdir().unwrap();
     let empty = tempfile::tempdir().unwrap();
     let yah = write_yah(dir.path(), "\nvault \"v\" {\n  provider = \"1password\"\n  secrets  = {\n    TOKEN = \"some-ref\"\n  }\n}\n");
-    let human = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["vault", "status"]).arg(&yah).env("PATH", empty.path()).output().unwrap();
+    let human = std::process::Command::new(env!("CARGO_BIN_EXE_h1")).args(["vault", "status"]).arg(&yah).env("PATH", empty.path()).output().unwrap();
     assert!(!human.status.success());
     let combined = format!("{}{}", String::from_utf8_lossy(&human.stdout), String::from_utf8_lossy(&human.stderr));
     assert!(combined.contains("program op not found"), "{combined}");
-    let json_run = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["vault", "status", "--json"]).arg(&yah).env("PATH", empty.path()).output().unwrap();
+    let json_run = std::process::Command::new(env!("CARGO_BIN_EXE_h1")).args(["vault", "status", "--json"]).arg(&yah).env("PATH", empty.path()).output().unwrap();
     assert!(!json_run.status.success());
     let stdout = String::from_utf8(json_run.stdout).unwrap();
     let v = parse_json(&stdout);

@@ -10,10 +10,10 @@
 
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use graphloop::ast::{ExprKind, Stmt, StrPart};
-use graphloop::diag::Diagnostic;
-use graphloop::lexer::{Tok, Token, lex};
-use graphloop::parser::parse;
+use h1::yah::ast::{ExprKind, Stmt, StrPart};
+use h1::yah::diag::Diagnostic;
+use h1::yah::lexer::{Tok, Token, lex};
+use h1::yah::parser::parse;
 
 const SEED: u64 = 0x2545_F491_4F6C_DD1D;
 

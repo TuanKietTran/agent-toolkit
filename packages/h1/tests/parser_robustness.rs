@@ -5,7 +5,7 @@
 //! (b) prefix truncations of the canonical fixture and every example
 //!     (every byte offset for the smallest file, sampled for larger ones),
 //! (c) random single-byte mutations of those valid files.
-//! Every input goes through `graphloop::load::load_file` — the exact entry
+//! Every input goes through `h1::yah::load::load_file` — the exact entry
 //! path the CLI uses — written as raw bytes to a temp file, so invalid UTF-8
 //! is exercised as the loader's normal read error, never a lossy shortcut.
 //! Ok and diagnostic Err are both acceptable outcomes; a panic is not.
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::PathBuf;
 
-use graphloop::load::load_file;
+use h1::yah::load::load_file;
 
 const SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
@@ -136,6 +136,6 @@ fn valid_sources_still_load() {
     // green robustness run cannot be an artefact of everything erroring.
     let overrides: BTreeMap<String, String> = BTreeMap::new();
     let src = include_str!("fixtures/canonical.yah");
-    let spec = graphloop::load::load_str("canonical.yah", src, &overrides).expect("canonical loads");
+    let spec = h1::yah::load::load_str("canonical.yah", src, &overrides).expect("canonical loads");
     assert_eq!(spec.version, 1);
 }

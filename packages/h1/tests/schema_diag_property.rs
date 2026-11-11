@@ -6,8 +6,8 @@
 
 use std::collections::BTreeMap;
 
-use graphloop::diag::{Diagnostics, Severity};
-use graphloop::load::load_str;
+use h1::yah::diag::{Diagnostics, Severity};
+use h1::yah::load::load_str;
 
 const SEED: u64 = 0x5C4E4A11D1A6;
 
