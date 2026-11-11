@@ -26,6 +26,7 @@ pub mod manifest;
 pub mod parser;
 pub mod pick;
 pub mod plan;
+pub mod preview;
 pub mod refs;
 pub mod resolve;
 pub mod schema;
