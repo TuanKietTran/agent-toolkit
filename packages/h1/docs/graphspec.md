@@ -286,11 +286,11 @@ Error: Missing required argument
 The argument "role" is required, but no definition was found.
 ```
 
-Lexer and parser errors stop at the first problem; resolve and schema errors are collected and reported together. `graphloop check` prints the rendered diagnostics to stderr and exits 1; a valid file exits 0.
+Lexer and parser errors stop at the first problem; resolve and schema errors are collected and reported together. `h1 check` prints the rendered diagnostics to stderr and exits 1; a valid file exits 0.
 
 ## Run manifest
 
-`graphloop up` writes one JSON manifest per run, before opening any lab, so the console and lab-gui can show planned nodes. It lives next to h1's session data, under a `graphs` directory: the base is `$H1_DIR` when set, else the same base h1 uses for its sessions (`$LOCALAPPDATA/h1/sessions` on Windows, else `$XDG_RUNTIME_DIR` or `$TMPDIR` or the system temp dir, joined with `h1`), plus `/graphs` (`src/manifest.rs`: `dir()` / `path_for(run)`). The file is `<graphs>/<run>.json`, written atomically (temp file in the same directory, then rename). Readers: the h1 console (Graphspec overlay) and lab-gui. Writer: only `graphloop up`.
+`h1 up` writes one JSON manifest per run, before opening any lab, so the console and lab-gui can show planned nodes. It lives next to h1's session data, under a `graphs` directory: the base is `$H1_DIR` when set, else the same base h1 uses for its sessions (`$LOCALAPPDATA/h1/sessions` on Windows, else `$XDG_RUNTIME_DIR` or `$TMPDIR` or the system temp dir, joined with `h1`), plus `/graphs` (`src/manifest.rs`: `dir()` / `path_for(run)`). The file is `<graphs>/<run>.json`, written atomically (temp file in the same directory, then rename). Readers: the h1 console (Graphspec overlay) and lab-gui. Writer: only `h1 up`.
 
 Top-level fields: `version`, `run` (run id), `team`, `source` (the `.yah` path), `root` (root session name), `created_ms`, `trace_dir` (or `null`), `nodes`, `edges`. Each node: `name` (session name), `harness` (label), `role`, `parent` (session name or `null`), `requested_model` (as written), `model` (resolved model id), `model_label`, `pick` (`via`, `rule`, `reason`, `degraded_level`), `tools`. Each edge: `from`, `to`, `kind` (parent or member, per Semantics).
 
@@ -326,23 +326,23 @@ Reproduced from the contract's "Launching" section:
 
 Common flags: `FILE` (a `.yah` path), `--team NAME` (default: the only team, or an error listing them), `--prefix P`, `--var NAME=VALUE` (repeatable), `--detached`. Output samples below are illustrative.
 
-- `graphloop check FILE` — load, resolve and validate; print the counts or the rendered diagnostics (stderr), exit 0 / 1.
-- `graphloop plan FILE [--json]` — resolve models, build the plan, print each step's shell line preceded by a comment naming the resolved model. `--json` prints one JSON object instead.
-- `graphloop graph FILE` — print the team's edges (the graph of Semantics) without opening anything.
-- `graphloop up FILE` — write the run manifest (above), then open every step in plan order with h1; on a failed open, stop and roll back the labs this run already opened.
-- `graphloop down RUN` — stop every session named in the run's manifest; report what it stopped.
-- `graphloop runs` — table of manifests: run, team, nodes live/total, age.
-- `graphloop trace RUN` — list the recordings in the run's trace directory, with sizes and the node each belongs to.
+- `h1 check FILE` — load, resolve and validate; print the counts or the rendered diagnostics (stderr), exit 0 / 1.
+- `h1 plan FILE [--json]` — resolve models, build the plan, print each step's shell line preceded by a comment naming the resolved model. `--json` prints one JSON object instead.
+- `h1 graph FILE` — print the team's edges (the graph of Semantics) without opening anything.
+- `h1 up FILE` — write the run manifest (above), then open every step in plan order with h1; on a failed open, stop and roll back the labs this run already opened.
+- `h1 down RUN` — stop every session named in the run's manifest; report what it stopped.
+- `h1 runs` — table of manifests: run, team, nodes live/total, age.
+- `h1 trace RUN` — list the recordings in the run's trace directory, with sizes and the node each belongs to.
 
 ```text
-$ graphloop check examples/team.yah
+$ h1 check examples/team.yah
 ok: 2 harnesses, 1 teams
 
-$ graphloop plan examples/team.yah
+$ h1 plan examples/team.yah
 # harness builder: claude-sonnet-5-5 (via system-one: role=builder)
 h1 open -n builder -- pi --provider claude-cli --model claude-sonnet-5-5 --no-session
 
-$ graphloop graph examples/team.yah
+$ h1 graph examples/team.yah
 commander -> builder (parent)
 ```
 
@@ -403,7 +403,7 @@ Merge rule (prototype, then the consuming block on top; the consumer always wins
 - `map` values (`env`) and the `open` block: merged key by key, consumer's key wins;
 - a key set to `null` in the consumer removes the inherited key.
 
-Required keys are checked after the merge, so a prototype may leave `role` unset for the consumer to supply. A prototype that no harness or group uses is valid and ignored. `graphloop check` reports an unknown prototype label with a `Did you mean ...?` hint.
+Required keys are checked after the merge, so a prototype may leave `role` unset for the consumer to supply. A prototype that no harness or group uses is valid and ignored. `h1 check` reports an unknown prototype label with a `Did you mean ...?` hint.
 
 ## Name interpolation
 
@@ -474,7 +474,7 @@ A status board does not need to list logs. Under the same `log_dir`, a harness c
 
 # Secret vaults
 
-A `.yah` file never contains a secret value. It contains a `vault` block that says *where* a secret lives, and references of the form `${vault.NAME.KEY}` in the places that need it. Nothing is read at parse, `check` or `plan` time: values are fetched only when `graphloop up` opens a lab.
+A `.yah` file never contains a secret value. It contains a `vault` block that says *where* a secret lives, and references of the form `${vault.NAME.KEY}` in the places that need it. Nothing is read at parse, `check` or `plan` time: values are fetched only when `h1 up` opens a lab.
 
 ## The `vault` block
 
@@ -524,7 +524,7 @@ harness "worker" {
 | Provider | Status | Reference form (the `secrets` value; the KEY itself when unmapped) |
 | --- | --- | --- |
 | `dotenv` | available | The variable name in the file named by `path` (default `.env` beside the `.yah`). The file is `KEY=VALUE` lines, with `#` comments, optional `export ` prefixes and single- or double-quoted values. |
-| `env` | available | The name of a variable in graphloop's process environment. |
+| `env` | available | The name of a variable in h1's process environment. |
 | `command` | available | Passed to the `command` argv template as `{ref}` (`{key}` is the KEY). Any CLI that prints a secret to stdout can be a backend. |
 | `1password` | available | An `op://vault/item/field` reference, read with the 1Password CLI (`op read`); `account` selects the account. |
 | `bitwarden` | available | A Bitwarden item, read with `bw get`, in one of the forms `item` (its password), `item/username`, `item/password`, `item/notes`, `item/uri` or `item/totp`, or `item#custom` (a custom field). |
@@ -536,9 +536,9 @@ All seven are adapters in this build, behind the same block and the same `${vaul
 ## Security model
 
 - **Fetched at `up`, only at `up`.** Every value a run needs is rendered before the first lab is opened. A secret that cannot be fetched, or that fetches as an empty value, stops the run with an error and **no lab is opened**.
-- **Memory only.** Fetched values are held in memory for that run (and cached so a provider is not called twice for the same key). They are never written to disk by graphloop.
+- **Memory only.** Fetched values are held in memory for that run (and cached so a provider is not called twice for the same key). They are never written to disk by h1.
 - **Environment, never argv.** A secret reaches the lab through the `h1 open` process environment, as described above, never as a command-line argument.
-- **Scrubbed.** Known secret values are replaced with `***` in every message, error and provider output graphloop prints. Errors name the vault, the key and the provider, never a value.
+- **Scrubbed.** Known secret values are replaced with `***` in every message, error and provider output h1 prints. Errors name the vault, the key and the provider, never a value.
 - **Names only in output.** `plan`, `graph`, `up --dry-run`, `runs`, `trace` and `vault status` print environment variable NAMES only — entries that come from a vault are marked as vault-sourced — and never print values.
 - **Provider failures.** The CLI providers (`1password`, `bitwarden`, `bitwarden-secrets`, `keychain`) share one failure path: the error names the program and its exit status only, and never quotes the provider's stdout or stderr. A locked Bitwarden vault is reported as locked — `Bitwarden vault is locked: run: bw unlock` — instead of any provider output. The `command` provider's error likewise names its program and exit status; it may quote the first line of its stderr, scrubbed of any fetched values.
 - **Never in manifests.** The run manifest records vault *names* and configuration only; no fetched value and no expanded `${env.*}` value ever appears in a manifest or any other run file.
@@ -565,9 +565,9 @@ vault "fleet" {
 ```
 
 ```sh
-graphloop up fleet.yah                            # dotenv: read fleet.env (the default)
-graphloop up fleet.yah --var secrets=env          # the same block, read the process environment
-graphloop up fleet.yah --var secrets=1password    # the same block, read with the 1Password CLI
+h1 up fleet.yah                            # dotenv: read fleet.env (the default)
+h1 up fleet.yah --var secrets=env          # the same block, read the process environment
+h1 up fleet.yah --var secrets=1password    # the same block, read with the 1Password CLI
 ```
 
 This is the pattern `fleet.yah` uses: the graph, the harness `env` maps and the secret names stay identical; only the backend changes.
@@ -580,7 +580,7 @@ This is the pattern `fleet.yah` uses: the graph, the harness `env` maps and the 
 - Unless `--no-env-file` is passed, a `.env` file in the directory of the `.yah` file is used implicitly when it exists.
 - Lookup order for `${env.NAME}`: the real process environment first, then the files, with an earlier `--env-file` winning over a later one.
 - The same merged view is the bootstrap environment for provider CLIs: it is passed to them so a token such as `OP_SERVICE_ACCOUNT_TOKEN`, `BW_SESSION` or `BWS_ACCESS_TOKEN` can live in an env file instead of being exported in the shell.
-- Values loaded from these files never appear in graphloop output; they are passed only to the processes graphloop opens and to the provider CLIs.
+- Values loaded from these files never appear in h1 output; they are passed only to the processes h1 opens and to the provider CLIs.
 
 ## Worked examples
 
@@ -610,14 +610,14 @@ harness "worker" {
 }
 ```
 
-With `FLEET_TOKEN=...` in `fleet.env` beside the `.yah` file, `graphloop up` fetches it and the `worker` program sees it as `$FLEET_TOKEN`. The `.env` file itself is never committed.
+With `FLEET_TOKEN=...` in `fleet.env` beside the `.yah` file, `h1 up` fetches it and the `worker` program sees it as `$FLEET_TOKEN`. The `.env` file itself is never committed.
 
 ### 2. One block, two backends
 
 Example 1 with `provider = var.secrets` and a `variable "secrets"` defaulting to `"dotenv"` (the full form is in "Switching backends" above): locally the token comes from `fleet.env`; in CI, `--var secrets=env` reads the same name from the CI environment, where the CI system injects it. No other line changes.
 
-### 3. AliasVault (not a graphloop backend)
+### 3. AliasVault (not an h1 backend)
 
-AliasVault cannot be read from graphloop. Its vault is end-to-end encrypted: no CLI or plain HTTP API returns a plaintext credential or creates an item, and the in-container `aliasvault` CLI is admin-only (`reset-admin-password`, `hash-password`). Decryption is client-side after unlock, so no `command` provider can fetch from it.
+AliasVault cannot be read from h1. Its vault is end-to-end encrypted: no CLI or plain HTTP API returns a plaintext credential or creates an item, and the in-container `aliasvault` CLI is admin-only (`reset-admin-password`, `hash-password`). Decryption is client-side after unlock, so no `command` provider can fetch from it.
 
 The only interop is the other direction: importing into AliasVault via its web UI, Settings -> Import / Export, Generic CSV with columns `service_name,url,username,password,totp_secret,notes,folder`.

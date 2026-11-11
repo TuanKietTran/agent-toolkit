@@ -1,5 +1,7 @@
 # graphloop
 
+> **Moved:** the graphloop binary has merged into `h1` — `graphloop check|plan|graph|up|down|vault|runs|trace` are now `h1 check|plan|graph|up|down|vault|runs|trace`, same arguments and flags. See the Migration section of [`packages/h1/README.md`](../h1/README.md). This directory keeps the Graphspec document and the examples.
+
 Graphloop is the first concrete implementation of **prompts -> agents -> loops -> graphs**: a Rust crate that parses Graphspec (`.yah`) files and brings a team up as `h1` labs.
 
 Each layer is owned by an existing piece, not reinvented here:
