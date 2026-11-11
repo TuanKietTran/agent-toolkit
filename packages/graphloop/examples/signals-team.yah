@@ -1,0 +1,71 @@
+yah 1
+
+// signals-team.yah - two apps wired with signals, events and relations.
+//
+// The .yah grammar declares exactly one relation: `parent`. Here
+// consumer's parent is producer, so the team graph has the parent
+// edge producer -> consumer, and producer is opened first.
+//
+// The rest of the wiring is h1 runtime state (contract:
+// packages/h1/src/wire.rs), declared after `graphloop up` brings
+// the team up (session names are the harness labels):
+//
+//   h1 relation add producer parent consumer --cascade
+//   h1 relation add consumer depends_on producer
+//   h1 signal emit -n producer --to consumer data.ready --text ready
+//   h1 signal listen -n consumer --name data.ready --count 1
+//   h1 event subscribe -n consumer --kind exited,relation_ended
+//
+// producer ending then raises `relation_ended` on consumer, and
+// the cascade parent edge stops consumer with it. Relations and
+// signals are in-memory host state only; nothing is written to disk.
+//
+// Harmless like demo.yah: the hosted program is plain cat, every
+// lab is detached, and no command ever runs a model; system_one
+// still needs a fallback label, so one small model block is declared.
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+}
+
+model "haiku" {
+  provider = "anthropic"
+  id = "claude-haiku-5-5"
+  capabilities = ["chat"]
+}
+
+system_one {
+  fallback = "haiku"
+}
+
+harness "producer" {
+  kind = "h1"
+  role = "producer"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    detached = true
+  }
+}
+
+harness "consumer" {
+  kind = "h1"
+  role = "consumer"
+  parent = "producer"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    detached = true
+  }
+}
+
+team "signals" {
+  root = "producer"
+  members = ["consumer"]
+  graph = true
+}

@@ -81,6 +81,14 @@ const EXPECTED: &[&str] = &[
     "h1 status -n ux --json",
     "h1 screen -n ux --tail 12 --compact",
     "h1 stop -n ux",
+    "h1 relation add producer parent consumer --cascade",
+    "h1 relation add consumer depends_on producer",
+    "h1 signal emit -n producer --to consumer data.ready --text ready",
+    "h1 signal listen -n consumer --name data.ready --count 1",
+    "h1 event subscribe -n consumer --kind exited,relation_ended --count 2",
+    "h1 relation list -n consumer --json",
+    "h1 relation graph",
+    "h1 relation remove consumer depends_on producer",
     "h1 console",
     "h1 console --here",
     "h1 console --snapshot --view graph --width 130 --height 30",
@@ -161,6 +169,38 @@ const SKIPPED: &[(&str, &str)] = &[
     (
         "h1 stop -n ux",
         "needs the running ux session; the stop form is exercised on the cat lab",
+    ),
+    (
+        "h1 relation add producer parent consumer --cascade",
+        "needs the running producer and consumer sessions; the relation add form is exercised by the signals integration tests on disposable cat labs",
+    ),
+    (
+        "h1 relation add consumer depends_on producer",
+        "needs the running producer and consumer sessions; the relation add form is exercised by the signals integration tests on disposable cat labs",
+    ),
+    (
+        "h1 signal emit -n producer --to consumer data.ready --text ready",
+        "needs the running producer and consumer sessions; the signal emit form is exercised by the signals integration tests on disposable cat labs",
+    ),
+    (
+        "h1 signal listen -n consumer --name data.ready --count 1",
+        "blocks until a matching signal arrives; the signal listen form is exercised by the signals integration tests on disposable cat labs",
+    ),
+    (
+        "h1 event subscribe -n consumer --kind exited,relation_ended --count 2",
+        "needs the running consumer session and streams until its count is reached; the event subscribe form is exercised by the signals integration tests on disposable cat labs",
+    ),
+    (
+        "h1 relation list -n consumer --json",
+        "needs the running consumer session; the relation list form is exercised by the signals integration tests on disposable cat labs",
+    ),
+    (
+        "h1 relation graph",
+        "needs running sessions with relation edges; the relation graph form is exercised by the signals integration tests on disposable cat labs",
+    ),
+    (
+        "h1 relation remove consumer depends_on producer",
+        "needs the running producer and consumer sessions and the edge added above; the relation remove form is exercised by the signals integration tests on disposable cat labs",
     ),
     (
         "h1 console",
