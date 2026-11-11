@@ -202,7 +202,13 @@ fn handle_control(stream: ipc::Stream, shared: &Arc<HostShared>) -> Result<()> {
     // `dispatch` answers "unknown operation" (see the wire contract header).
     if matches!(
         op.as_str(),
-        "signal_emit" | "signal_listen" | "event_subscribe"
+        "signal_emit"
+            | "signal_listen"
+            | "event_subscribe"
+            | "relation_add"
+            | "relation_remove"
+            | "relation_list"
+            | "relation_release"
     ) {
         let request: crate::wire::Request = match serde_json::from_value(value) {
             Ok(request) => request,
@@ -215,7 +221,7 @@ fn handle_control(stream: ipc::Stream, shared: &Arc<HostShared>) -> Result<()> {
     reply(&stream, &dispatch(&value, shared))
 }
 
-fn response_value(response: crate::wire::Response) -> Value {
+pub(crate) fn response_value(response: crate::wire::Response) -> Value {
     serde_json::to_value(response)
         .unwrap_or_else(|_| json!({ "ok": false, "error": "failed to serialize response" }))
 }
@@ -283,10 +289,7 @@ fn handle_wire(
                 replay_frame,
             )
         }
-        _ => reply(
-            &stream,
-            &failure("unknown operation: wire op not implemented yet".to_owned()),
-        ),
+        other => reply(&stream, &crate::observe::relation_op(shared, other)),
     }
 }
 

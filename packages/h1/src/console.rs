@@ -68,7 +68,8 @@ pub(crate) struct ConsoleArgs {
 }
 
 pub(crate) fn run(args: ConsoleArgs) -> Result<i32> {
-    let view = View::parse(&args.view).ok_or_else(|| anyhow!("unknown view {:?}: use labs, graph or models", args.view))?;
+    let view = View::parse(&args.view)
+        .ok_or_else(|| anyhow!("unknown view {:?}: use labs, graph or models", args.view))?;
     if args.snapshot {
         return snapshot(&args, view);
     }
@@ -88,7 +89,9 @@ pub(crate) fn run(args: ConsoleArgs) -> Result<i32> {
         return Ok(0);
     }
     if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
-        return Err(anyhow!("--here needs a terminal; drop it to open a new window, or use --snapshot"));
+        return Err(anyhow!(
+            "--here needs a terminal; drop it to open a new window, or use --snapshot"
+        ));
     }
     tui(&args, view)?;
     Ok(0)
@@ -151,9 +154,18 @@ fn look(entry: &session::Entry, stalled_ms: u64) -> Probe {
     let Ok(answer) = request_with_timeout(&socket, json!({ "op": "screen" }), timeout) else {
         return gone(entry);
     };
-    let screen = answer.get("screen").and_then(Value::as_str).unwrap_or_default().to_owned();
+    let screen = answer
+        .get("screen")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
     let status = request_with_timeout(&socket, json!({ "op": "status" }), timeout).ok();
-    let number = |key: &str| status.as_ref().and_then(|s| s.get(key)).and_then(Value::as_u64);
+    let number = |key: &str| {
+        status
+            .as_ref()
+            .and_then(|s| s.get(key))
+            .and_then(Value::as_u64)
+    };
     let quiet_ms = number("quiet_ms");
     let running = status
         .as_ref()
@@ -192,7 +204,10 @@ fn probe_all(stalled_ms: u64) -> Vec<Probe> {
             .iter()
             .map(|entry| scope.spawn(move || look(entry, stalled_ms)))
             .collect();
-        handles.into_iter().filter_map(|handle| handle.join().ok()).collect()
+        handles
+            .into_iter()
+            .filter_map(|handle| handle.join().ok())
+            .collect()
     });
     // A host that no longer answers is hidden, never forgotten: its record is what `h1 recover` reopens from.
     found.retain(|probe| probe.state != "gone");
@@ -223,7 +238,12 @@ impl Lab {
         self.probe.entry.model_label().unwrap_or_else(|| "-".into())
     }
     fn program(&self) -> String {
-        self.probe.entry.command.first().map(|c| c.rsplit('/').next().unwrap_or(c).to_owned()).unwrap_or_default()
+        self.probe
+            .entry
+            .command
+            .first()
+            .map(|c| c.rsplit('/').next().unwrap_or(c).to_owned())
+            .unwrap_or_default()
     }
 }
 
@@ -256,13 +276,22 @@ fn arrange(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>) -> Vec<La
 }
 
 /// Manifest info for a session name, whether the session is live or only planned.
-fn overlay_info<'a>(overlay: &'a crate::graphspec::Overlay, name: &str) -> Option<&'a crate::graphspec::NodeInfo> {
-    overlay.get(name).or_else(|| overlay.planned.iter().find(|info| info.node.name == name))
+fn overlay_info<'a>(
+    overlay: &'a crate::graphspec::Overlay,
+    name: &str,
+) -> Option<&'a crate::graphspec::NodeInfo> {
+    overlay
+        .get(name)
+        .or_else(|| overlay.planned.iter().find(|info| info.node.name == name))
 }
 
 /// `provider/id tag` for a manifest node, e.g. `anthropic/claude-sonnet-5-5 s1 R3`.
 fn resolved_text(info: &crate::graphspec::NodeInfo) -> String {
-    let model = if info.node.model.is_empty() { &info.node.model_label } else { &info.node.model };
+    let model = if info.node.model.is_empty() {
+        &info.node.model_label
+    } else {
+        &info.node.model
+    };
     if model.is_empty() {
         info.node.pick_tag()
     } else {
@@ -280,7 +309,11 @@ fn short_model(model: &str) -> &str {
 
 /// The resolved model for a manifest node, with the provider prefix dropped.
 fn manifest_model(info: &crate::graphspec::NodeInfo) -> String {
-    let model = if info.node.model.is_empty() { &info.node.model_label } else { &info.node.model };
+    let model = if info.node.model.is_empty() {
+        &info.node.model_label
+    } else {
+        &info.node.model
+    };
     short_model(model).to_owned()
 }
 
@@ -290,7 +323,11 @@ fn manifest_model(info: &crate::graphspec::NodeInfo) -> String {
 fn manifest_line(role: &str, info: &crate::graphspec::NodeInfo, inner: usize) -> String {
     let model = manifest_model(info);
     let full = format!("{role} · {model}");
-    if full.chars().count() <= inner { full } else { model }
+    if full.chars().count() <= inner {
+        full
+    } else {
+        model
+    }
 }
 
 /// A synthetic probe for a manifest node whose session is not up yet (state `planned`).
@@ -306,9 +343,17 @@ fn planned_probe(info: &crate::graphspec::NodeInfo) -> Probe {
             cols: 0,
             rows: 0,
             started_ms: u64::MAX,
-            role: if info.node.role.is_empty() { None } else { Some(info.node.role.clone()) },
+            role: if info.node.role.is_empty() {
+                None
+            } else {
+                Some(info.node.role.clone())
+            },
             parent: info.node.parent.clone(),
-            model: if info.node.model.is_empty() { None } else { Some(info.node.model.clone()) },
+            model: if info.node.model.is_empty() {
+                None
+            } else {
+                Some(info.node.model.clone())
+            },
             brief: None,
             resume_log: None,
             new_cmd: None,
@@ -325,21 +370,41 @@ fn planned_probe(info: &crate::graphspec::NodeInfo) -> Probe {
     }
 }
 
-fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, overlay: &crate::graphspec::Overlay) -> Vec<Lab> {
+fn arrange_with(
+    probes: &[Probe],
+    history: &HashMap<String, VecDeque<u64>>,
+    overlay: &crate::graphspec::Overlay,
+) -> Vec<Lab> {
     // Effective parent: the registry parent, else the manifest node's parent, else the
     // `from` of a manifest `member` edge into this node. Rewriting the entry parent lets
     // the forest walk and the graph layout below share the one answer.
     let all_names: HashSet<&str> = probes.iter().map(|p| p.entry.name.as_str()).collect();
     let mut owned: Vec<Probe> = probes.to_vec();
     for probe in owned.iter_mut() {
-        let live_parent = probe.entry.parent.as_deref().filter(|parent| all_names.contains(parent) && *parent != probe.entry.name).map(str::to_owned);
+        let live_parent = probe
+            .entry
+            .parent
+            .as_deref()
+            .filter(|parent| all_names.contains(parent) && *parent != probe.entry.name)
+            .map(str::to_owned);
         if live_parent.is_some() {
             continue;
         }
         let fallback = overlay_info(overlay, &probe.entry.name)
             .and_then(|info| info.node.parent.clone())
-            .or_else(|| overlay.edges.iter().find(|edge| edge.to == probe.entry.name && edge.kind == crate::graphspec::EdgeKind::Member).map(|edge| edge.from.clone()));
-        if let Some(parent) = fallback.filter(|parent| all_names.contains(parent.as_str()) && *parent != probe.entry.name) {
+            .or_else(|| {
+                overlay
+                    .edges
+                    .iter()
+                    .find(|edge| {
+                        edge.to == probe.entry.name
+                            && edge.kind == crate::graphspec::EdgeKind::Member
+                    })
+                    .map(|edge| edge.from.clone())
+            });
+        if let Some(parent) = fallback
+            .filter(|parent| all_names.contains(parent.as_str()) && *parent != probe.entry.name)
+        {
             probe.entry.parent = Some(parent);
         }
     }
@@ -369,7 +434,15 @@ fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, over
         kids: &'a HashMap<String, Vec<usize>>,
         history: &'a HashMap<String, VecDeque<u64>>,
     }
-    fn walk(index: usize, depth: usize, trail: &str, last: bool, forest: &Forest, seen: &mut HashSet<usize>, out: &mut Vec<Lab>) {
+    fn walk(
+        index: usize,
+        depth: usize,
+        trail: &str,
+        last: bool,
+        forest: &Forest,
+        seen: &mut HashSet<usize>,
+        out: &mut Vec<Lab>,
+    ) {
         let probes = forest.probes;
         let kids = forest.kids;
         let history = forest.history;
@@ -378,7 +451,11 @@ fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, over
         }
         let probe = &probes[index];
         let children = kids.get(&probe.entry.name).cloned().unwrap_or_default();
-        let prefix = if depth == 0 { String::new() } else { format!("{trail}{}", if last { "└─ " } else { "├─ " }) };
+        let prefix = if depth == 0 {
+            String::new()
+        } else {
+            format!("{trail}{}", if last { "└─ " } else { "├─ " })
+        };
         let role = probe.entry.role.clone().unwrap_or_else(|| {
             if !children.is_empty() {
                 "manager".into()
@@ -394,14 +471,33 @@ fn arrange_with(probes: &[Probe], history: &HashMap<String, VecDeque<u64>>, over
             parent: probe.entry.parent.clone(),
             depth,
             prefix,
-            history: history.get(&probe.entry.name).map(|h| h.iter().copied().collect()).unwrap_or_default(),
+            history: history
+                .get(&probe.entry.name)
+                .map(|h| h.iter().copied().collect())
+                .unwrap_or_default(),
         });
-        let next_trail = if depth == 0 { String::new() } else { format!("{trail}{}", if last { "   " } else { "│  " }) };
+        let next_trail = if depth == 0 {
+            String::new()
+        } else {
+            format!("{trail}{}", if last { "   " } else { "│  " })
+        };
         for (n, child) in children.iter().enumerate() {
-            walk(*child, depth + 1, &next_trail, n + 1 == children.len(), forest, seen, out);
+            walk(
+                *child,
+                depth + 1,
+                &next_trail,
+                n + 1 == children.len(),
+                forest,
+                seen,
+                out,
+            );
         }
     }
-    let forest = Forest { probes, kids: &kids, history };
+    let forest = Forest {
+        probes,
+        kids: &kids,
+        history,
+    };
     for root in roots {
         walk(root, 0, "", true, &forest, &mut seen, &mut ordered);
     }
@@ -432,8 +528,17 @@ struct GraphNode {
 
 /// Places every lab in a column per depth; a parent sits in the middle of its children.
 fn layout(labs: &[Lab]) -> Vec<GraphNode> {
-    let index_of: HashMap<&str, usize> = labs.iter().enumerate().map(|(i, l)| (l.name(), i)).collect();
-    let mut nodes = vec![GraphNode { lab: None, depth: 0, row: 0, parent: None }];
+    let index_of: HashMap<&str, usize> = labs
+        .iter()
+        .enumerate()
+        .map(|(i, l)| (l.name(), i))
+        .collect();
+    let mut nodes = vec![GraphNode {
+        lab: None,
+        depth: 0,
+        row: 0,
+        parent: None,
+    }];
     let mut kids: Vec<Vec<usize>> = vec![Vec::new()];
     let mut node_of_lab: HashMap<usize, usize> = HashMap::new();
     for (i, lab) in labs.iter().enumerate() {
@@ -446,7 +551,12 @@ fn layout(labs: &[Lab]) -> Vec<GraphNode> {
             .filter(|_| lab.depth > 0)
             .unwrap_or(0);
         let id = nodes.len();
-        nodes.push(GraphNode { lab: Some(i), depth: nodes[parent_node].depth + 1, row: 0, parent: Some(parent_node) });
+        nodes.push(GraphNode {
+            lab: Some(i),
+            depth: nodes[parent_node].depth + 1,
+            row: 0,
+            parent: Some(parent_node),
+        });
         kids.push(Vec::new());
         kids[parent_node].push(id);
         node_of_lab.insert(i, id);
@@ -485,7 +595,17 @@ struct Canvas {
 
 impl Canvas {
     fn new(width: usize, height: usize) -> Self {
-        Canvas { width, height, cells: vec![Glyph { ch: ' ', style: Style::default() }; width * height] }
+        Canvas {
+            width,
+            height,
+            cells: vec![
+                Glyph {
+                    ch: ' ',
+                    style: Style::default()
+                };
+                width * height
+            ],
+        }
     }
     fn put(&mut self, x: usize, y: usize, ch: char, style: Style) {
         if x < self.width && y < self.height {
@@ -534,7 +654,12 @@ fn fit(text: &str, width: usize) -> String {
 }
 
 /// Draws the graph. Returns the canvas and the (x, y) of every node, indexed like `nodes`.
-fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overlay: &crate::graphspec::Overlay) -> (Canvas, Vec<(usize, usize)>) {
+fn draw_graph(
+    labs: &[Lab],
+    nodes: &[GraphNode],
+    selected: Option<usize>,
+    overlay: &crate::graphspec::Overlay,
+) -> (Canvas, Vec<(usize, usize)>) {
     let columns = nodes.iter().map(|n| n.depth).max().unwrap_or(0) + 1;
     let rows = nodes.iter().map(|n| n.row).max().unwrap_or(0) / 2 + 1;
     let stride_x = NODE_W + GAP_X;
@@ -542,7 +667,10 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
     let width = columns * stride_x - GAP_X;
     let height = rows * stride_y - GAP_Y;
     let mut canvas = Canvas::new(width, height);
-    let origin: Vec<(usize, usize)> = nodes.iter().map(|n| (n.depth * stride_x, n.row / 2 * stride_y)).collect();
+    let origin: Vec<(usize, usize)> = nodes
+        .iter()
+        .map(|n| (n.depth * stride_x, n.row / 2 * stride_y))
+        .collect();
 
     // edges first, so boxes sit on top
     let mut kids: Vec<Vec<usize>> = vec![Vec::new(); nodes.len()];
@@ -585,8 +713,15 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
             canvas.put(spine_x, y, ch, edge);
         }
         for (child, y) in children.iter().zip(&child_ys) {
-            let live = nodes[*child].lab.map(|l| matches!(labs[l].state(), "working" | "asking")).unwrap_or(false);
-            let style = if live { Style::default().fg(GREEN) } else { edge };
+            let live = nodes[*child]
+                .lab
+                .map(|l| matches!(labs[l].state(), "working" | "asking"))
+                .unwrap_or(false);
+            let style = if live {
+                Style::default().fg(GREEN)
+            } else {
+                edge
+            };
             let (cx, _) = origin[*child];
             for x in spine_x + 1..cx.saturating_sub(1) {
                 canvas.put(x, *y, '─', style);
@@ -602,7 +737,11 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
             None => (
                 AQUA,
                 "◆ commander".to_owned(),
-                format!("you · {} lab{}", labs.len(), if labs.len() == 1 { "" } else { "s" }),
+                format!(
+                    "you · {} lab{}",
+                    labs.len(),
+                    if labs.len() == 1 { "" } else { "s" }
+                ),
                 None,
                 AQUA,
                 NODE_H,
@@ -611,7 +750,10 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
                 let lab = &labs[l];
                 let info = overlay_info(overlay, lab.name());
                 let (subtitle, tag) = match info {
-                    Some(info) => (manifest_line(&lab.role, info, NODE_W - 4), Some(info.node.pick_tag())),
+                    Some(info) => (
+                        manifest_line(&lab.role, info, NODE_W - 4),
+                        Some(info.node.pick_tag()),
+                    ),
                     None => (format!("{} · {}", lab.role, lab.model()), None),
                 };
                 (
@@ -624,9 +766,21 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
                 )
             }
         };
-        let border_style = if focus { Style::default().fg(Color::Black).bg(AQUA) } else { Style::default().fg(border) };
-        let body_bg = if focus { Style::default().fg(Color::Black).bg(AQUA) } else { Style::default() };
-        let (tl, tr, bl, br, h, v) = if focus { ('╔', '╗', '╚', '╝', '═', '║') } else { ('╭', '╮', '╰', '╯', '─', '│') };
+        let border_style = if focus {
+            Style::default().fg(Color::Black).bg(AQUA)
+        } else {
+            Style::default().fg(border)
+        };
+        let body_bg = if focus {
+            Style::default().fg(Color::Black).bg(AQUA)
+        } else {
+            Style::default()
+        };
+        let (tl, tr, bl, br, h, v) = if focus {
+            ('╔', '╗', '╚', '╝', '═', '║')
+        } else {
+            ('╭', '╮', '╰', '╯', '─', '│')
+        };
         for i in 0..NODE_W {
             let (top_ch, bottom_ch) = match i {
                 0 => (tl, bl),
@@ -645,9 +799,18 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
         }
         let inner = NODE_W - 4;
         let (name_style, state_style) = if focus {
-            (Style::default().fg(Color::Black).bg(AQUA).add_modifier(Modifier::BOLD), Style::default().fg(Color::Black).bg(AQUA))
+            (
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(AQUA)
+                    .add_modifier(Modifier::BOLD),
+                Style::default().fg(Color::Black).bg(AQUA),
+            )
         } else {
-            (Style::default().fg(color).add_modifier(Modifier::BOLD), Style::default().fg(color))
+            (
+                Style::default().fg(color).add_modifier(Modifier::BOLD),
+                Style::default().fg(color),
+            )
         };
         match node.lab {
             None => canvas.text(x + 2, y + 1, &fit(&title, inner), name_style),
@@ -655,13 +818,26 @@ fn draw_graph(labs: &[Lab], nodes: &[GraphNode], selected: Option<usize>, overla
                 let state = labs[l].state().to_owned();
                 let room = inner.saturating_sub(state.chars().count() + 1);
                 canvas.text(x + 2, y + 1, &fit(&title, room), name_style);
-                canvas.text(x + 2 + inner - state.chars().count(), y + 1, &state, state_style);
+                canvas.text(
+                    x + 2 + inner - state.chars().count(),
+                    y + 1,
+                    &state,
+                    state_style,
+                );
             }
         }
-        let sub_style = if focus { Style::default().fg(Color::Black).bg(AQUA) } else { Style::default().fg(GRAY) };
+        let sub_style = if focus {
+            Style::default().fg(Color::Black).bg(AQUA)
+        } else {
+            Style::default().fg(GRAY)
+        };
         canvas.text(x + 2, y + 2, &fit(&subtitle, inner), sub_style);
         if let Some(tag) = &tag {
-            let tag_style = if focus { Style::default().fg(Color::Black).bg(AQUA) } else { Style::default().fg(DIM) };
+            let tag_style = if focus {
+                Style::default().fg(Color::Black).bg(AQUA)
+            } else {
+                Style::default().fg(DIM)
+            };
             canvas.text(x + 2, y + 3, &fit(tag, inner), tag_style);
         }
     }
@@ -802,15 +978,23 @@ impl App {
             .iter()
             .filter(|lab| {
                 needle.is_empty()
-                    || [lab.name(), &lab.role, lab.state(), &lab.model(), lab.parent.as_deref().unwrap_or("")]
-                        .iter()
-                        .any(|field| field.to_lowercase().contains(&needle))
+                    || [
+                        lab.name(),
+                        &lab.role,
+                        lab.state(),
+                        &lab.model(),
+                        lab.parent.as_deref().unwrap_or(""),
+                    ]
+                    .iter()
+                    .any(|field| field.to_lowercase().contains(&needle))
             })
             .collect();
         match self.sort {
             Sort::Tree => {}
             Sort::Name => rows.sort_by(|a, b| a.name().cmp(b.name())),
-            Sort::State => rows.sort_by(|a, b| a.state().cmp(b.state()).then(a.name().cmp(b.name()))),
+            Sort::State => {
+                rows.sort_by(|a, b| a.state().cmp(b.state()).then(a.name().cmp(b.name())))
+            }
             Sort::Age => rows.sort_by_key(|lab| std::cmp::Reverse(lab.probe.uptime_ms)),
         }
         rows
@@ -822,7 +1006,11 @@ impl App {
             .selected
             .as_ref()
             .and_then(|name| names.iter().position(|n| n == name))
-            .or_else(|| self.table.selected().map(|i| i.min(names.len().saturating_sub(1))))
+            .or_else(|| {
+                self.table
+                    .selected()
+                    .map(|i| i.min(names.len().saturating_sub(1)))
+            })
             .filter(|_| !names.is_empty())
             .or(if names.is_empty() { None } else { Some(0) });
         self.table.select(index);
@@ -851,9 +1039,14 @@ impl App {
 
     /// Moves along the graph: left to the parent, right to the first child.
     fn walk_graph(&mut self, to_parent: bool) {
-        let Some(current) = self.selected_lab().cloned() else { return };
+        let Some(current) = self.selected_lab().cloned() else {
+            return;
+        };
         let target = if to_parent {
-            current.parent.clone().filter(|p| self.labs.iter().any(|l| l.name() == p))
+            current
+                .parent
+                .clone()
+                .filter(|p| self.labs.iter().any(|l| l.name() == p))
         } else {
             self.labs
                 .iter()
@@ -885,7 +1078,11 @@ impl App {
         let Some(head) = words.next() else { return };
         match head {
             "q" | "q!" | "quit" | "exit" => self.quit = true,
-            "stop" | "kill" => match words.next().map(str::to_owned).or_else(|| self.selected.clone()) {
+            "stop" | "kill" => match words
+                .next()
+                .map(str::to_owned)
+                .or_else(|| self.selected.clone())
+            {
                 Some(name) => self.mode = Mode::Confirm(name),
                 None => self.say("no lab selected", true),
             },
@@ -896,7 +1093,10 @@ impl App {
                     self.view = view;
                     self.reselect();
                 }
-                None => self.say(format!("unknown command :{other}  (labs, graph, models, stop, attach, quit)"), true),
+                None => self.say(
+                    format!("unknown command :{other}  (labs, graph, models, stop, attach, quit)"),
+                    true,
+                ),
             },
         }
     }
@@ -908,23 +1108,31 @@ impl App {
         let Some(lab) = self.labs.iter().find(|l| l.name() == name) else {
             return self.say(format!("no lab named {name}"), true);
         };
-        match open_terminal_window(&["attach".into(), "-s".into(), lab.probe.entry.socket.clone()], None) {
-            Ok(()) => self.say(format!("opened {name} in a new window (Ctrl-] detaches)"), false),
+        match open_terminal_window(
+            &["attach".into(), "-s".into(), lab.probe.entry.socket.clone()],
+            None,
+        ) {
+            Ok(()) => self.say(
+                format!("opened {name} in a new window (Ctrl-] detaches)"),
+                false,
+            ),
             Err(error) => self.say(format!("attach failed: {error:#}"), true),
         }
     }
 
     fn spawn_self(&mut self, args: &[&str], ok: String) {
-        let result = env::current_exe().map_err(anyhow::Error::from).and_then(|exe| {
-            Command::new(exe)
-                .args(args)
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .spawn()
-                .map(|_| ())
-                .map_err(anyhow::Error::from)
-        });
+        let result = env::current_exe()
+            .map_err(anyhow::Error::from)
+            .and_then(|exe| {
+                Command::new(exe)
+                    .args(args)
+                    .stdin(std::process::Stdio::null())
+                    .stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .spawn()
+                    .map(|_| ())
+                    .map_err(anyhow::Error::from)
+            });
         match result {
             Ok(()) => self.say(ok, false),
             Err(error) => self.say(format!("failed: {error:#}"), true),
@@ -958,7 +1166,9 @@ impl App {
                             Mode::Filter(text) => self.filter = text,
                             Mode::Command(text) => self.run_command(&text),
                             Mode::Message(text) => {
-                                if let (Some(name), false) = (self.selected.clone(), text.is_empty()) {
+                                if let (Some(name), false) =
+                                    (self.selected.clone(), text.is_empty())
+                                {
                                     self.spawn_self(
                                         &["send", "-n", &name, "--paced", "-e", &text],
                                         format!("sent to {name}"),
@@ -1007,7 +1217,9 @@ impl App {
                 self.mode = Mode::Normal;
             }
             Mode::Peek | Mode::Describe | Mode::Help => match key.code {
-                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter if !matches!(self.mode, Mode::Peek) || key.code != KeyCode::Enter => {
+                KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter
+                    if !matches!(self.mode, Mode::Peek) || key.code != KeyCode::Enter =>
+                {
                     self.mode = Mode::Normal;
                     self.scroll = 0;
                 }
@@ -1027,8 +1239,13 @@ impl App {
                 KeyCode::Char(':') => self.mode = Mode::Command(String::new()),
                 KeyCode::Char('/') => self.mode = Mode::Filter(self.filter.clone()),
                 KeyCode::Char('?') => self.mode = Mode::Help,
-                KeyCode::Enter | KeyCode::Char('l' | 'v' | 'd' | 'a' | 's' | 'm') if self.view == View::Agents => {
-                    self.say("agents view is read-only: press 1 or :labs to act on a lab", false)
+                KeyCode::Enter | KeyCode::Char('l' | 'v' | 'd' | 'a' | 's' | 'm')
+                    if self.view == View::Agents =>
+                {
+                    self.say(
+                        "agents view is read-only: press 1 or :labs to act on a lab",
+                        false,
+                    )
                 }
                 KeyCode::Char('d') if ctrl => {
                     if let Some(name) = self.selected.clone() {
@@ -1062,8 +1279,12 @@ impl App {
                     self.sort = self.sort.next();
                     self.reselect();
                 }
-                KeyCode::Down | KeyCode::Char('j') if self.view == View::Agents => self.step_agents(1),
-                KeyCode::Up | KeyCode::Char('k') if self.view == View::Agents => self.step_agents(-1),
+                KeyCode::Down | KeyCode::Char('j') if self.view == View::Agents => {
+                    self.step_agents(1)
+                }
+                KeyCode::Up | KeyCode::Char('k') if self.view == View::Agents => {
+                    self.step_agents(-1)
+                }
                 KeyCode::Char('g') if self.view == View::Labs => self.view = View::Graph,
                 KeyCode::Char('g') | KeyCode::Home => self.jump(false),
                 KeyCode::Char('G') | KeyCode::End => self.jump(true),
@@ -1083,7 +1304,9 @@ impl App {
                 KeyCode::Up | KeyCode::Char('k') => self.step(-1),
                 KeyCode::PageDown => self.step(10),
                 KeyCode::PageUp => self.step(-10),
-                KeyCode::Left | KeyCode::Char('h') if self.view == View::Graph => self.walk_graph(true),
+                KeyCode::Left | KeyCode::Char('h') if self.view == View::Graph => {
+                    self.walk_graph(true)
+                }
                 KeyCode::Right if self.view == View::Graph => self.walk_graph(false),
                 _ => {}
             },
@@ -1095,7 +1318,10 @@ impl App {
 
 fn key_hint<'a>(key: &'a str, text: &'a str) -> Line<'a> {
     Line::from(vec![
-        Span::styled(format!("<{key}>"), Style::default().fg(PINK).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("<{key}>"),
+            Style::default().fg(PINK).add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
         Span::styled(text.to_owned(), Style::default().fg(GRAY)),
     ])
@@ -1103,7 +1329,14 @@ fn key_hint<'a>(key: &'a str, text: &'a str) -> Line<'a> {
 
 fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
-    let prompt_rows = if matches!(app.mode, Mode::Filter(_) | Mode::Command(_) | Mode::Message(_)) { 3 } else { 0 };
+    let prompt_rows = if matches!(
+        app.mode,
+        Mode::Filter(_) | Mode::Command(_) | Mode::Message(_)
+    ) {
+        3
+    } else {
+        0
+    };
     let [header, prompt, main, crumbs] = Layout::vertical([
         Constraint::Length(6),
         Constraint::Length(prompt_rows),
@@ -1141,48 +1374,113 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     .areas(area);
     let label = |key: &str, value: String| {
         Line::from(vec![
-            Span::styled(format!("{key:<10}"), Style::default().fg(ORANGE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{key:<10}"),
+                Style::default().fg(ORANGE).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(value, Style::default().fg(Color::White)),
         ])
     };
     let counts = app.counts();
     let dir = session::session_dir().display().to_string();
-    let terminal = env::var("H1_TERMINAL").unwrap_or_else(|_| if cfg!(target_os = "macos") { "ghostty".into() } else { "default".into() });
+    let terminal = env::var("H1_TERMINAL").unwrap_or_else(|_| {
+        if cfg!(target_os = "macos") {
+            "ghostty".into()
+        } else {
+            "default".into()
+        }
+    });
     let lines = vec![
-        label("Sessions:", fit(&dir, (info.width as usize).saturating_sub(11))),
+        label(
+            "Sessions:",
+            fit(&dir, (info.width as usize).saturating_sub(11)),
+        ),
         label("Terminal:", terminal),
         label("Labs:", format!("{}", app.labs.len())),
         Line::from(vec![
-            Span::styled(format!("{:<10}", "State:"), Style::default().fg(ORANGE).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("{:<10}", "State:"),
+                Style::default().fg(ORANGE).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(format!("● {} ", counts[0].1), Style::default().fg(GREEN)),
             Span::styled(format!("◆ {} ", counts[1].1), Style::default().fg(YELLOW)),
             Span::styled(format!("◌ {} ", counts[2].1), Style::default().fg(ORANGE)),
             Span::styled(format!("✕ {}", counts[3].1), Style::default().fg(RED)),
         ]),
-        label("Refresh:", format!("{} ms · sort {}", app.interval_ms, app.sort.name())),
+        label(
+            "Refresh:",
+            format!("{} ms · sort {}", app.interval_ms, app.sort.name()),
+        ),
         label("Version:", format!("h1 {}", env!("CARGO_PKG_VERSION"))),
     ];
     frame.render_widget(Paragraph::new(lines), info);
 
     let (left, right): (Vec<Line>, Vec<Line>) = match app.view {
         View::Labs => (
-            vec![key_hint("enter", "Peek screen"), key_hint("d", "Describe"), key_hint("a", "Attach (new window)"), key_hint("m", "Message"), key_hint("ctrl-d", "Stop")],
-            vec![key_hint("/", "Filter"), key_hint(":", "Command"), key_hint("o", "Sort"), key_hint("g", "Graph"), key_hint("?", "Help")],
+            vec![
+                key_hint("enter", "Peek screen"),
+                key_hint("d", "Describe"),
+                key_hint("a", "Attach (new window)"),
+                key_hint("m", "Message"),
+                key_hint("ctrl-d", "Stop"),
+            ],
+            vec![
+                key_hint("/", "Filter"),
+                key_hint(":", "Command"),
+                key_hint("o", "Sort"),
+                key_hint("g", "Graph"),
+                key_hint("?", "Help"),
+            ],
         ),
         View::Graph => (
-            vec![key_hint("enter", "Peek screen"), key_hint("d", "Describe"), key_hint("a", "Attach (new window)"), key_hint("m", "Message"), key_hint("ctrl-d", "Stop")],
-            vec![key_hint("↑↓", "Prev/next lab"), key_hint("←→", "Parent/child"), key_hint("tab", "Next view"), key_hint(":", "Command"), key_hint("?", "Help")],
+            vec![
+                key_hint("enter", "Peek screen"),
+                key_hint("d", "Describe"),
+                key_hint("a", "Attach (new window)"),
+                key_hint("m", "Message"),
+                key_hint("ctrl-d", "Stop"),
+            ],
+            vec![
+                key_hint("↑↓", "Prev/next lab"),
+                key_hint("←→", "Parent/child"),
+                key_hint("tab", "Next view"),
+                key_hint(":", "Command"),
+                key_hint("?", "Help"),
+            ],
         ),
         View::Agents => (
-            vec![key_hint("1", "Labs"), key_hint("2", "Graph"), key_hint("3", "Models"), key_hint("4", "All agents"), key_hint("j k", "Move")],
-            vec![key_hint("/", "Filter"), key_hint(":", "Command"), key_hint("tab", "Next view"), key_hint("?", "Help"), key_hint("q", "Quit")],
+            vec![
+                key_hint("1", "Labs"),
+                key_hint("2", "Graph"),
+                key_hint("3", "Models"),
+                key_hint("4", "All agents"),
+                key_hint("j k", "Move"),
+            ],
+            vec![
+                key_hint("/", "Filter"),
+                key_hint(":", "Command"),
+                key_hint("tab", "Next view"),
+                key_hint("?", "Help"),
+                key_hint("q", "Quit"),
+            ],
         ),
         View::Models => (
-            vec![key_hint("1", "Labs"), key_hint("2", "Graph"), key_hint("3", "Models"), key_hint("4", "All agents")],
-            vec![key_hint("/", "Filter"), key_hint(":", "Command"), key_hint("?", "Help"), key_hint("q", "Quit")],
+            vec![
+                key_hint("1", "Labs"),
+                key_hint("2", "Graph"),
+                key_hint("3", "Models"),
+                key_hint("4", "All agents"),
+            ],
+            vec![
+                key_hint("/", "Filter"),
+                key_hint(":", "Command"),
+                key_hint("?", "Help"),
+                key_hint("q", "Quit"),
+            ],
         ),
     };
-    let [a, b] = Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(hints);
+    let [a, b] =
+        Layout::horizontal([Constraint::Percentage(55), Constraint::Percentage(45)]).areas(hints);
     frame.render_widget(Paragraph::new(left), a);
     frame.render_widget(Paragraph::new(right), b);
 
@@ -1197,7 +1495,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
     let lines: Vec<Line> = logo_lines
         .iter()
         .enumerate()
-        .map(|(i, l)| Line::from(Span::styled(*l, Style::default().fg(if i == 5 { GRAY } else { ORANGE }))))
+        .map(|(i, l)| {
+            Line::from(Span::styled(
+                *l,
+                Style::default().fg(if i == 5 { GRAY } else { ORANGE }),
+            ))
+        })
         .collect();
     frame.render_widget(Paragraph::new(lines), logo);
 }
@@ -1205,7 +1508,12 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
 fn draw_prompt(frame: &mut Frame, area: Rect, app: &App) {
     let (symbol, text, color, hint) = match &app.mode {
         Mode::Filter(t) => ("/", t.as_str(), AQUA, ""),
-        Mode::Command(t) => (":", t.as_str(), ORANGE, "  labs · graph · models · stop [lab] · attach [lab] · quit"),
+        Mode::Command(t) => (
+            ":",
+            t.as_str(),
+            ORANGE,
+            "  labs · graph · models · stop [lab] · attach [lab] · quit",
+        ),
         Mode::Message(t) => ("send>", t.as_str(), PINK, ""),
         _ => return,
     };
@@ -1213,9 +1521,14 @@ fn draw_prompt(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Message(_) => format!(" → {} ", app.selected.clone().unwrap_or_default()),
         _ => String::new(),
     };
-    let block = Block::bordered().border_style(Style::default().fg(color)).title(Span::styled(target, Style::default().fg(color)));
+    let block = Block::bordered()
+        .border_style(Style::default().fg(color))
+        .title(Span::styled(target, Style::default().fg(color)));
     let line = Line::from(vec![
-        Span::styled(format!("{symbol} "), Style::default().fg(color).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("{symbol} "),
+            Style::default().fg(color).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(text.to_owned(), Style::default().fg(Color::White)),
         Span::styled("█", Style::default().fg(color)),
         Span::styled(hint, Style::default().fg(DIM)),
@@ -1226,19 +1539,31 @@ fn draw_prompt(frame: &mut Frame, area: Rect, app: &App) {
 fn titled_block<'a>(view: &str, shown: usize, total: usize, filter: &str) -> Block<'a> {
     let mut spans = vec![
         Span::styled(" ", Style::default()),
-        Span::styled(view.to_owned(), Style::default().fg(AQUA).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            view.to_owned(),
+            Style::default().fg(AQUA).add_modifier(Modifier::BOLD),
+        ),
     ];
     if !filter.is_empty() {
-        spans.push(Span::styled(format!("(/{filter})"), Style::default().fg(Color::White)));
+        spans.push(Span::styled(
+            format!("(/{filter})"),
+            Style::default().fg(Color::White),
+        ));
     } else {
         spans.push(Span::styled("(all)", Style::default().fg(Color::White)));
     }
-    spans.push(Span::styled(format!("[{shown}"), Style::default().fg(Color::White)));
+    spans.push(Span::styled(
+        format!("[{shown}"),
+        Style::default().fg(Color::White),
+    ));
     if shown != total {
         spans.push(Span::styled(format!("/{total}"), Style::default().fg(DIM)));
     }
     spans.push(Span::styled("] ", Style::default().fg(Color::White)));
-    Block::bordered().border_style(Style::default().fg(BLUE)).title(Line::from(spans)).title_alignment(Alignment::Center)
+    Block::bordered()
+        .border_style(Style::default().fg(BLUE))
+        .title(Line::from(spans))
+        .title_alignment(Alignment::Center)
 }
 
 fn spark(history: &[u64], width: usize) -> String {
@@ -1281,28 +1606,55 @@ fn draw_labs(frame: &mut Frame, area: Rect, app: &mut App) {
         header.extend(["PROGRAM", "CWD"]);
         widths.extend([Constraint::Length(8), Constraint::Min(18)]);
     }
-    let head = Row::new(header.iter().map(|h| Cell::from(*h))).style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD)).bottom_margin(0);
+    let head = Row::new(header.iter().map(|h| Cell::from(*h)))
+        .style(
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        )
+        .bottom_margin(0);
     let rows = rows_data.iter().map(|lab| {
         let color = state_color(lab.state());
         let tree = app.sort == Sort::Tree && app.filter.is_empty();
-        let name = if tree { format!("{}{}", lab.prefix, lab.name()) } else { lab.name().to_owned() };
+        let name = if tree {
+            format!("{}{}", lab.prefix, lab.name())
+        } else {
+            lab.name().to_owned()
+        };
         let mut cells = vec![
             Cell::from(name).style(Style::default().fg(AQUA)),
             Cell::from(lab.role.clone()).style(Style::default().fg(role_color(&lab.role))),
         ];
         if medium {
-            cells.push(Cell::from(lab.parent.clone().unwrap_or_else(|| "-".into())).style(Style::default().fg(GRAY)));
+            cells.push(
+                Cell::from(lab.parent.clone().unwrap_or_else(|| "-".into()))
+                    .style(Style::default().fg(GRAY)),
+            );
         }
-        cells.push(Cell::from(format!("{} {}", state_glyph(lab.state()), lab.state())).style(Style::default().fg(color)));
+        cells.push(
+            Cell::from(format!("{} {}", state_glyph(lab.state()), lab.state()))
+                .style(Style::default().fg(color)),
+        );
         cells.push(Cell::from(app.display_model(lab)).style(Style::default().fg(Color::White)));
         if medium {
             cells.push(Cell::from(spark(&lab.history, 8)).style(Style::default().fg(GREEN)));
         }
         cells.push(Cell::from(human_duration(lab.probe.quiet_ms)).style(Style::default().fg(GRAY)));
-        cells.push(Cell::from(human_duration(lab.probe.uptime_ms)).style(Style::default().fg(GRAY)));
+        cells
+            .push(Cell::from(human_duration(lab.probe.uptime_ms)).style(Style::default().fg(GRAY)));
         if wide {
             cells.push(Cell::from(lab.program()).style(Style::default().fg(GRAY)));
-            cells.push(Cell::from(lab.probe.entry.cwd.clone().map(|c| tail_path(&c, 28)).unwrap_or_default()).style(Style::default().fg(GRAY)));
+            cells.push(
+                Cell::from(
+                    lab.probe
+                        .entry
+                        .cwd
+                        .clone()
+                        .map(|c| tail_path(&c, 28))
+                        .unwrap_or_default(),
+                )
+                .style(Style::default().fg(GRAY)),
+            );
         }
         Row::new(cells)
     });
@@ -1324,7 +1676,12 @@ fn draw_labs(frame: &mut Frame, area: Rect, app: &mut App) {
         } else {
             vec![Line::from("No lab matches the filter.").alignment(Alignment::Center)]
         };
-        let inner = Rect { x: area.x + 1, y: area.y + area.height / 2 - 1, width: area.width - 2, height: 3 };
+        let inner = Rect {
+            x: area.x + 1,
+            y: area.y + area.height / 2 - 1,
+            width: area.width - 2,
+            height: 3,
+        };
         frame.render_widget(Paragraph::new(note).style(Style::default().fg(GRAY)), inner);
     }
 }
@@ -1349,33 +1706,72 @@ fn draw_graph_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let [top, body] = Layout::vertical([Constraint::Length(5), Constraint::Min(3)]).areas(inner);
 
     // activity sparkline: output bytes per refresh, all labs together
-    let [spark_area, legend_area] = Layout::horizontal([Constraint::Min(20), Constraint::Length(30)]).areas(top);
+    let [spark_area, legend_area] =
+        Layout::horizontal([Constraint::Min(20), Constraint::Length(30)]).areas(top);
     let data: Vec<u64> = app.total.iter().copied().collect();
-    let spark_block = Block::bordered().border_style(Style::default().fg(DIM)).title(Span::styled(" activity · output per refresh ", Style::default().fg(GRAY)));
+    let spark_block = Block::bordered()
+        .border_style(Style::default().fg(DIM))
+        .title(Span::styled(
+            " activity · output per refresh ",
+            Style::default().fg(GRAY),
+        ));
     let spark_inner = spark_block.inner(spark_area);
     frame.render_widget(spark_block, spark_area);
     let keep = spark_inner.width as usize;
     let shown = &data[data.len().saturating_sub(keep)..];
-    frame.render_widget(Sparkline::default().data(shown.iter().copied()).style(Style::default().fg(GREEN)), spark_inner);
+    frame.render_widget(
+        Sparkline::default()
+            .data(shown.iter().copied())
+            .style(Style::default().fg(GREEN)),
+        spark_inner,
+    );
     let counts = app.counts();
     let legend = vec![
-        Line::from(Span::styled(format!("● working {}", counts[0].1), Style::default().fg(GREEN))),
-        Line::from(Span::styled(format!("◆ asking  {}", counts[1].1), Style::default().fg(YELLOW))),
-        Line::from(Span::styled(format!("◌ stalled {}", counts[2].1), Style::default().fg(ORANGE))),
-        Line::from(Span::styled(format!("✕ gone    {}", counts[3].1), Style::default().fg(RED))),
+        Line::from(Span::styled(
+            format!("● working {}", counts[0].1),
+            Style::default().fg(GREEN),
+        )),
+        Line::from(Span::styled(
+            format!("◆ asking  {}", counts[1].1),
+            Style::default().fg(YELLOW),
+        )),
+        Line::from(Span::styled(
+            format!("◌ stalled {}", counts[2].1),
+            Style::default().fg(ORANGE),
+        )),
+        Line::from(Span::styled(
+            format!("✕ gone    {}", counts[3].1),
+            Style::default().fg(RED),
+        )),
     ];
-    frame.render_widget(Paragraph::new(legend), Rect { x: legend_area.x + 2, ..legend_area });
+    frame.render_widget(
+        Paragraph::new(legend),
+        Rect {
+            x: legend_area.x + 2,
+            ..legend_area
+        },
+    );
 
     let body = match app.overlay.header() {
         Some(text) => {
-            let [head, rest] = Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(body);
-            frame.render_widget(Paragraph::new(Span::styled(format!(" {text}"), Style::default().fg(AQUA).add_modifier(Modifier::BOLD))), head);
+            let [head, rest] =
+                Layout::vertical([Constraint::Length(1), Constraint::Min(3)]).areas(body);
+            frame.render_widget(
+                Paragraph::new(Span::styled(
+                    format!(" {text}"),
+                    Style::default().fg(AQUA).add_modifier(Modifier::BOLD),
+                )),
+                head,
+            );
             rest
         }
         None => body,
     };
     let nodes = layout(&app.labs);
-    let focus_lab = app.selected.as_ref().and_then(|name| app.labs.iter().position(|l| l.name() == name));
+    let focus_lab = app
+        .selected
+        .as_ref()
+        .and_then(|name| app.labs.iter().position(|l| l.name() == name));
     let focus = focus_lab.and_then(|lab| nodes.iter().position(|n| n.lab == Some(lab)));
     let (canvas, origin) = draw_graph(&app.labs, &nodes, focus, &app.overlay);
     // keep the focused node in view
@@ -1385,12 +1781,21 @@ fn draw_graph_view(frame: &mut Frame, area: Rect, app: &mut App) {
     let ox = (fx + NODE_W).saturating_sub(view_w);
     let oy = (fy + NODE_H_TALL).saturating_sub(view_h);
     let lines = canvas.lines();
-    let shown: Vec<Line> = lines.into_iter().skip(oy).map(|line| clip_line(line, ox, view_w)).collect();
+    let shown: Vec<Line> = lines
+        .into_iter()
+        .skip(oy)
+        .map(|line| clip_line(line, ox, view_w))
+        .collect();
     frame.render_widget(Paragraph::new(shown), body);
     if app.labs.is_empty() {
         frame.render_widget(
-            Paragraph::new(Line::from("Waiting for labs to open…").alignment(Alignment::Center)).style(Style::default().fg(GRAY)),
-            Rect { y: body.y + 6.min(body.height.saturating_sub(1)), height: 1, ..body },
+            Paragraph::new(Line::from("Waiting for labs to open…").alignment(Alignment::Center))
+                .style(Style::default().fg(GRAY)),
+            Rect {
+                y: body.y + 6.min(body.height.saturating_sub(1)),
+                height: 1,
+                ..body
+            },
         );
     }
 }
@@ -1419,7 +1824,6 @@ fn clip_line(line: Line<'static>, skip: usize, width: usize) -> Line<'static> {
     Line::from(spans)
 }
 
-
 // ---------------------------------------------------------------- all agents (native scan)
 
 /// The latest registry from the scanner (or from a file given with `--agents`) and when it arrived.
@@ -1447,13 +1851,17 @@ impl AgentsFeed {
 fn scan_registry(file: &Option<PathBuf>, stalled_ms: u64) -> std::result::Result<Registry, String> {
     match file {
         Some(path) => load_registry_file(path).map_err(|error| format!("{error:#}")),
-        None => Ok(agents::registry_now(agents::scan(&agents::ScanOptions { probe: true, stalled_ms }))),
+        None => Ok(agents::registry_now(agents::scan(&agents::ScanOptions {
+            probe: true,
+            stalled_ms,
+        }))),
     }
 }
 
 fn load_registry_file(path: &Path) -> Result<Registry> {
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    serde_json::from_slice(&bytes).with_context(|| format!("{} is not an agent registry", path.display()))
+    serde_json::from_slice(&bytes)
+        .with_context(|| format!("{} is not an agent registry", path.display()))
 }
 
 fn agent_status_color(status: &str) -> Color {
@@ -1480,9 +1888,23 @@ impl App {
             .into_iter()
             .filter(|agent| {
                 needle.is_empty()
-                    || [&agent.kind, &agent.name, &agent.role, &agent.status, &agent.model, &agent.cwd, &agent.last]
-                        .iter()
-                        .any(|field| field.as_deref().unwrap_or("").to_lowercase().contains(&needle))
+                    || [
+                        &agent.kind,
+                        &agent.name,
+                        &agent.role,
+                        &agent.status,
+                        &agent.model,
+                        &agent.cwd,
+                        &agent.last,
+                    ]
+                    .iter()
+                    .any(|field| {
+                        field
+                            .as_deref()
+                            .unwrap_or("")
+                            .to_lowercase()
+                            .contains(&needle)
+                    })
             })
             .collect();
         rows.sort_by_key(|a| (!a.this_session, a.managed, a.kind.clone(), a.name.clone()));
@@ -1495,21 +1917,30 @@ impl App {
             return;
         }
         let current = self.agents_table.selected().unwrap_or(0) as isize;
-        self.agents_table.select(Some((current + delta).clamp(0, total as isize - 1) as usize));
+        self.agents_table
+            .select(Some((current + delta).clamp(0, total as isize - 1) as usize));
     }
 }
 
 fn draw_agents(frame: &mut Frame, area: Rect, app: &mut App) {
     let rows_data = app.visible_agents();
-    let total = app.agents.registry.as_ref().map(|r| r.agents.len()).unwrap_or(0);
+    let total = app
+        .agents
+        .registry
+        .as_ref()
+        .map(|r| r.agents.len())
+        .unwrap_or(0);
     app.agents.shown = rows_data.len();
     if app.agents_table.selected().is_none() && !rows_data.is_empty() {
         app.agents_table.select(Some(0));
     }
-    if let Some(selected) = app.agents_table.selected() && selected >= rows_data.len() {
+    if let Some(selected) = app.agents_table.selected()
+        && selected >= rows_data.len()
+    {
         app.agents_table.select(rows_data.len().checked_sub(1));
     }
-    let [table_area, note_area] = Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).areas(area);
+    let [table_area, note_area] =
+        Layout::vertical([Constraint::Min(4), Constraint::Length(1)]).areas(area);
     let block = titled_block("agents", rows_data.len(), total, &app.filter);
     if app.agents.registry.is_none() {
         let inner = block.inner(table_area);
@@ -1518,38 +1949,92 @@ fn draw_agents(frame: &mut Frame, area: Rect, app: &mut App) {
             Some(error) => format!("Could not read the agent registry: {error}"),
             None => "Scanning for agents…".to_owned(),
         };
-        let rect = Rect { y: inner.y + inner.height / 2, height: 1.min(inner.height), ..inner };
-        frame.render_widget(Paragraph::new(Line::from(text).alignment(Alignment::Center)).style(Style::default().fg(GRAY)), rect);
+        let rect = Rect {
+            y: inner.y + inner.height / 2,
+            height: 1.min(inner.height),
+            ..inner
+        };
+        frame.render_widget(
+            Paragraph::new(Line::from(text).alignment(Alignment::Center))
+                .style(Style::default().fg(GRAY)),
+            rect,
+        );
         return;
     }
     let wide = table_area.width >= 130;
     let mut header = vec!["KIND", "NAME", "ROLE", "STATUS", "MODEL", "CTX", "UPTIME"];
-    let mut widths = vec![Constraint::Length(8), Constraint::Min(20), Constraint::Length(24), Constraint::Length(9), Constraint::Min(18), Constraint::Length(11), Constraint::Length(8)];
+    let mut widths = vec![
+        Constraint::Length(8),
+        Constraint::Min(20),
+        Constraint::Length(24),
+        Constraint::Length(9),
+        Constraint::Min(18),
+        Constraint::Length(11),
+        Constraint::Length(8),
+    ];
     if wide {
         header.extend(["CWD", "LAST ACTIVITY"]);
         widths.extend([Constraint::Length(24), Constraint::Min(30)]);
     }
-    let head = Row::new(header.iter().map(|h| Cell::from(*h))).style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+    let head = Row::new(header.iter().map(|h| Cell::from(*h))).style(
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    );
     let rows = rows_data.iter().map(|agent| {
         let status = agent.status.clone().unwrap_or_default();
-        let name = agent.name.clone().or_else(|| agent.pid.map(|p| format!("pid {p}"))).unwrap_or_else(|| "-".into());
-        let name_style = if agent.this_session { Style::default().fg(AQUA).add_modifier(Modifier::BOLD) } else { Style::default().fg(AQUA) };
+        let name = agent
+            .name
+            .clone()
+            .or_else(|| agent.pid.map(|p| format!("pid {p}")))
+            .unwrap_or_else(|| "-".into());
+        let name_style = if agent.this_session {
+            Style::default().fg(AQUA).add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(AQUA)
+        };
         let mut cells = vec![
-            Cell::from(agent.kind.clone().unwrap_or_else(|| "-".into())).style(Style::default().fg(BLUE)),
-            Cell::from(if agent.this_session { format!("◆ {name}") } else { name }).style(name_style),
-            Cell::from(agent.role.clone().unwrap_or_else(|| "-".into())).style(Style::default().fg(if agent.this_session { PINK } else { GRAY })),
-            Cell::from(format!("{} {}", state_glyph(&status), status)).style(Style::default().fg(agent_status_color(&status))),
-            Cell::from(agent.model.clone().unwrap_or_else(|| "-".into())).style(Style::default().fg(Color::White)),
-            Cell::from(agent.context.clone().unwrap_or_else(|| "-".into())).style(Style::default().fg(GRAY)),
-            Cell::from(agent.uptime.clone().unwrap_or_else(|| "-".into())).style(Style::default().fg(GRAY)),
+            Cell::from(agent.kind.clone().unwrap_or_else(|| "-".into()))
+                .style(Style::default().fg(BLUE)),
+            Cell::from(if agent.this_session {
+                format!("◆ {name}")
+            } else {
+                name
+            })
+            .style(name_style),
+            Cell::from(agent.role.clone().unwrap_or_else(|| "-".into()))
+                .style(Style::default().fg(if agent.this_session { PINK } else { GRAY })),
+            Cell::from(format!("{} {}", state_glyph(&status), status))
+                .style(Style::default().fg(agent_status_color(&status))),
+            Cell::from(agent.model.clone().unwrap_or_else(|| "-".into()))
+                .style(Style::default().fg(Color::White)),
+            Cell::from(agent.context.clone().unwrap_or_else(|| "-".into()))
+                .style(Style::default().fg(GRAY)),
+            Cell::from(agent.uptime.clone().unwrap_or_else(|| "-".into()))
+                .style(Style::default().fg(GRAY)),
         ];
         if wide {
-            cells.push(Cell::from(agent.cwd.clone().map(|c| tail_path(&c, 24)).unwrap_or_default()).style(Style::default().fg(GRAY)));
-            cells.push(Cell::from(agent.last.clone().unwrap_or_default()).style(Style::default().fg(DIM)));
+            cells.push(
+                Cell::from(
+                    agent
+                        .cwd
+                        .clone()
+                        .map(|c| tail_path(&c, 24))
+                        .unwrap_or_default(),
+                )
+                .style(Style::default().fg(GRAY)),
+            );
+            cells.push(
+                Cell::from(agent.last.clone().unwrap_or_default()).style(Style::default().fg(DIM)),
+            );
         }
         Row::new(cells)
     });
-    let table = Table::new(rows, widths).header(head).block(block).row_highlight_style(Style::default().fg(Color::Black).bg(AQUA)).column_spacing(2);
+    let table = Table::new(rows, widths)
+        .header(head)
+        .block(block)
+        .row_highlight_style(Style::default().fg(Color::Black).bg(AQUA))
+        .column_spacing(2);
     frame.render_stateful_widget(table, table_area, &mut app.agents_table);
     let mut kinds: Vec<(String, usize)> = Vec::new();
     for agent in app.agents.registry.iter().flat_map(|r| r.agents.iter()) {
@@ -1560,11 +2045,24 @@ fn draw_agents(frame: &mut Frame, area: Rect, app: &mut App) {
         }
     }
     kinds.sort();
-    let counts = kinds.iter().map(|(k, n)| format!("{k} {n}")).collect::<Vec<_>>().join(" · ");
+    let counts = kinds
+        .iter()
+        .map(|(k, n)| format!("{k} {n}"))
+        .collect::<Vec<_>>()
+        .join(" · ");
     let age = app.agents.age().map(|d| d.as_secs()).unwrap_or(0);
     let stale = age > 30;
-    let text = format!(" {counts}  |  scanned {age}s ago{}", if stale { "  (stale)" } else { "" });
-    frame.render_widget(Paragraph::new(Span::styled(text, Style::default().fg(if stale { ORANGE } else { DIM }))), note_area);
+    let text = format!(
+        " {counts}  |  scanned {age}s ago{}",
+        if stale { "  (stale)" } else { "" }
+    );
+    frame.render_widget(
+        Paragraph::new(Span::styled(
+            text,
+            Style::default().fg(if stale { ORANGE } else { DIM }),
+        )),
+        note_area,
+    );
 }
 
 fn draw_models(frame: &mut Frame, area: Rect, app: &mut App) {
@@ -1579,23 +2077,55 @@ fn draw_models(frame: &mut Frame, area: Rect, app: &mut App) {
     groups.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then(a.0.cmp(&b.0)));
     let needle = app.filter.to_lowercase();
     groups.retain(|(m, _)| needle.is_empty() || m.to_lowercase().contains(&needle));
-    let head = Row::new(["MODEL", "LABS", "MANAGERS", "WORKERS", "WORKING", "ASKING", "STALLED"].map(Cell::from))
-        .style(Style::default().fg(Color::White).add_modifier(Modifier::BOLD));
+    let head = Row::new(
+        [
+            "MODEL", "LABS", "MANAGERS", "WORKERS", "WORKING", "ASKING", "STALLED",
+        ]
+        .map(Cell::from),
+    )
+    .style(
+        Style::default()
+            .fg(Color::White)
+            .add_modifier(Modifier::BOLD),
+    );
     let rows = groups.iter().map(|(model, labs)| {
         let n = |f: &dyn Fn(&&Lab) -> bool| labs.iter().filter(|l| f(l)).count().to_string();
-        let family = if model.starts_with("muse") { PINK } else if model.starts_with("opencode") { BLUE } else { Color::White };
+        let family = if model.starts_with("muse") {
+            PINK
+        } else if model.starts_with("opencode") {
+            BLUE
+        } else {
+            Color::White
+        };
         Row::new(vec![
             Cell::from(model.clone()).style(Style::default().fg(family)),
             Cell::from(labs.len().to_string()),
             Cell::from(n(&|l| is_lead(&l.role))),
             Cell::from(n(&|l| !is_lead(&l.role) && l.role != "lab")),
-            Cell::from(n(&|l| matches!(l.state(), "working" | "up"))).style(Style::default().fg(GREEN)),
+            Cell::from(n(&|l| matches!(l.state(), "working" | "up")))
+                .style(Style::default().fg(GREEN)),
             Cell::from(n(&|l| l.state() == "asking")).style(Style::default().fg(YELLOW)),
             Cell::from(n(&|l| l.state() == "stalled")).style(Style::default().fg(ORANGE)),
         ])
     });
-    let widths = [Constraint::Min(30), Constraint::Length(6), Constraint::Length(10), Constraint::Length(9), Constraint::Length(9), Constraint::Length(8), Constraint::Length(9)];
-    let table = Table::new(rows, widths).header(head).block(titled_block("models", groups.len(), groups.len(), &app.filter)).column_spacing(2);
+    let widths = [
+        Constraint::Min(30),
+        Constraint::Length(6),
+        Constraint::Length(10),
+        Constraint::Length(9),
+        Constraint::Length(9),
+        Constraint::Length(8),
+        Constraint::Length(9),
+    ];
+    let table = Table::new(rows, widths)
+        .header(head)
+        .block(titled_block(
+            "models",
+            groups.len(),
+            groups.len(),
+            &app.filter,
+        ))
+        .column_spacing(2);
     frame.render_widget(table, area);
 }
 
@@ -1632,7 +2162,12 @@ mod overlay_tests {
 
     #[test]
     fn centered_clamps_and_centers_in_area() {
-        let area = Rect { x: 0, y: 0, width: 20, height: 10 };
+        let area = Rect {
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 10,
+        };
         let r = centered(area, 30, 4);
         assert_eq!((r.x, r.y, r.width, r.height), (0, 3, 20, 4));
         let r = centered(area, 10, 2);
@@ -1644,10 +2179,17 @@ fn draw_crumbs(frame: &mut Frame, area: Rect, app: &App) {
     let crumb = |text: &str, active: bool| {
         Span::styled(
             format!(" <{text}> "),
-            if active { Style::default().fg(Color::Black).bg(ORANGE) } else { Style::default().fg(Color::Black).bg(AQUA) },
+            if active {
+                Style::default().fg(Color::Black).bg(ORANGE)
+            } else {
+                Style::default().fg(Color::Black).bg(AQUA)
+            },
         )
     };
-    let mut spans = vec![crumb("labs", app.view == View::Labs && app.mode == Mode::Normal)];
+    let mut spans = vec![crumb(
+        "labs",
+        app.view == View::Labs && app.mode == Mode::Normal,
+    )];
     if app.view != View::Labs {
         spans.push(Span::raw(" "));
         spans.push(crumb(app.view.name(), app.mode == Mode::Normal));
@@ -1670,31 +2212,63 @@ fn draw_crumbs(frame: &mut Frame, area: Rect, app: &App) {
     }
     let left = Line::from(spans);
     frame.render_widget(Paragraph::new(left), area);
-    if let Some((text, at, error)) = &app.flash && at.elapsed() < Duration::from_secs(6) {
+    if let Some((text, at, error)) = &app.flash
+        && at.elapsed() < Duration::from_secs(6)
+    {
         let color = if *error { RED } else { GREEN };
         let width = text.chars().count().min(area.width as usize / 2);
-        let rect = Rect { x: area.x + area.width.saturating_sub(width as u16 + 1), width: width as u16, ..area };
-        frame.render_widget(Paragraph::new(Span::styled(fit(text, width), Style::default().fg(color))), rect);
+        let rect = Rect {
+            x: area.x + area.width.saturating_sub(width as u16 + 1),
+            width: width as u16,
+            ..area
+        };
+        frame.render_widget(
+            Paragraph::new(Span::styled(fit(text, width), Style::default().fg(color))),
+            rect,
+        );
     }
 }
 
 fn centered(area: Rect, width: u16, height: u16) -> Rect {
     let width = width.min(area.width);
     let height = height.min(area.height);
-    Rect { x: area.x + (area.width - width) / 2, y: area.y + (area.height - height) / 2, width, height }
+    Rect {
+        x: area.x + (area.width - width) / 2,
+        y: area.y + (area.height - height) / 2,
+        width,
+        height,
+    }
 }
 
 fn draw_peek(frame: &mut Frame, area: Rect, app: &App) {
-    let Some(lab) = app.selected_lab() else { return };
-    let rect = Rect { x: area.x, y: area.y + 6, width: area.width, height: area.height.saturating_sub(7) };
+    let Some(lab) = app.selected_lab() else {
+        return;
+    };
+    let rect = Rect {
+        x: area.x,
+        y: area.y + 6,
+        width: area.width,
+        height: area.height.saturating_sub(7),
+    };
     frame.render_widget(Clear, rect);
     let title = Line::from(vec![
         Span::styled(" peek(", Style::default().fg(AQUA)),
-        Span::styled(lab.name().to_owned(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            lab.name().to_owned(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(") ", Style::default().fg(AQUA)),
-        Span::styled(format!("{} {} ", state_glyph(lab.state()), lab.state()), Style::default().fg(state_color(lab.state()))),
+        Span::styled(
+            format!("{} {} ", state_glyph(lab.state()), lab.state()),
+            Style::default().fg(state_color(lab.state())),
+        ),
     ]);
-    let block = Block::bordered().border_style(Style::default().fg(BLUE)).title(title).title_alignment(Alignment::Center);
+    let block = Block::bordered()
+        .border_style(Style::default().fg(BLUE))
+        .title(title)
+        .title_alignment(Alignment::Center);
     let inner = block.inner(rect);
     let mut lines: Vec<&str> = lab.probe.screen.lines().map(str::trim_end).collect();
     while lines.last().is_some_and(|l| l.is_empty()) {
@@ -1702,7 +2276,12 @@ fn draw_peek(frame: &mut Frame, area: Rect, app: &App) {
     }
     let start = lines.len().saturating_sub(inner.height as usize);
     let start = start.saturating_sub(app.scroll as usize);
-    let text: Vec<Line> = lines.iter().skip(start).take(inner.height as usize).map(|l| Line::from(l.to_string())).collect();
+    let text: Vec<Line> = lines
+        .iter()
+        .skip(start)
+        .take(inner.height as usize)
+        .map(|l| Line::from(l.to_string()))
+        .collect();
     frame.render_widget(Paragraph::new(text).block(block), rect);
 }
 
@@ -1718,20 +2297,61 @@ fn is_env_name(name: &str) -> bool {
 }
 
 fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
-    let Some(lab) = app.selected_lab() else { return };
-    let rect = Rect { x: area.x, y: area.y + 6, width: area.width, height: area.height.saturating_sub(7) };
+    let Some(lab) = app.selected_lab() else {
+        return;
+    };
+    let rect = Rect {
+        x: area.x,
+        y: area.y + 6,
+        width: area.width,
+        height: area.height.saturating_sub(7),
+    };
     frame.render_widget(Clear, rect);
     let entry = &lab.probe.entry;
-    let key = |k: &str| Span::styled(format!("{k:<12}"), Style::default().fg(ORANGE).add_modifier(Modifier::BOLD));
-    let line = |k: &str, v: String| Line::from(vec![key(k), Span::styled(v, Style::default().fg(Color::White))]);
-    let children: Vec<String> = app.labs.iter().filter(|l| l.parent.as_deref() == Some(lab.name())).map(|l| l.name().to_owned()).collect();
+    let key = |k: &str| {
+        Span::styled(
+            format!("{k:<12}"),
+            Style::default().fg(ORANGE).add_modifier(Modifier::BOLD),
+        )
+    };
+    let line = |k: &str, v: String| {
+        Line::from(vec![
+            key(k),
+            Span::styled(v, Style::default().fg(Color::White)),
+        ])
+    };
+    let children: Vec<String> = app
+        .labs
+        .iter()
+        .filter(|l| l.parent.as_deref() == Some(lab.name()))
+        .map(|l| l.name().to_owned())
+        .collect();
     let mut lines = vec![
         line("Name:", lab.name().to_owned()),
         line("Role:", lab.role.clone()),
-        line("Parent:", lab.parent.clone().unwrap_or_else(|| "- (reports to the commander)".into())),
-        line("Children:", if children.is_empty() { "-".into() } else { children.join(", ") }),
+        line(
+            "Parent:",
+            lab.parent
+                .clone()
+                .unwrap_or_else(|| "- (reports to the commander)".into()),
+        ),
+        line(
+            "Children:",
+            if children.is_empty() {
+                "-".into()
+            } else {
+                children.join(", ")
+            },
+        ),
         line("Model:", app.display_model(lab)),
-        line("State:", format!("{} (quiet for {})", lab.state(), human_duration(lab.probe.quiet_ms))),
+        line(
+            "State:",
+            format!(
+                "{} (quiet for {})",
+                lab.state(),
+                human_duration(lab.probe.quiet_ms)
+            ),
+        ),
         line("Uptime:", human_duration(lab.probe.uptime_ms)),
         line("Command:", entry.command.join(" ")),
         line("Cwd:", entry.cwd.clone().unwrap_or_default()),
@@ -1739,9 +2359,19 @@ fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
         line("Host pid:", entry.pid.to_string()),
         line("Size:", format!("{}x{}", entry.cols, entry.rows)),
         line("Output:", format!("{} bytes", lab.probe.bytes_out)),
-        line("Title:", if lab.probe.window_title.is_empty() { entry.title.clone().unwrap_or_default() } else { lab.probe.window_title.clone() }),
+        line(
+            "Title:",
+            if lab.probe.window_title.is_empty() {
+                entry.title.clone().unwrap_or_default()
+            } else {
+                lab.probe.window_title.clone()
+            },
+        ),
         Line::from(""),
-        Line::from(Span::styled("Screen (last lines)", Style::default().fg(AQUA).add_modifier(Modifier::BOLD))),
+        Line::from(Span::styled(
+            "Screen (last lines)",
+            Style::default().fg(AQUA).add_modifier(Modifier::BOLD),
+        )),
     ];
     if let Some(info) = overlay_info(&app.overlay, lab.name()) {
         let pick = &info.node.pick;
@@ -1749,41 +2379,89 @@ fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
             Some(rule) => format!("{} · {}", pick.via, rule),
             None => pick.via.clone(),
         };
-        let pick_text = if pick.reason.is_empty() { via } else { format!("{via} · {}", pick.reason) };
+        let pick_text = if pick.reason.is_empty() {
+            via
+        } else {
+            format!("{via} · {}", pick.reason)
+        };
         let mut extra = vec![
             line("Team:", info.team.clone()),
             line("Run:", info.run.clone()),
             line("Harness:", info.node.harness.clone()),
             line("Requested:", info.node.requested_model.clone()),
             line("Pick:", pick_text),
-            line("Trace:", info.trace_dir.clone().unwrap_or_else(|| "-".into())),
+            line(
+                "Trace:",
+                info.trace_dir.clone().unwrap_or_else(|| "-".into()),
+            ),
         ];
-        let secrets: Vec<String> = info.node.vault_env.iter().filter(|name| is_env_name(name)).cloned().collect();
+        let secrets: Vec<String> = info
+            .node
+            .vault_env
+            .iter()
+            .filter(|name| is_env_name(name))
+            .cloned()
+            .collect();
         if !secrets.is_empty() {
-            extra.push(line("Secrets (names only):", format!(" {}", secrets.join(", "))));
+            extra.push(line(
+                "Secrets (names only):",
+                format!(" {}", secrets.join(", ")),
+            ));
         }
         lines.splice(5..5, extra);
     }
-    let mut screen: Vec<&str> = lab.probe.screen.lines().map(str::trim_end).filter(|l| !l.is_empty()).collect();
+    let mut screen: Vec<&str> = lab
+        .probe
+        .screen
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.is_empty())
+        .collect();
     let keep = 14;
     screen.drain(..screen.len().saturating_sub(keep));
-    lines.extend(screen.into_iter().map(|l| Line::from(Span::styled(l.to_owned(), Style::default().fg(GRAY)))));
+    lines.extend(
+        screen
+            .into_iter()
+            .map(|l| Line::from(Span::styled(l.to_owned(), Style::default().fg(GRAY)))),
+    );
     let title = Line::from(vec![
         Span::styled(" describe(", Style::default().fg(AQUA)),
-        Span::styled(lab.name().to_owned(), Style::default().fg(Color::White).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            lab.name().to_owned(),
+            Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::styled(") ", Style::default().fg(AQUA)),
     ]);
-    let block = Block::bordered().border_style(Style::default().fg(BLUE)).title(title).title_alignment(Alignment::Center);
-    frame.render_widget(Paragraph::new(lines).block(block).scroll((app.scroll, 0)).wrap(Wrap { trim: false }), rect);
+    let block = Block::bordered()
+        .border_style(Style::default().fg(BLUE))
+        .title(title)
+        .title_alignment(Alignment::Center);
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(block)
+            .scroll((app.scroll, 0))
+            .wrap(Wrap { trim: false }),
+        rect,
+    );
 }
 
 fn draw_help(frame: &mut Frame, area: Rect) {
     let rect = centered(area, 74, 27);
     frame.render_widget(Clear, rect);
-    let section = |t: &str| Line::from(Span::styled(t.to_owned(), Style::default().fg(AQUA).add_modifier(Modifier::BOLD)));
+    let section = |t: &str| {
+        Line::from(Span::styled(
+            t.to_owned(),
+            Style::default().fg(AQUA).add_modifier(Modifier::BOLD),
+        ))
+    };
     let row = |k: &str, d: &str| {
         Line::from(vec![
-            Span::styled(format!("  {k:<14}"), Style::default().fg(PINK).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("  {k:<14}"),
+                Style::default().fg(PINK).add_modifier(Modifier::BOLD),
+            ),
             Span::styled(d.to_owned(), Style::default().fg(Color::White)),
         ])
     };
@@ -1806,24 +2484,48 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         row("/", "filter by name, role, state, model or parent"),
         row("o", "sort: tree, name, state, age"),
         row(":labs :graph", ":models :agents switch view"),
-        row(":stop [lab]", "stop a lab        :attach [lab]  attach in a window"),
+        row(
+            ":stop [lab]",
+            "stop a lab        :attach [lab]  attach in a window",
+        ),
         row("esc", "clear filter / close overlay"),
         row("q  :q  ctrl-c", "quit"),
         Line::from(""),
-        Line::from(Span::styled("  Lab graph edges come from `open --parent`, or automatically from a manager's own opens.", Style::default().fg(GRAY))),
+        Line::from(Span::styled(
+            "  Lab graph edges come from `open --parent`, or automatically from a manager's own opens.",
+            Style::default().fg(GRAY),
+        )),
     ];
-    let block = Block::bordered().border_style(Style::default().fg(BLUE)).title(Span::styled(" help ", Style::default().fg(AQUA))).title_alignment(Alignment::Center);
+    let block = Block::bordered()
+        .border_style(Style::default().fg(BLUE))
+        .title(Span::styled(" help ", Style::default().fg(AQUA)))
+        .title_alignment(Alignment::Center);
     frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
 
 fn draw_confirm(frame: &mut Frame, area: Rect, name: &str) {
     let rect = centered(area, 52, 5);
     frame.render_widget(Clear, rect);
-    let block = Block::bordered().border_style(Style::default().fg(RED)).title(Span::styled(" Stop ", Style::default().fg(RED))).title_alignment(Alignment::Center);
+    let block = Block::bordered()
+        .border_style(Style::default().fg(RED))
+        .title(Span::styled(" Stop ", Style::default().fg(RED)))
+        .title_alignment(Alignment::Center);
     let lines = vec![
         Line::from(""),
-        Line::from(vec![Span::raw("Stop lab "), Span::styled(name.to_owned(), Style::default().fg(AQUA).add_modifier(Modifier::BOLD)), Span::raw("?")]).alignment(Alignment::Center),
-        Line::from(Span::styled("<y> stop    <any other key> cancel", Style::default().fg(GRAY))).alignment(Alignment::Center),
+        Line::from(vec![
+            Span::raw("Stop lab "),
+            Span::styled(
+                name.to_owned(),
+                Style::default().fg(AQUA).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("?"),
+        ])
+        .alignment(Alignment::Center),
+        Line::from(Span::styled(
+            "<y> stop    <any other key> cancel",
+            Style::default().fg(GRAY),
+        ))
+        .alignment(Alignment::Center),
     ];
     frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
@@ -1831,11 +2533,26 @@ fn draw_confirm(frame: &mut Frame, area: Rect, name: &str) {
 fn draw_confirm_renew(frame: &mut Frame, area: Rect, name: &str) {
     let rect = centered(area, 52, 5);
     frame.render_widget(Clear, rect);
-    let block = Block::bordered().border_style(Style::default().fg(GREEN)).title(Span::styled(" Renew ", Style::default().fg(GREEN))).title_alignment(Alignment::Center);
+    let block = Block::bordered()
+        .border_style(Style::default().fg(GREEN))
+        .title(Span::styled(" Renew ", Style::default().fg(GREEN)))
+        .title_alignment(Alignment::Center);
     let lines = vec![
         Line::from(""),
-        Line::from(vec![Span::raw("Renew lab "), Span::styled(name.to_owned(), Style::default().fg(AQUA).add_modifier(Modifier::BOLD)), Span::raw("?")]).alignment(Alignment::Center),
-        Line::from(Span::styled("<y> renew    <any other key> cancel", Style::default().fg(GRAY))).alignment(Alignment::Center),
+        Line::from(vec![
+            Span::raw("Renew lab "),
+            Span::styled(
+                name.to_owned(),
+                Style::default().fg(AQUA).add_modifier(Modifier::BOLD),
+            ),
+            Span::raw("?"),
+        ])
+        .alignment(Alignment::Center),
+        Line::from(Span::styled(
+            "<y> renew    <any other key> cancel",
+            Style::default().fg(GRAY),
+        ))
+        .alignment(Alignment::Center),
     ];
     frame.render_widget(Paragraph::new(lines).block(block), rect);
 }
@@ -1845,7 +2562,8 @@ fn draw_confirm_renew(frame: &mut Frame, area: Rect, name: &str) {
 fn tui(args: &ConsoleArgs, view: View) -> Result<()> {
     let interval = Duration::from_millis(args.interval_ms.max(200));
     let stalled_ms = args.stalled_ms;
-    let (sender, receiver) = mpsc::channel::<(Vec<Probe>, Option<std::result::Result<Registry, String>>)>();
+    let (sender, receiver) =
+        mpsc::channel::<(Vec<Probe>, Option<std::result::Result<Registry, String>>)>();
     let stop = Arc::new(AtomicBool::new(false));
     let agents_file = args.agents.clone();
     let poller = {
@@ -1856,7 +2574,9 @@ fn tui(args: &ConsoleArgs, view: View) -> Result<()> {
                 let started = Instant::now();
                 let probes = probe_all(stalled_ms);
                 // the all-agents scan costs a process listing and a few reads: every third refresh
-                let registry = cycle.is_multiple_of(3).then(|| scan_registry(&agents_file, stalled_ms));
+                let registry = cycle
+                    .is_multiple_of(3)
+                    .then(|| scan_registry(&agents_file, stalled_ms));
                 cycle += 1;
                 if sender.send((probes, registry)).is_err() {
                     break;
@@ -1881,7 +2601,11 @@ fn tui(args: &ConsoleArgs, view: View) -> Result<()> {
                 }
                 dirty = true;
             }
-            if app.flash.as_ref().is_some_and(|(_, at, _)| at.elapsed() < Duration::from_millis(6100)) {
+            if app
+                .flash
+                .as_ref()
+                .is_some_and(|(_, at, _)| at.elapsed() < Duration::from_millis(6100))
+            {
                 dirty = true;
             }
             if dirty {
@@ -1941,7 +2665,14 @@ fn render_text(app: &mut App, width: u16, height: u16) -> Result<String> {
 mod tests {
     use super::*;
 
-    fn probe(name: &str, parent: Option<&str>, role: Option<&str>, state: &str, model: &[&str], started: u64) -> Probe {
+    fn probe(
+        name: &str,
+        parent: Option<&str>,
+        role: Option<&str>,
+        state: &str,
+        model: &[&str],
+        started: u64,
+    ) -> Probe {
         Probe {
             entry: session::Entry {
                 name: name.into(),
@@ -1994,7 +2725,11 @@ mod tests {
         assert_eq!(role("mgr1"), "manager");
         assert_eq!(role("mgr2"), "manager", "inferred from having children");
         assert_eq!(role("w1"), "worker");
-        assert_eq!(role("orphan"), "worker", "a parent that is not running does not hide the lab");
+        assert_eq!(
+            role("orphan"),
+            "worker",
+            "a parent that is not running does not hide the lab"
+        );
         assert_eq!(labs[1].prefix, "├─ ");
         assert_eq!(labs[2].prefix, "└─ ");
         assert_eq!(labs[1].depth, 1);
@@ -2018,7 +2753,12 @@ mod tests {
         let nodes = layout(&labs);
         assert_eq!(nodes[0].lab, None);
         assert_eq!(nodes[0].depth, 0);
-        let find = |name: &str| nodes.iter().find(|n| n.lab.map(|l| labs[l].name() == name).unwrap_or(false)).unwrap();
+        let find = |name: &str| {
+            nodes
+                .iter()
+                .find(|n| n.lab.map(|l| labs[l].name() == name).unwrap_or(false))
+                .unwrap()
+        };
         assert_eq!(find("mgr1").depth, 1);
         assert_eq!(find("w1").depth, 2);
         let (a, b) = (find("w1").row, find("w2").row);
@@ -2051,7 +2791,17 @@ mod tests {
         let mut app = App::new(View::Labs, 1000);
         app.apply(fleet());
         let text = render_text(&mut app, 170, 30).unwrap();
-        for needle in ["labs(all)[6]", "mgr1", "├─ w1", "└─ w2", "manager", "muse/muse", "opencode-cli/opencode/gpt-6-luna", "◆ asking", "<enter>"] {
+        for needle in [
+            "labs(all)[6]",
+            "mgr1",
+            "├─ w1",
+            "└─ w2",
+            "manager",
+            "muse/muse",
+            "opencode-cli/opencode/gpt-6-luna",
+            "◆ asking",
+            "<enter>",
+        ] {
             assert!(text.contains(needle), "missing {needle:?} in\n{text}");
         }
     }
@@ -2061,7 +2811,14 @@ mod tests {
         let mut app = App::new(View::Graph, 1000);
         app.apply(fleet());
         let text = render_text(&mut app, 150, 40).unwrap();
-        for needle in ["◆ commander", "● mgr1", "◆ w2", "◌ mgr2", "─▶", "graph(all)[6]"] {
+        for needle in [
+            "◆ commander",
+            "● mgr1",
+            "◆ w2",
+            "◌ mgr2",
+            "─▶",
+            "graph(all)[6]",
+        ] {
             assert!(text.contains(needle), "missing {needle:?} in\n{text}");
         }
     }
@@ -2080,7 +2837,14 @@ mod tests {
         .unwrap();
         let overlay = crate::graphspec::overlay(&["dry-a"], &[manifest]);
         assert_eq!(overlay.planned.len(), 2);
-        let mut probes = vec![probe("dry-a", None, Some("commander"), "working", &["cat"], 1)];
+        let mut probes = vec![probe(
+            "dry-a",
+            None,
+            Some("commander"),
+            "working",
+            &["cat"],
+            1,
+        )];
         for info in &overlay.planned {
             probes.push(planned_probe(info));
         }
@@ -2090,13 +2854,31 @@ mod tests {
             app.labs = labs.clone();
             app.overlay = overlay.clone();
             let text = render_text(&mut app, width, 36).unwrap();
-            for needle in ["claude-sonnet-5-5", "s1 R3", "claude-haiku-5-5", "fallback", "claude-opus-5-5", "pinned", "○ dry-b", "○ dry-c"] {
-                assert!(text.contains(needle), "width {width}: missing {needle:?} in\n{text}");
+            for needle in [
+                "claude-sonnet-5-5",
+                "s1 R3",
+                "claude-haiku-5-5",
+                "fallback",
+                "claude-opus-5-5",
+                "pinned",
+                "○ dry-b",
+                "○ dry-c",
+            ] {
+                assert!(
+                    text.contains(needle),
+                    "width {width}: missing {needle:?} in\n{text}"
+                );
             }
-            assert!(!text.contains("anthropic/cla"), "width {width}: model still truncated in\n{text}");
+            assert!(
+                !text.contains("anthropic/cla"),
+                "width {width}: model still truncated in\n{text}"
+            );
             for needle in ["claude-sonnet-5-5", "s1 R3", "fallback", "pinned"] {
                 let line = text.lines().find(|l| l.contains(needle)).unwrap();
-                assert!(line.matches('│').count() >= 2, "width {width}: {needle:?} not inside a node box: {line:?}");
+                assert!(
+                    line.matches('│').count() >= 2,
+                    "width {width}: {needle:?} not inside a node box: {line:?}"
+                );
             }
         }
     }
@@ -2141,7 +2923,11 @@ mod tests {
         }
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.filter, "mgr");
-        assert_eq!(app.visible().len(), 5, "the filter also matches the parent column, so a manager's workers stay with it");
+        assert_eq!(
+            app.visible().len(),
+            5,
+            "the filter also matches the parent column, so a manager's workers stay with it"
+        );
         app.key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE));
         assert!(app.filter.is_empty() && !app.quit);
         app.key(key(':'));
@@ -2165,15 +2951,28 @@ mod tests {
         app.apply(fleet());
         assert_eq!(app.selected.as_deref(), Some("mgr1"));
         app.key(key('R'));
-        assert!(matches!(app.mode, Mode::ConfirmRenew(ref n) if n == "mgr1"), "R must ask before renewing, got {:?}", app.mode);
+        assert!(
+            matches!(app.mode, Mode::ConfirmRenew(ref n) if n == "mgr1"),
+            "R must ask before renewing, got {:?}",
+            app.mode
+        );
         let text = render_text(&mut app, 120, 30).unwrap();
-        assert!(text.contains("Renew lab") && text.contains("mgr1") && text.contains("<y> renew"), "{text}");
-        assert!(text.contains("renew?"), "crumb must name the renew overlay in\n{text}");
+        assert!(
+            text.contains("Renew lab") && text.contains("mgr1") && text.contains("<y> renew"),
+            "{text}"
+        );
+        assert!(
+            text.contains("renew?"),
+            "crumb must name the renew overlay in\n{text}"
+        );
         app.key(key('n'));
         assert_eq!(app.mode, Mode::Normal);
         app.key(key('?'));
         let text = render_text(&mut app, 120, 30).unwrap();
-        assert!(text.contains("renew the lab (asks first)"), "help must list R in\n{text}");
+        assert!(
+            text.contains("renew the lab (asks first)"),
+            "help must list R in\n{text}"
+        );
     }
 
     #[test]
@@ -2201,10 +3000,16 @@ mod tests {
         app.apply(fleet());
         app.mode = Mode::Peek;
         let text = render_text(&mut app, 120, 30).unwrap();
-        assert!(text.contains("mgr1 screen line") && text.contains("peek("), "{text}");
+        assert!(
+            text.contains("mgr1 screen line") && text.contains("peek("),
+            "{text}"
+        );
         app.mode = Mode::Describe;
         let text = render_text(&mut app, 120, 30).unwrap();
-        assert!(text.contains("Children:") && text.contains("w1, w2"), "{text}");
+        assert!(
+            text.contains("Children:") && text.contains("w1, w2"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -2219,8 +3024,14 @@ mod tests {
         app.mode = Mode::Describe;
         let text = render_text(&mut app, 150, 36).unwrap();
         assert!(text.contains("Secrets (names only):"), "{text}");
-        assert!(text.contains("FLEET_TOKEN") && text.contains("OTHER_TOKEN"), "{text}");
-        assert!(!text.contains("abc123xyz"), "value-shaped entry leaked in\n{text}");
+        assert!(
+            text.contains("FLEET_TOKEN") && text.contains("OTHER_TOKEN"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("abc123xyz"),
+            "value-shaped entry leaked in\n{text}"
+        );
         let manifest_without: crate::graphspec::Manifest = serde_json::from_str(
             r#"{"version":1,"run":"run-1","team":"default","source":"/tmp/x.yah","root":"mgr1","created_ms":1,"nodes":[{"name":"mgr1","harness":"mgr","role":"manager","parent":null,"requested_model":"system-one","model":"anthropic/claude-sonnet-5-5","model_label":"sonnet","pick":{"via":"system-one","rule":"R3","reason":"","degraded_level":0},"tools":[]}],"edges":[]}"#,
         )
@@ -2230,8 +3041,14 @@ mod tests {
         app.overlay = crate::graphspec::overlay(&["mgr1"], &[manifest_without]);
         app.mode = Mode::Describe;
         let text = render_text(&mut app, 150, 36).unwrap();
-        assert!(text.contains("Team:") && text.contains("Children:"), "{text}");
-        assert!(!text.contains("Secrets"), "no vault_env must render unchanged in\n{text}");
+        assert!(
+            text.contains("Team:") && text.contains("Children:"),
+            "{text}"
+        );
+        assert!(
+            !text.contains("Secrets"),
+            "no vault_env must render unchanged in\n{text}"
+        );
     }
 
     #[test]
@@ -2248,13 +3065,29 @@ mod tests {
         let mut app = App::new(View::Agents, 1000);
         app.agents.set(registry);
         let text = render_text(&mut app, 170, 24).unwrap();
-        for needle in ["agents(all)[4]", "◆ f0cedc99", "worker-a", "opencode-33", "claude 2", "opencode 1", "pi 1", "created redline.ts", "scanned"] {
+        for needle in [
+            "agents(all)[4]",
+            "◆ f0cedc99",
+            "worker-a",
+            "opencode-33",
+            "claude 2",
+            "opencode 1",
+            "pi 1",
+            "created redline.ts",
+            "scanned",
+        ] {
             assert!(text.contains(needle), "missing {needle:?} in\n{text}");
         }
         let mine = text.lines().position(|l| l.contains("◆ f0cedc99")).unwrap();
-        let standalone = text.lines().position(|l| l.contains("opencode-33")).unwrap();
+        let standalone = text
+            .lines()
+            .position(|l| l.contains("opencode-33"))
+            .unwrap();
         let lab = text.lines().position(|l| l.contains("worker-a")).unwrap();
-        assert!(mine < standalone && standalone < lab, "this session, then people-started agents, then labs");
+        assert!(
+            mine < standalone && standalone < lab,
+            "this session, then people-started agents, then labs"
+        );
         app.filter = "redline".into();
         assert_eq!(app.visible_agents().len(), 1);
     }
@@ -2271,7 +3104,11 @@ mod tests {
         let text = render_text(&mut app, 150, 20).unwrap();
         assert!(text.contains("Could not read the agent registry"), "{text}");
         let good = directory.path().join("good.json");
-        fs::write(&good, r#"{"agents":[{"kind":"codex","name":"c1","status":"idle"}]}"#).unwrap();
+        fs::write(
+            &good,
+            r#"{"agents":[{"kind":"codex","name":"c1","status":"idle"}]}"#,
+        )
+        .unwrap();
         assert_eq!(scan_registry(&Some(good), 8000).unwrap().agents.len(), 1);
     }
 
@@ -2290,6 +3127,10 @@ mod tests {
         app.key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE));
         assert_eq!(app.view, View::Agents);
         app.key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL));
-        assert_eq!(app.mode, Mode::Normal, "the agents view cannot stop anything");
+        assert_eq!(
+            app.mode,
+            Mode::Normal,
+            "the agents view cannot stop anything"
+        );
     }
 }

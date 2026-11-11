@@ -484,7 +484,10 @@ fn a_stale_registry_entry_is_hidden_by_list_and_dropped_by_stop() {
     assert_eq!(shown[0]["state"], "dead");
     let hidden = lab.json(&["list", "--json"]);
     assert!(hidden.as_array().unwrap().is_empty(), "{hidden}");
-    assert!(record.exists(), "listing must keep the record of a dead host");
+    assert!(
+        record.exists(),
+        "listing must keep the record of a dead host"
+    );
     let out = lab.cli(&["stop", "-n", "ghost"]);
     assert!(
         out.status.success(),
@@ -833,7 +836,11 @@ fn recover_killed_fake_agent_resends_brief() {
     let mut lab = Lab::new();
     let dir = lab.directory.path().to_path_buf();
     let log = dir.join("resume.log");
-    fs::write(&log, "old-1\nold-2\nkeep-1\nkeep-2\nkeep-3\nkeep-4\nkeep-5\n").unwrap();
+    fs::write(
+        &log,
+        "old-1\nold-2\nkeep-1\nkeep-2\nkeep-3\nkeep-4\nkeep-5\n",
+    )
+    .unwrap();
     let brief = dir.join("brief.txt");
     fs::write(&brief, "brief-content-xyz\n").unwrap();
     let record = dir.join("submissions.txt");
@@ -891,11 +898,7 @@ fn recover_missing_env_name_reports_name_only() {
     cmd.env_remove("R42_ONLY_NAME");
     let out = cmd.output().unwrap();
     assert!(!out.status.success(), "missing env name must fail recover");
-    let combined = format!(
-        "{} {}",
-        text(&out),
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let combined = format!("{} {}", text(&out), String::from_utf8_lossy(&out.stderr));
     assert!(
         combined.contains("R42_ONLY_NAME"),
         "missing name reported by name: {combined}"
@@ -964,11 +967,7 @@ fn doctor_lists_record_but_no_host() {
     lab.host("deadlab", &[], os::TWO_LINES);
     kill_only_host(&mut lab);
     let out = lab.cli(&["doctor"]);
-    let combined = format!(
-        "{} {}",
-        text(&out),
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let combined = format!("{} {}", text(&out), String::from_utf8_lossy(&out.stderr));
     assert!(
         combined.contains("deadlab"),
         "doctor lists the dead session: {combined}"

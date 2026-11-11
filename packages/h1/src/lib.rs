@@ -9,6 +9,8 @@ mod graphspec;
 mod hub;
 mod ipc;
 mod keys;
+mod observe;
+mod relations;
 mod session;
 mod signals;
 mod state;
@@ -102,6 +104,10 @@ enum Commands {
     Watch(WatchArgs),
     /// Emit or listen for signals between sessions.
     Signal(signals::SignalArgs),
+    /// Declare, list, remove and draw relations between sessions.
+    Relation(relations::RelationArgs),
+    /// Subscribe to the state changes of sessions.
+    Event(relations::EventArgs),
     /// Start a named agent lab.
     Spawn(commander::SpawnArgs),
     /// Record a lab checkpoint in the persistent ledger.
@@ -473,7 +479,12 @@ struct RenewCmdArgs {
 #[derive(Debug, Args)]
 struct RecoverCmdArgs {
     /// Session name given to `host --name` or `open --name`.
-    #[arg(long, short = 'n', value_name = "NAME", required_unless_present = "all")]
+    #[arg(
+        long,
+        short = 'n',
+        value_name = "NAME",
+        required_unless_present = "all"
+    )]
     name: Option<String>,
     /// Recover every session that has a record but no host.
     #[arg(long, conflicts_with = "name")]
@@ -631,6 +642,8 @@ pub fn execute(cli: Cli) -> Result<i32> {
         },
         Commands::Watch(args) => commands::watch(args),
         Commands::Signal(args) => signals::run(args),
+        Commands::Relation(args) => relations::run_relation(args),
+        Commands::Event(args) => relations::run_event(args),
         Commands::Spawn(args) => commander::spawn(args),
         Commands::Checkpoint(args) => commander::checkpoint(args),
         Commands::Decide(args) => commander::decide(args),
@@ -944,6 +957,7 @@ fn host(mut args: HostArgs) -> Result<i32> {
             )
         }),
     });
+    observe::start(&shared);
     let listener_thread = {
         let shared = shared.clone();
         thread::spawn(move || control::serve_socket(listener, shared))
@@ -1019,9 +1033,11 @@ fn host(mut args: HostArgs) -> Result<i32> {
 
     let code = record_exit(recorder, code)?;
     *shared.exit_code.lock().unwrap() = Some(code);
+    observe::finish(&shared, code);
     // Keep answering for a moment so that a `wait` or `status` can read the final screen and the exit code.
     thread::sleep(Duration::from_millis(300));
     stopped.store(true, Ordering::Release);
+    shared.hub.close();
     let _ = listener_thread.join();
     Ok(code)
 }

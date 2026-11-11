@@ -50,7 +50,7 @@ pub(crate) struct SignalListenArgs {
     #[command(flatten)]
     pub connection: SocketArgs,
     /// Only signals with this name. Repeatable; left out matches all names.
-    #[arg(long = "name", value_name = "N")]
+    #[arg(long = "signal", value_name = "N")]
     pub names: Vec<String>,
     /// Only signals with this type. Repeatable; left out matches all types.
     #[arg(long = "type", value_name = "T")]
@@ -156,63 +156,101 @@ fn listen(args: SignalListenArgs) -> Result<i32> {
         names: args.names.clone(),
         types: args.types.clone(),
     };
-    let stream = ipc::connect(&socket)
-        .with_context(|| format!("failed to connect to {}", socket.display()))?;
+    stream_many(vec![socket], request, args.count, args.timeout_ms, true)?;
+    Ok(0)
+}
+
+/// Opens a streaming operation on every socket, prints each frame as one JSON line (merged, in
+/// arrival order) until `count` frames were printed, `timeout_ms` passed, or every stream ended.
+/// `strict`: a socket that does not answer is an error (one named target); otherwise it is skipped
+/// (`--all`, where sessions may disappear while the command starts).
+pub(crate) fn stream_many(
+    sockets: Vec<PathBuf>,
+    request: crate::wire::Request,
+    count: Option<usize>,
+    timeout_ms: Option<u64>,
+    strict: bool,
+) -> Result<()> {
     let mut message = serde_json::to_vec(&serde_json::to_value(request)?)?;
     message.push(b'\n');
-    (&stream).write_all(&message)?;
-    (&stream).flush()?;
-    // Reader thread: the local-socket stream has no portable read timeout, so
-    // lines arrive over a channel and the deadline is enforced here.
-    let (sender, receiver) = mpsc::channel::<String>();
-    thread::spawn(move || {
-        let mut reader = BufReader::new(&stream);
-        loop {
-            let mut line = String::new();
-            match reader.read_line(&mut line) {
-                Ok(0) | Err(_) => break,
-                Ok(_) => {
-                    if sender.send(line).is_err() {
-                        break;
+    // One reader thread per stream: the local-socket stream has no portable read timeout, so lines
+    // arrive over a channel and the deadline is enforced here. `None` marks a stream that ended.
+    let (sender, receiver) = mpsc::channel::<Option<String>>();
+    let mut open = 0usize;
+    for socket in sockets {
+        let connected = ipc::connect(&socket)
+            .with_context(|| format!("failed to connect to {}", socket.display()))
+            .and_then(|stream| {
+                (&stream).write_all(&message)?;
+                (&stream).flush()?;
+                Ok(stream)
+            });
+        let stream = match connected {
+            Ok(stream) => stream,
+            Err(error) if strict => return Err(error),
+            Err(_) => continue,
+        };
+        open += 1;
+        let sender = sender.clone();
+        thread::spawn(move || {
+            let mut reader = BufReader::new(&stream);
+            let mut handshake = String::new();
+            let accepted = matches!(reader.read_line(&mut handshake), Ok(n) if n > 0)
+                && serde_json::from_str::<Value>(handshake.trim())
+                    .ok()
+                    .and_then(|value| value.get("ok").and_then(Value::as_bool))
+                    == Some(true);
+            if accepted {
+                loop {
+                    let mut line = String::new();
+                    match reader.read_line(&mut line) {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => {
+                            if sender.send(Some(line)).is_err() {
+                                return;
+                            }
+                        }
                     }
                 }
             }
-        }
-    });
-    let deadline = args
-        .timeout_ms
-        .map(|ms| Instant::now() + Duration::from_millis(ms));
-    let next_line =
-        |receiver: &mpsc::Receiver<String>, deadline: Option<Instant>| -> Option<String> {
-            match deadline {
-                Some(deadline) => {
-                    let remaining = deadline.checked_duration_since(Instant::now())?;
-                    receiver.recv_timeout(remaining).ok()
-                }
-                None => receiver.recv().ok(),
-            }
-        };
-    // First line is the stream handshake, never a frame: do not print it.
-    let first = next_line(&receiver, deadline)
-        .ok_or_else(|| anyhow!("host closed the stream before answering"))?;
-    let handshake: Value = serde_json::from_str(first.trim()).context("invalid host response")?;
-    if handshake.get("ok").and_then(Value::as_bool) != Some(true) {
-        let message = handshake
-            .get("error")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown error");
-        return Err(anyhow!("host rejected request: {message}"));
+            let _ = sender.send(None);
+        });
     }
+    drop(sender);
+    if open == 0 {
+        return if strict {
+            Err(anyhow!("no stream could be opened"))
+        } else {
+            Ok(())
+        };
+    }
+    let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let mut printed = 0usize;
-    while args.count.is_none_or(|count| printed < count) {
-        let Some(line) = next_line(&receiver, deadline) else {
-            break;
+    while open > 0 && count.is_none_or(|count| printed < count) {
+        let item = match deadline {
+            Some(deadline) => {
+                let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                    break;
+                };
+                match receiver.recv_timeout(remaining) {
+                    Ok(item) => item,
+                    Err(_) => break,
+                }
+            }
+            None => match receiver.recv() {
+                Ok(item) => item,
+                Err(_) => break,
+            },
+        };
+        let Some(line) = item else {
+            open -= 1;
+            continue;
         };
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
         }
-        if serde_json::from_str::<Value>(trimmed)
+        let ended = serde_json::from_str::<Value>(trimmed)
             .ok()
             .and_then(|value| {
                 value
@@ -221,15 +259,15 @@ fn listen(args: SignalListenArgs) -> Result<i32> {
                     .map(str::to_owned)
             })
             .as_deref()
-            == Some("end")
-        {
-            break;
+            == Some("end");
+        if ended {
+            continue;
         }
         println!("{trimmed}");
         io::stdout().flush()?;
         printed += 1;
     }
-    Ok(0)
+    Ok(())
 }
 
 #[cfg(test)]

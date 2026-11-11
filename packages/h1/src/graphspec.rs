@@ -131,9 +131,19 @@ impl Overlay {
         let up = manifest
             .nodes
             .iter()
-            .filter(|node| self.by_name.get(&node.name).is_some_and(|info| info.run == manifest.run))
+            .filter(|node| {
+                self.by_name
+                    .get(&node.name)
+                    .is_some_and(|info| info.run == manifest.run)
+            })
             .count();
-        Some(format!("team {} · run {} · {}/{} up", manifest.team, manifest.run, up, manifest.nodes.len()))
+        Some(format!(
+            "team {} · run {} · {}/{} up",
+            manifest.team,
+            manifest.run,
+            up,
+            manifest.nodes.len()
+        ))
     }
 }
 
@@ -162,7 +172,11 @@ pub fn load_all_from(dir: &Path) -> Vec<Manifest> {
         .filter_map(|text| serde_json::from_str::<Manifest>(&text).ok())
         .filter(|manifest| manifest.version == VERSION)
         .collect();
-    manifests.sort_by(|a, b| a.created_ms.cmp(&b.created_ms).then_with(|| a.run.cmp(&b.run)));
+    manifests.sort_by(|a, b| {
+        a.created_ms
+            .cmp(&b.created_ms)
+            .then_with(|| a.run.cmp(&b.run))
+    });
     manifests
 }
 
@@ -174,7 +188,12 @@ pub fn overlay(labs_live: &[&str], manifests: &[Manifest]) -> Overlay {
     let mut planned_seen: HashSet<String> = HashSet::new();
     let mut edge_seen: HashSet<(String, String, EdgeKind)> = HashSet::new();
     for manifest in manifests {
-        if manifest.version != VERSION || !manifest.nodes.iter().any(|node| live.contains(node.name.as_str())) {
+        if manifest.version != VERSION
+            || !manifest
+                .nodes
+                .iter()
+                .any(|node| live.contains(node.name.as_str()))
+        {
             continue;
         }
         out.active.push(manifest.clone());
@@ -241,10 +260,16 @@ mod tests {
     fn overlay_maps_live_plans_rest_and_drops_stale() {
         let manifest = fixture();
         let over = overlay(&["cmdr"], std::slice::from_ref(&manifest));
-        assert_eq!(over.get("cmdr").unwrap().node.model, "anthropic/claude-sonnet-5-5");
+        assert_eq!(
+            over.get("cmdr").unwrap().node.model,
+            "anthropic/claude-sonnet-5-5"
+        );
         assert_eq!(over.planned.len(), 1);
         assert_eq!(over.planned[0].node.name, "builder");
-        assert_eq!(over.header().as_deref(), Some("team alpha · run run-1 · 1/2 up"));
+        assert_eq!(
+            over.header().as_deref(),
+            Some("team alpha · run run-1 · 1/2 up")
+        );
         let stale = overlay(&["someone-else"], &[manifest]);
         assert!(stale.by_name.is_empty() && stale.planned.is_empty() && stale.active.is_empty());
     }

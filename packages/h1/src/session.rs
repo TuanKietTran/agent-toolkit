@@ -295,9 +295,7 @@ mod tests {
                     None,
                     "C:\\Temp".into()
                 ),
-                PathBuf::from("C:\\Local")
-                    .join("h1")
-                    .join("sessions")
+                PathBuf::from("C:\\Local").join("h1").join("sessions")
             );
         }
     }
@@ -327,12 +325,22 @@ mod tests {
     fn model_comes_from_the_record_or_the_command_line() {
         let mut item = entry("m", 1);
         assert_eq!(item.model_label(), None);
-        item.command = ["pi", "--provider", "muse", "--model", "muse"].map(String::from).to_vec();
+        item.command = ["pi", "--provider", "muse", "--model", "muse"]
+            .map(String::from)
+            .to_vec();
         assert_eq!(item.model_label().as_deref(), Some("muse/muse"));
-        item.command = ["pi", "--model", "opencode-cli/opencode/gpt-6-luna"].map(String::from).to_vec();
-        assert_eq!(item.model_label().as_deref(), Some("opencode-cli/opencode/gpt-6-luna"));
+        item.command = ["pi", "--model", "opencode-cli/opencode/gpt-6-luna"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(
+            item.model_label().as_deref(),
+            Some("opencode-cli/opencode/gpt-6-luna")
+        );
         item.model = Some("claude-cli/claude-haiku-5-5".into());
-        assert_eq!(item.model_label().as_deref(), Some("claude-cli/claude-haiku-5-5"));
+        assert_eq!(
+            item.model_label().as_deref(),
+            Some("claude-cli/claude-haiku-5-5")
+        );
     }
 
     #[test]

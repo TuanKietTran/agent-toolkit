@@ -437,9 +437,7 @@ pub(crate) fn merged_rules() -> &'static [HarnessRule] {
     RULES.get_or_init(|| {
         let mut rules = builtin_rules();
         if let Some(home) = env::var_os("HOME") {
-            let path = PathBuf::from(home)
-                .join(".h1")
-                .join("harnesses.toml");
+            let path = PathBuf::from(home).join(".h1").join("harnesses.toml");
             if let Ok(text) = fs::read_to_string(&path) {
                 for user in parse_harness_rules(&text) {
                     match rules.iter_mut().find(|rule| rule.kind == user.kind) {
@@ -526,7 +524,9 @@ pub(crate) fn detect_kind_with(command: &str, rules: &[HarnessRule]) -> Option<S
                 }
             }
         }
-        if let Some(score) = score && best.as_ref().is_none_or(|(top, _)| score > *top) {
+        if let Some(score) = score
+            && best.as_ref().is_none_or(|(top, _)| score > *top)
+        {
             best = Some((score, rule.kind.clone()));
         }
     }
@@ -589,7 +589,9 @@ impl HostSpec {
     /// Where the host's control socket may be. Older hosts resolved `-s NAME` under the temp dir.
     pub fn socket_candidates(&self) -> Vec<PathBuf> {
         let mut found = Vec::new();
-        if let Some(name) = &self.name && let Ok(path) = session::socket_for(name) {
+        if let Some(name) = &self.name
+            && let Ok(path) = session::socket_for(name)
+        {
             found.push(path);
         }
         if let Some(socket) = &self.socket {
@@ -788,7 +790,9 @@ pub(crate) fn tail_of_lines(lines: &[&str]) -> Tail {
                 .filter(|m| !m.starts_with('<'))
                 .map(str::to_owned);
         }
-        if tail.tokens.is_none() && let Some(usage) = message.get("usage") {
+        if tail.tokens.is_none()
+            && let Some(usage) = message.get("usage")
+        {
             let count = |key: &str| usage.get(key).and_then(Value::as_u64).unwrap_or(0);
             let total = count("input_tokens")
                 + count("cache_read_input_tokens")
@@ -1565,10 +1569,7 @@ mod tests {
             program_of("/opt/homebrew/bin/opencode run -m x"),
             Some(Program::Opencode)
         );
-        assert_eq!(
-            program_of("h1 host --name x -- pi"),
-            Some(Program::LabHost)
-        );
+        assert_eq!(program_of("h1 host --name x -- pi"), Some(Program::LabHost));
         assert_eq!(program_of("h1 list"), None);
         assert_eq!(program_of("python3 pi.py"), None);
         assert_eq!(program_of("/Applications/Zed.app/Contents/MacOS/zed"), None);

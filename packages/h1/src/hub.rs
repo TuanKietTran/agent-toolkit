@@ -9,7 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-use crate::state::State;
 use crate::wire::{Edge, Event, EventKind, Frame, RelationKind, Signal};
 
 pub(crate) fn now_ms() -> u64 {
@@ -44,7 +43,6 @@ struct Inner {
     signal_subs: Vec<SignalSub>,
     event_subs: Vec<EventSub>,
     edges: HashSet<Edge>,
-    last_state: Option<State>,
     last_event: Option<Event>,
     closed: bool,
 }
@@ -142,19 +140,6 @@ impl Hub {
     /// The most recent event, for `event_subscribe` replay.
     pub(crate) fn last_event(&self) -> Option<Event> {
         self.inner.lock().unwrap().last_event.clone()
-    }
-
-    /// Record the latest classified state; returns the previous one so the caller
-    /// emits exactly one event per transition.
-    pub(crate) fn swap_state(&self, state: State) -> Option<State> {
-        let mut inner = self.inner.lock().unwrap();
-        let previous = inner.last_state;
-        inner.last_state = Some(state);
-        previous
-    }
-
-    pub(crate) fn last_state(&self) -> Option<State> {
-        self.inner.lock().unwrap().last_state
     }
 
     // ---- relations ----
