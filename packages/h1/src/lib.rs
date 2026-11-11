@@ -1,3 +1,4 @@
+mod agent_start;
 mod agents;
 mod commander;
 mod commands;
@@ -82,6 +83,14 @@ enum Commands {
     Socket(SocketAliasArgs),
     /// Start a hosted program in its own visible window and name the session (spec 007).
     Open(OpenArgs),
+    /// Start Claude Code hosted in an h1 session, attached to this terminal.
+    Claude(AgentStartArgs),
+    /// Start Pi hosted in an h1 session, attached to this terminal.
+    Pi(AgentStartArgs),
+    /// Start opencode hosted in an h1 session, attached to this terminal.
+    Opencode(AgentStartArgs),
+    /// Start Codex hosted in an h1 session, attached to this terminal.
+    Codex(AgentStartArgs),
     /// List the named sessions that are running.
     List(ListArgs),
     /// Show whether a session is working, asking or stalled, and its size and age.
@@ -615,6 +624,25 @@ struct OpenArgs {
     command: Vec<OsString>,
 }
 
+/// Shared arguments for the builtin agent start commands (`claude`, `pi`,
+/// `opencode`, `codex`): which session name, detached or attached, where the
+/// program starts, and passthrough arguments for the program itself.
+#[derive(Debug, Args)]
+struct AgentStartArgs {
+    /// Session name: `-n NAME` reaches it afterwards. Defaults to the agent kind (`claude`, `pi`, ...).
+    #[arg(long, short = 'n', value_name = "NAME")]
+    name: Option<String>,
+    /// Do not open a window: host in the background (control it with send, ask, screen, key, wait).
+    #[arg(long)]
+    detached: bool,
+    /// Directory the program starts in. Defaults to this process's current directory.
+    #[arg(long, value_name = "DIR")]
+    cwd: Option<PathBuf>,
+    /// Arguments for the agent program. Place these after `--`.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<OsString>,
+}
+
 pub fn execute(cli: Cli) -> Result<i32> {
     match cli.command {
         Commands::Run(args) => run(args),
@@ -635,6 +663,10 @@ pub fn execute(cli: Cli) -> Result<i32> {
         Commands::Foreground(args) => foreground(args),
         Commands::Socket(args) => print_default_socket(args),
         Commands::Open(args) => commands::open(args),
+        Commands::Claude(args) => agent_start::run("claude", args),
+        Commands::Pi(args) => agent_start::run("pi", args),
+        Commands::Opencode(args) => agent_start::run("opencode", args),
+        Commands::Codex(args) => agent_start::run("codex", args),
         Commands::List(args) => commands::list(args),
         Commands::Status(args) => match args.lab_name {
             Some(name) => commander::status(&name),
