@@ -29,8 +29,21 @@ graphloop down examples/demo.yah
 - `src/` — the crate: `lexer.rs` / `parser.rs` (tokens, recursive-descent parser), `resolve.rs` / `load.rs` (substitution, references, pipeline glue), `schema.rs` (strict validation), `pick.rs` (system-one resolution), `plan.rs` (team -> open steps, edges, manifest), `cli.rs` (`check|plan|graph|up|down|runs|trace`), plus the shared-contract modules `ast.rs`, `spec.rs`, `diag.rs`, `manifest.rs`.
 - `docs/graphspec.md` — the Graphspec specification.
 - `editors/` — TextMate grammar (`yah.tmLanguage.json`), `language-configuration.json`, install notes (`README.md`), and the dependency-free validator `check.mjs`.
-- `examples/` — `team.yah` (commander -> builder), `research-team.yah` (planner with researcher / builder / reviewer), `demo.yah` (harmless detached `cat` labs), `renewable-team.yah` (builder with `brief` / `resume_log` / `auto_rearm` renew fields).
+- `examples/` — `team.yah` (commander -> builder), `research-team.yah` (planner with researcher / builder / reviewer), `demo.yah` (harmless detached `cat` labs), `renewable-team.yah` (builder with `brief` / `resume_log` / `auto_rearm` renew fields), `vault.yah` (a dotenv vault referenced from an env map), `preview.yah` (lead -> worker pair that exercises every field `graphloop preview` reports).
 - `tests/fixtures/canonical.yah` — the canonical example the grammar checks run against.
+
+## Preview
+
+`graphloop preview examples/preview.yah` prints, as JSON, what `graphloop up` would open for a team — without opening anything: no sessions are started, no files are written, and no run manifest is created. Vault and environment values are never fetched, so a preview is safe to run anywhere, including in tests.
+
+The document is versioned and stable enough to golden-test:
+
+- Top level: `version`, `source`, `team`, `root`, `nodes`, `edges`, `warnings`.
+- Each node: `name`, `harness`, `role`, `parent`, the resolved `model`, the `open_command` argv, `cwd`, and `env`.
+- `env` entries carry only `key` and `masked`: `masked` is true when the value is late-bound (`${vault.*}` or `${env.*}`). Env values never appear in preview output at all.
+- Non-fatal findings — for example a vault whose provider is not ready — are collected in `warnings` instead of failing the preview; hard errors fail exactly as `check` does.
+
+The `h1` console can render the same preview as a planned graph (its `--preview` mode), so the JSON and the picture never drift.
 
 ## Secrets
 
