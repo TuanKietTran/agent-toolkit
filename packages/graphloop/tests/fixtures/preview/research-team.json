@@ -5,19 +5,106 @@
   "root": "planner",
   "prefix": null,
   "nodes": [
-    { "name": "planner", "harness": "planner", "role": "planner", "parent": null, "requested_model": "sonnet", "model": "anthropic/claude-sonnet-5-5", "model_label": "sonnet", "model_status": "pinned", "tools": ["fs"], "cwd": null, "env": [], "open_command": "h1 open -n planner --role planner --model anthropic/claude-sonnet-5-5 -C 140 -R 40 -- pi --provider claude-cli --model claude-sonnet-5-5 --no-session" },
-    { "name": "researcher", "harness": "researcher", "role": "researcher", "parent": "planner", "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": ["fs"], "cwd": "./work", "env": [], "open_command": "h1 open -n researcher --role researcher --parent planner --model system-one --cwd ./work -- pi --provider claude-cli --model '${harnesses.researcher.model_id}' --no-session" },
-    { "name": "builder", "harness": "builder", "role": "builder", "parent": "planner", "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": ["fs"], "cwd": "./work", "env": [], "open_command": "h1 open -n builder --role builder --parent planner --model system-one --cwd ./work -- pi --provider claude-cli --model '${harnesses.builder.model_id}' --no-session" },
-    { "name": "reviewer", "harness": "reviewer", "role": "reviewer", "parent": "planner", "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": ["fs"], "cwd": "./work", "env": [], "open_command": "h1 open -n reviewer --role reviewer --parent planner --model system-one --cwd ./work -- pi --provider claude-cli --model '${harnesses.reviewer.model_id}' --no-session" }
+    {
+      "name": "planner",
+      "harness": "planner",
+      "role": "planner",
+      "parent": null,
+      "requested_model": "sonnet",
+      "model": "anthropic/claude-sonnet-5-5",
+      "model_label": "sonnet",
+      "model_status": "pinned",
+      "tools": [
+        "fs"
+      ],
+      "cwd": null,
+      "env": [],
+      "open_command": "h1 open -n planner --role planner --model anthropic/claude-sonnet-5-5 -C 140 -R 40 -- pi --provider claude-cli --model claude-sonnet-5-5 --no-session"
+    },
+    {
+      "name": "researcher",
+      "harness": "researcher",
+      "role": "researcher",
+      "parent": "planner",
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [
+        "fs"
+      ],
+      "cwd": "./work",
+      "env": [],
+      "open_command": "h1 open -n researcher --role researcher --parent planner --model system-one --cwd ./work -- pi --provider claude-cli --model system-one --no-session"
+    },
+    {
+      "name": "builder",
+      "harness": "builder",
+      "role": "builder",
+      "parent": "planner",
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [
+        "fs"
+      ],
+      "cwd": "./work",
+      "env": [],
+      "open_command": "h1 open -n builder --role builder --parent planner --model system-one --cwd ./work -- pi --provider claude-cli --model system-one --no-session"
+    },
+    {
+      "name": "reviewer",
+      "harness": "reviewer",
+      "role": "reviewer",
+      "parent": "planner",
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [
+        "fs"
+      ],
+      "cwd": "./work",
+      "env": [],
+      "open_command": "h1 open -n reviewer --role reviewer --parent planner --model system-one --cwd ./work -- pi --provider claude-cli --model system-one --no-session"
+    }
   ],
   "edges": [
-    { "from": "planner", "to": "researcher", "kind": "parent" },
-    { "from": "planner", "to": "builder", "kind": "parent" },
-    { "from": "planner", "to": "reviewer", "kind": "parent" }
+    {
+      "from": "planner",
+      "to": "researcher",
+      "kind": "parent"
+    },
+    {
+      "from": "planner",
+      "to": "builder",
+      "kind": "parent"
+    },
+    {
+      "from": "planner",
+      "to": "reviewer",
+      "kind": "parent"
+    }
   ],
   "warnings": [
-    { "severity": "warn", "code": "missing_cwd", "node": "builder", "message": "cwd \"./work\" does not exist" },
-    { "severity": "warn", "code": "missing_cwd", "node": "researcher", "message": "cwd \"./work\" does not exist" },
-    { "severity": "warn", "code": "missing_cwd", "node": "reviewer", "message": "cwd \"./work\" does not exist" }
+    {
+      "severity": "warn",
+      "code": "missing_cwd",
+      "node": "builder",
+      "message": "cwd \"./work\" does not exist"
+    },
+    {
+      "severity": "warn",
+      "code": "missing_cwd",
+      "node": "researcher",
+      "message": "cwd \"./work\" does not exist"
+    },
+    {
+      "severity": "warn",
+      "code": "missing_cwd",
+      "node": "reviewer",
+      "message": "cwd \"./work\" does not exist"
+    }
   ]
 }

@@ -5,8 +5,11 @@
 //! and the as-written harness blocks (NOT from `plan --json`: plan resolves
 //! models through system-one, preview never calls the picker, so a harness
 //! with `model = "system-one"` is `pending` with `model: null` here).
-//! Pending-node `open_command`s assume the builder renders `--model
-//! system-one`; warning `message` wording is likewise the builder's.
+//! Pending-node `open_command`s render `--model system-one`: the
+//! builder substitutes `${harnesses.<name>.model_id}` with the requested
+//! model. Warning `message` wording is likewise the builder's. Goldens
+//! were hand-derived, then regenerated against the merged builder and
+//! the diff reviewed: only that substitution differed semantically.
 //!
 //! Two tests:
 //! - `golden_fixtures_parse_and_satisfy_contract_invariants` always runs:
@@ -14,11 +17,11 @@
 //!   the contract invariants (version, source, model-status coherence,
 //!   secret-literal masking, warning sort order and severity mapping).
 //! - `preview_cli_matches_goldens_when_available` is gated on the preview
-//!   subcommand existing (pv-core #3/#4, not yet landed in this worktree):
-//!   if the binary rejects `preview`, it prints `PREVIEW_SKIPPED` and
-//!   passes, the same gate pattern as `H1_BIN` in `vault_up_real_h1.rs`.
-//!   Once the CLI lands: `UPDATE_GOLDEN=1 cargo test --test preview_golden`
-//!   regenerates the fixtures; review that diff before committing it.
+//!   subcommand existing: if the binary rejects `preview`, it prints
+//!   `PREVIEW_SKIPPED` and passes, the same gate pattern as `H1_BIN` in
+//!   `vault_up_real_h1.rs`. `UPDATE_GOLDEN=1 cargo test --test
+//!   preview_golden` regenerates the fixtures; review that diff before
+//!   committing it.
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;

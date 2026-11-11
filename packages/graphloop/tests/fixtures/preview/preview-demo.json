@@ -5,8 +5,41 @@
   "root": "demo",
   "prefix": null,
   "nodes": [
-    { "name": "demo", "harness": "demo", "role": "lead", "parent": null, "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": [], "cwd": "./preview-demo-work", "env": [ { "key": "NOTE", "value": "", "source": "literal", "masked": false } ], "open_command": "h1 open -n demo --role lead --model system-one --cwd ./preview-demo-work --env NOTE= -- cat" }
+    {
+      "name": "demo",
+      "harness": "demo",
+      "role": "lead",
+      "parent": null,
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": "./preview-demo-work",
+      "env": [
+        {
+          "key": "NOTE",
+          "value": "",
+          "source": "literal",
+          "masked": false
+        }
+      ],
+      "open_command": "h1 open -n demo --role lead --model system-one --cwd ./preview-demo-work --env NOTE= -- cat"
+    }
   ],
   "edges": [],
-  "warnings": [ { "severity": "warn", "code": "empty_variable", "node": null, "message": "variable \"note\" is empty" }, { "severity": "warn", "code": "missing_cwd", "node": "demo", "message": "cwd \"./preview-demo-work\" does not exist" } ]
+  "warnings": [
+    {
+      "severity": "warn",
+      "code": "empty_variable",
+      "node": null,
+      "message": "variable \"note\" is empty"
+    },
+    {
+      "severity": "warn",
+      "code": "missing_cwd",
+      "node": "demo",
+      "message": "cwd \"./preview-demo-work\" does not exist"
+    }
+  ]
 }

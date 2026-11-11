@@ -18,8 +18,8 @@
 //!   before and after the run.
 //!
 //! Gated like `preview_cli_matches_goldens_when_available`: if this
-//! binary has no `preview` subcommand yet (pv-core not landed), the test
-//! prints `PREVIEW_SKIPPED` and passes.
+//! binary has no `preview` subcommand, the test prints
+//! `PREVIEW_SKIPPED` and passes.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

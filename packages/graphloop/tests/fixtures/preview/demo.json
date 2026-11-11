@@ -5,13 +5,60 @@
   "root": "alpha",
   "prefix": null,
   "nodes": [
-    { "name": "alpha", "harness": "alpha", "role": "demo", "parent": null, "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": [], "cwd": null, "env": [], "open_command": "h1 open -n alpha --role demo --model system-one --detached -- cat" },
-    { "name": "beta", "harness": "beta", "role": "demo", "parent": "alpha", "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": [], "cwd": null, "env": [], "open_command": "h1 open -n beta --role demo --parent alpha --model system-one --detached -- cat" },
-    { "name": "gamma", "harness": "gamma", "role": "demo", "parent": "alpha", "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": [], "cwd": null, "env": [], "open_command": "h1 open -n gamma --role demo --parent alpha --model system-one --detached -- cat" }
+    {
+      "name": "alpha",
+      "harness": "alpha",
+      "role": "demo",
+      "parent": null,
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": null,
+      "env": [],
+      "open_command": "h1 open -n alpha --role demo --model system-one --detached -- cat"
+    },
+    {
+      "name": "beta",
+      "harness": "beta",
+      "role": "demo",
+      "parent": "alpha",
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": null,
+      "env": [],
+      "open_command": "h1 open -n beta --role demo --parent alpha --model system-one --detached -- cat"
+    },
+    {
+      "name": "gamma",
+      "harness": "gamma",
+      "role": "demo",
+      "parent": "alpha",
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": null,
+      "env": [],
+      "open_command": "h1 open -n gamma --role demo --parent alpha --model system-one --detached -- cat"
+    }
   ],
   "edges": [
-    { "from": "alpha", "to": "beta", "kind": "parent" },
-    { "from": "alpha", "to": "gamma", "kind": "parent" }
+    {
+      "from": "alpha",
+      "to": "beta",
+      "kind": "parent"
+    },
+    {
+      "from": "alpha",
+      "to": "gamma",
+      "kind": "parent"
+    }
   ],
   "warnings": []
 }

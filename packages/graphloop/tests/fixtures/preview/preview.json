@@ -5,9 +5,68 @@
   "root": "lead",
   "prefix": null,
   "nodes": [
-    { "name": "lead", "harness": "lead", "role": "lead", "parent": null, "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": [], "cwd": null, "env": [ { "key": "MODE", "value": "preview", "source": "literal", "masked": false }, { "key": "PREVIEW_TOKEN", "value": "${vault.local.PREVIEW_TOKEN}", "source": "vault", "masked": false } ], "open_command": "h1 open -n lead --role lead --model system-one -C 120 -R 36 --env MODE=preview --env 'PREVIEW_TOKEN=${vault.local.PREVIEW_TOKEN}' -- cat" },
-    { "name": "worker", "harness": "worker", "role": "worker", "parent": "lead", "requested_model": "system-one", "model": null, "model_label": null, "model_status": "pending", "tools": [], "cwd": "./work", "env": [ { "key": "GREETING", "value": "${env.PREVIEW_GREETING}", "source": "env", "masked": false } ], "open_command": "h1 open -n worker --role worker --parent lead --model system-one --cwd ./work --env 'GREETING=${env.PREVIEW_GREETING}' --detached -- cat" }
+    {
+      "name": "lead",
+      "harness": "lead",
+      "role": "lead",
+      "parent": null,
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": null,
+      "env": [
+        {
+          "key": "MODE",
+          "value": "preview",
+          "source": "literal",
+          "masked": false
+        },
+        {
+          "key": "PREVIEW_TOKEN",
+          "value": "${vault.local.PREVIEW_TOKEN}",
+          "source": "vault",
+          "masked": false
+        }
+      ],
+      "open_command": "h1 open -n lead --role lead --model system-one -C 120 -R 36 --env MODE=preview --env 'PREVIEW_TOKEN=${vault.local.PREVIEW_TOKEN}' -- cat"
+    },
+    {
+      "name": "worker",
+      "harness": "worker",
+      "role": "worker",
+      "parent": "lead",
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": "./work",
+      "env": [
+        {
+          "key": "GREETING",
+          "value": "${env.PREVIEW_GREETING}",
+          "source": "env",
+          "masked": false
+        }
+      ],
+      "open_command": "h1 open -n worker --role worker --parent lead --model system-one --cwd ./work --env 'GREETING=${env.PREVIEW_GREETING}' --detached -- cat"
+    }
   ],
-  "edges": [ { "from": "lead", "to": "worker", "kind": "parent" } ],
-  "warnings": [ { "severity": "warn", "code": "missing_cwd", "node": "worker", "message": "cwd \"./work\" does not exist" } ]
+  "edges": [
+    {
+      "from": "lead",
+      "to": "worker",
+      "kind": "parent"
+    }
+  ],
+  "warnings": [
+    {
+      "severity": "warn",
+      "code": "missing_cwd",
+      "node": "worker",
+      "message": "cwd \"./work\" does not exist"
+    }
+  ]
 }
