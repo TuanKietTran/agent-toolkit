@@ -1,0 +1,11 @@
+=== check ===
+ok: 2 harnesses, 1 teams
+=== plan ===
+# harness producer: anthropic/claude-haiku-5-5 (via system-one R3: validator fallback: strict constraints)
+h1 open -n producer --role producer --model anthropic/claude-haiku-5-5 --detached -- cat
+# harness consumer: anthropic/claude-haiku-5-5 (via system-one R3: validator fallback: strict constraints)
+h1 open -n consumer --role consumer --parent producer --model anthropic/claude-haiku-5-5 --detached -- cat
+=== graph ===
+team signals (root producer)
+producer  [producer]  anthropic/claude-haiku-5-5  (system-one R3)
+└─▶ consumer  [consumer]  anthropic/claude-haiku-5-5  (system-one R3)
