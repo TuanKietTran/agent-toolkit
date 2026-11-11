@@ -5,7 +5,7 @@
 //! value, a list's items and a map's entries (as assignments). String parts are NOT recursed
 //! into: interpolations are leaves, handled by visitors overriding `visit_expr`.
 
-use crate::ast::{Assign, Block, Expr, ExprKind, Stmt};
+use crate::yah::ast::{Assign, Block, Expr, ExprKind, Stmt};
 
 pub trait Visitor {
     fn visit_block(&mut self, b: &mut Block) {

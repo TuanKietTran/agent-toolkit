@@ -1,8 +1,8 @@
 //! Recursive-descent parser.
 
-use crate::ast::{self, Expr, ExprKind, Span, StrPart};
-use crate::diag::{Diagnostic, Diagnostics};
-use crate::lexer::{self, Tok, Token};
+use crate::yah::ast::{self, Expr, ExprKind, Span, StrPart};
+use crate::yah::diag::{Diagnostic, Diagnostics};
+use crate::yah::lexer::{self, Tok, Token};
 
 const HEADER_DETAIL: &str = "The first non-comment line of a .yah file must be \"yah 1\".";
 
@@ -573,7 +573,7 @@ pub fn parse(file: &str, src: &str) -> Result<ast::File, Diagnostics> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::{Stmt, StrPart};
+    use crate::yah::ast::{Stmt, StrPart};
 
     fn ok(src: &str) -> ast::File {
         parse("test.yah", src).unwrap()

@@ -16,9 +16,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, anyhow};
 
-use crate::ast::Span;
-use crate::diag::{Diagnostic, Diagnostics};
-use crate::spec::{Complexity, Harness, ModelRef, Spec};
+use crate::yah::ast::Span;
+use crate::yah::diag::{Diagnostic, Diagnostics};
+use crate::yah::spec::{Complexity, Harness, ModelRef, Spec};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CatalogEntry {
@@ -458,7 +458,7 @@ pub fn resolve_all(spec: &Spec, picker: &dyn Picker) -> Result<Vec<Resolved>, Di
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{Defaults, Model, Open, Provider, SystemOne as SystemOneSpec};
+    use crate::yah::spec::{Defaults, Model, Open, Provider, SystemOne as SystemOneSpec};
     use std::cell::{Cell, RefCell};
 
     fn decision(id: &str) -> PickDecision {

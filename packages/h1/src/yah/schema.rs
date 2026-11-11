@@ -2,10 +2,10 @@
 //!
 //! Input: the resolved `ast::File`. Output: `spec::Spec` or all collected `Diagnostics`.
 
-use crate::ast::{Expr, ExprKind, Span, Stmt, StrPart};
-use crate::diag::{suggest, Diagnostic, Diagnostics};
-use crate::refs::{self, Reference};
-use crate::spec::*;
+use crate::yah::ast::{Expr, ExprKind, Span, Stmt, StrPart};
+use crate::yah::diag::{suggest, Diagnostic, Diagnostics};
+use crate::yah::refs::{self, Reference};
+use crate::yah::spec::*;
 use std::collections::{HashMap, HashSet};
 
 pub const KNOWN_KINDS: &[&str] = &["variable", "defaults", "provider", "vault", "model", "system_one", "image", "api", "harness", "team", "workflow", "output"];
@@ -62,9 +62,9 @@ fn block_ctx(kind: &str, label: Option<&str>) -> String {
     }
 }
 
-fn collect_body<'a>(cx: &mut Cx, block: &'a crate::ast::Block, allowed: &[&str], nested_allowed: &[&str], ctx: &str) -> (HashMap<String, &'a crate::ast::Assign>, Vec<&'a crate::ast::Block>) {
-    let mut assigns: HashMap<String, &crate::ast::Assign> = HashMap::new();
-    let mut nested: Vec<&crate::ast::Block> = Vec::new();
+fn collect_body<'a>(cx: &mut Cx, block: &'a crate::yah::ast::Block, allowed: &[&str], nested_allowed: &[&str], ctx: &str) -> (HashMap<String, &'a crate::yah::ast::Assign>, Vec<&'a crate::yah::ast::Block>) {
+    let mut assigns: HashMap<String, &crate::yah::ast::Assign> = HashMap::new();
+    let mut nested: Vec<&crate::yah::ast::Block> = Vec::new();
     for stmt in &block.body {
         match stmt {
             Stmt::Assign(a) => {
@@ -86,7 +86,7 @@ fn collect_body<'a>(cx: &mut Cx, block: &'a crate::ast::Block, allowed: &[&str],
     (assigns, nested)
 }
 
-fn static_string(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<String> {
+fn static_string(cx: &mut Cx, a: &crate::yah::ast::Assign, ctx: &str) -> Option<String> {
     match &a.value.kind {
         ExprKind::Str(parts) => {
             let mut out = String::new();
@@ -164,7 +164,7 @@ fn expr_as_templ(cx: &mut Cx, e: &Expr, key: &str, harnesses: &[String], ctx: &s
     }
 }
 
-fn string_list(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<Vec<String>> {
+fn string_list(cx: &mut Cx, a: &crate::yah::ast::Assign, ctx: &str) -> Option<Vec<String>> {
     match &a.value.kind {
         ExprKind::List(items) => {
             let mut out = Vec::new();
@@ -190,7 +190,7 @@ fn string_list(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<Vec<Str
     }
 }
 
-fn templ_list(cx: &mut Cx, a: &crate::ast::Assign, harnesses: &[String], ctx: &str) -> Option<Vec<Templ>> {
+fn templ_list(cx: &mut Cx, a: &crate::yah::ast::Assign, harnesses: &[String], ctx: &str) -> Option<Vec<Templ>> {
     match &a.value.kind {
         ExprKind::List(items) => {
             let mut out = Vec::new();
@@ -201,14 +201,14 @@ fn templ_list(cx: &mut Cx, a: &crate::ast::Assign, harnesses: &[String], ctx: &s
     }
 }
 
-fn bool_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<bool> {
+fn bool_value(cx: &mut Cx, a: &crate::yah::ast::Assign, ctx: &str) -> Option<bool> {
     match &a.value.kind {
         ExprKind::Bool(b) => Some(*b),
         _ => { cx.type_err(a.value.span, &a.key, "a boolean", ctx); None }
     }
 }
 
-fn u16_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<u16> {
+fn u16_value(cx: &mut Cx, a: &crate::yah::ast::Assign, ctx: &str) -> Option<u16> {
     match &a.value.kind {
         ExprKind::Num(v) => {
             if v.fract() == 0.0 && *v >= 1.0 && *v <= 65535.0 { Some(*v as u16) } else { cx.invalid_value(a.value.span, &a.key, format!("Invalid value for attribute \"{}\": expected an integer between 1 and 65535, got {v}.", a.key), ctx); None }
@@ -217,7 +217,7 @@ fn u16_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<u16> {
     }
 }
 
-fn map_templ(cx: &mut Cx, a: &crate::ast::Assign, harnesses: &[String], ctx: &str) -> Option<Vec<(String, Templ)>> {
+fn map_templ(cx: &mut Cx, a: &crate::yah::ast::Assign, harnesses: &[String], ctx: &str) -> Option<Vec<(String, Templ)>> {
     match &a.value.kind {
         ExprKind::Map(entries) => {
             let mut out: Vec<(String, Templ)> = Vec::new();
@@ -266,7 +266,7 @@ fn json_value(cx: &mut Cx, e: &Expr, key: &str, ctx: &str) -> Option<serde_json:
     }
 }
 
-fn enum_value(cx: &mut Cx, a: &crate::ast::Assign, allowed: &[&str], ctx: &str) -> Option<String> {
+fn enum_value(cx: &mut Cx, a: &crate::yah::ast::Assign, allowed: &[&str], ctx: &str) -> Option<String> {
     let v = static_string(cx, a, ctx)?;
     if allowed.contains(&v.as_str()) { Some(v) } else {
         let list = allowed.iter().map(|s| format!("\\\"{s}\\\"")).collect::<Vec<_>>().join(", ");
@@ -275,7 +275,7 @@ fn enum_value(cx: &mut Cx, a: &crate::ast::Assign, allowed: &[&str], ctx: &str) 
     }
 }
 
-pub fn build(file: &crate::ast::File, scope: &crate::scope::Scope) -> Result<Spec, Diagnostics> {
+pub fn build(file: &crate::yah::ast::File, scope: &crate::yah::scope::Scope) -> Result<Spec, Diagnostics> {
     let mut cx = Cx { file: file.name.clone(), diags: Diagnostics::default(), vault_keys: scope.vault_keys.clone(), allow_vault: false };
     let mut spec = Spec { version: file.version, file: file.name.clone(), variables: Vec::new(), defaults: Defaults::default(), providers: Vec::new(), vaults: Vec::new(), models: Vec::new(), system_one: None, image: None, apis: Vec::new(), harnesses: Vec::new(), teams: Vec::new(), workflows: Vec::new(), outputs: Vec::new() };
     let mut seen_labelled: HashSet<(String, String)> = HashSet::new();
@@ -386,7 +386,7 @@ pub fn build(file: &crate::ast::File, scope: &crate::scope::Scope) -> Result<Spe
     cx.diags.into_result(spec)
 }
 
-fn parse_variable(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
+fn parse_variable(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("variable", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["type", "default", "description"], &[], &ctx);
@@ -406,7 +406,7 @@ fn parse_variable(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
     let description = assigns.get("description").and_then(|a| static_string(cx, a, &ctx));
     spec.variables.push(Variable { name: label, var_type, value, description, line: block.span.line });
 }
-fn parse_defaults(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option<(String, Span)> {
+fn parse_defaults(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) -> Option<(String, Span)> {
     let ctx = block_ctx("defaults", None);
     let (assigns, _) = collect_body(cx, block, &["model_policy", "sandbox"], &[], &ctx);
     let mut policy = None;
@@ -426,7 +426,7 @@ fn env_ref(path: &[String]) -> Option<String> {
     }
 }
 
-fn api_key_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<String> {
+fn api_key_value(cx: &mut Cx, a: &crate::yah::ast::Assign, ctx: &str) -> Option<String> {
     match &a.value.kind {
         ExprKind::Ref(path) if env_ref(path).is_some() => env_ref(path),
         ExprKind::Str(parts) if parts.len() == 1 => {
@@ -440,7 +440,7 @@ fn api_key_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<Strin
     }
 }
 
-fn parse_provider(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
+fn parse_provider(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("provider", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["type", "api_key", "base_url"], &[], &ctx);
@@ -455,7 +455,7 @@ fn parse_provider(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
 
 /// Vault label -> the KEYs of its `secrets` map, read straight from the AST so references can be
 /// checked before the vault block itself is validated.
-fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
+fn parse_vault(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("vault", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["provider", "path", "account", "command", "secrets"], &[], &ctx);
@@ -465,10 +465,10 @@ fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
     };
     let mut info = None;
     if let Some((p, span)) = &provider {
-        match crate::vault::provider(p) {
+        match crate::yah::vault::provider(p) {
             Some(i) => info = Some(i),
             None => {
-                let names: Vec<String> = crate::vault::provider_names().into_iter().map(str::to_owned).collect();
+                let names: Vec<String> = crate::yah::vault::provider_names().into_iter().map(str::to_owned).collect();
                 let hint = suggest(p, names.iter().map(String::as_str)).map(|s| format!("Did you mean \"{s}\"?"));
                 cx.err(*span, "Unknown vault provider", format!("The vault provider \"{p}\" is not supported. Available: {}.", names.join(", ")), Some(&ctx), hint);
             }
@@ -514,7 +514,7 @@ fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
     spec.vaults.push(Vault { name: label, provider: provider.map(|(p, _)| p).unwrap_or_default(), path, account, command: command.unwrap_or_default(), secrets, line: block.span.line });
 }
 
-fn parse_model(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option<(String, String, Span)> {
+fn parse_model(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) -> Option<(String, String, Span)> {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("model", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["provider", "id", "capabilities"], &[], &ctx);
@@ -528,7 +528,7 @@ fn parse_model(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Optio
     spec.models.push(Model { name: label, provider: provider.unwrap_or_default(), id, capabilities, line: block.span.line });
     provider_ref
 }
-fn parse_system_one(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option<(String, Span)> {
+fn parse_system_one(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) -> Option<(String, Span)> {
     let ctx = block_ctx("system_one", None);
     let (assigns, _) = collect_body(cx, block, &["fallback", "student"], &[], &ctx);
     let mut fallback_ref = None;
@@ -540,7 +540,7 @@ fn parse_system_one(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> 
     spec.system_one = Some(SystemOne { fallback: fallback.unwrap_or_default(), student, line: block.span.line });
     fallback_ref
 }
-fn parse_image(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option<(String, Span)> {
+fn parse_image(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) -> Option<(String, Span)> {
     let ctx = block_ctx("image", None);
     let (assigns, _) = collect_body(cx, block, &["provider", "generate", "vision"], &[], &ctx);
     let mut provider_ref = None;
@@ -553,7 +553,7 @@ fn parse_image(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Optio
     spec.image = Some(Image { provider: provider.unwrap_or_default(), generate, vision, line: block.span.line });
     provider_ref
 }
-fn parse_api(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses: &[String]) {
+fn parse_api(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec, harnesses: &[String]) {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("api", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["type", "command", "url", "env"], &[], &ctx);
@@ -590,7 +590,7 @@ fn parse_api(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses:
     cx.allow_vault = false;
     spec.apis.push(Api { name: label, api_type: if api_type.as_deref() == Some("http") { ApiType::Http } else { ApiType::Mcp }, command, url, env, line: block.span.line });
 }
-fn parse_open(cx: &mut Cx, block: &crate::ast::Block, harnesses: &[String], hctx: &str) -> Open {
+fn parse_open(cx: &mut Cx, block: &crate::yah::ast::Block, harnesses: &[String], hctx: &str) -> Open {
     let ctx = format!("{hctx} > open");
     let (assigns, _) = collect_body(cx, block, &["command", "cols", "rows", "cwd", "env", "title", "detached", "brief", "resume_log", "auto_rearm"], &[], &ctx);
     let mut command: Vec<Templ> = Vec::new();
@@ -616,7 +616,7 @@ fn parse_open(cx: &mut Cx, block: &crate::ast::Block, harnesses: &[String], hctx
     let auto_rearm = assigns.get("auto_rearm").and_then(|a| bool_value(cx, a, &ctx)).unwrap_or(false);
     Open { command, cols, rows, cwd, env, title, detached, brief, resume_log, auto_rearm }
 }
-fn parse_harness(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses: &[String]) -> Option<HarnessRefs> {
+fn parse_harness(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec, harnesses: &[String]) -> Option<HarnessRefs> {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("harness", Some(&label));
     let (assigns, nested) = collect_body(cx, block, &["kind", "role", "parent", "model", "tools", "complexity"], &["open"], &ctx);
@@ -663,7 +663,7 @@ fn parse_harness(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnes
     spec.harnesses.push(Harness { name: label.clone(), kind: kind.unwrap_or_default(), role: role.unwrap_or_default(), parent, model, tools, complexity, open, line: block.span.line });
     Some((label, parent_ref, model_raw, tools_refs, block.span))
 }
-fn parse_team(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option<TeamRefs> {
+fn parse_team(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) -> Option<TeamRefs> {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("team", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["root", "members", "graph"], &[], &ctx);
@@ -681,7 +681,7 @@ fn parse_team(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option
     spec.teams.push(Team { name: label.clone(), root: root.unwrap_or_default(), members, graph, line: block.span.line });
     root_ref.map(|r| (label, r, member_refs))
 }
-fn parse_workflow(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Option<(String, (String, Span))> {
+fn parse_workflow(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec) -> Option<(String, (String, Span))> {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("workflow", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["team", "steps"], &[], &ctx);
@@ -697,7 +697,7 @@ fn parse_workflow(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) -> Op
     spec.workflows.push(Workflow { name: label.clone(), team: team.unwrap_or_default(), steps, line: block.span.line });
     team_ref.map(|r| (label, r))
 }
-fn parse_output(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harnesses: &[String]) {
+fn parse_output(cx: &mut Cx, block: &crate::yah::ast::Block, spec: &mut Spec, harnesses: &[String]) {
     let label = block.label.clone().unwrap_or_default();
     let ctx = block_ctx("output", Some(&label));
     let (assigns, _) = collect_body(cx, block, &["value", "description"], &[], &ctx);
@@ -705,7 +705,7 @@ fn parse_output(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harness
         Some(a) => match &a.value.kind {
             ExprKind::Str(_) | ExprKind::Ref(_) => expr_as_templ(cx, &a.value, "value", harnesses, &ctx),
             _ => match json_value(cx, &a.value, "value", &ctx) {
-                Some(v) if v.is_number() || v.is_boolean() => Some(crate::spec::Templ::lit(&v.to_string())),
+                Some(v) if v.is_number() || v.is_boolean() => Some(crate::yah::spec::Templ::lit(&v.to_string())),
                 Some(_) => { cx.type_err(a.value.span, "value", "a string, number, bool or reference", &ctx); None }
                 None => None,
             },
@@ -713,6 +713,6 @@ fn parse_output(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec, harness
         None => { cx.missing(block.span, "value", &ctx); None }
     };
     let description = assigns.get("description").and_then(|a| static_string(cx, a, &ctx));
-    spec.outputs.push(crate::spec::Output { name: label.clone(), value: value.unwrap_or_default(), description, line: block.span.line });
+    spec.outputs.push(crate::yah::spec::Output { name: label.clone(), value: value.unwrap_or_default(), description, line: block.span.line });
 }
 // MARKER_PARSERS

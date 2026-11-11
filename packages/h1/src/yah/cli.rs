@@ -12,11 +12,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use clap::{Args, Parser, Subcommand};
 use serde_json::{Value, json};
 
-use crate::diag::{Diagnostics, Severity};
-use crate::manifest::{EdgeKind, Manifest, Node, PickInfo};
-use crate::pick::{PickDecision, PickRequest, Picker, Resolved, Via};
-use crate::plan::{OpenStep, Plan, PlanOpts};
-use crate::spec::{Harness, RenderCtx, Spec, Team, Vault};
+use crate::yah::diag::{Diagnostics, Severity};
+use crate::yah::manifest::{EdgeKind, Manifest, Node, PickInfo};
+use crate::yah::pick::{PickDecision, PickRequest, Picker, Resolved, Via};
+use crate::yah::plan::{OpenStep, Plan, PlanOpts};
+use crate::yah::spec::{Harness, RenderCtx, Spec, Team, Vault};
 
 pub fn check_line(harnesses: usize, teams: usize) -> String {
     format!("ok: {harnesses} harnesses, {teams} teams")
@@ -190,7 +190,7 @@ impl ProcessRunner {
     fn run_capture(&self, args: &[&str]) -> Result<String, String> {
         let mut cmd = std::process::Command::new(&self.bin);
         cmd.args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-        let out = crate::vault::spawn_retrying(&mut cmd).map_err(|e| format!("run {}: {e}", self.bin.display()))?.wait_with_output().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
+        let out = crate::yah::vault::spawn_retrying(&mut cmd).map_err(|e| format!("run {}: {e}", self.bin.display()))?.wait_with_output().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
         if out.status.success() { Ok(String::from_utf8_lossy(&out.stdout).into_owned()) } else { Err(format!("{} {} failed ({})", self.bin.display(), args.join(" "), out.status)) }
     }
 }
@@ -202,7 +202,7 @@ impl LabRunner for ProcessRunner {
         let file_err = file.try_clone().map_err(|e| format!("clone {}: {e}", log_path.display()))?;
         let mut cmd = std::process::Command::new(&self.bin);
         cmd.args(argv).envs(env.iter().cloned()).stdout(std::process::Stdio::from(file)).stderr(std::process::Stdio::from(file_err));
-        let status = crate::vault::spawn_retrying(&mut cmd).map_err(|e| format!("run {}: {e}", self.bin.display()))?.wait().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
+        let status = crate::yah::vault::spawn_retrying(&mut cmd).map_err(|e| format!("run {}: {e}", self.bin.display()))?.wait().map_err(|e| format!("run {}: {e}", self.bin.display()))?;
         if status.success() { Ok(()) } else { Err(format!("h1 open failed ({status}); see {}", log_path.display())) }
     }
     fn stop(&self, name: &str) -> Result<(), String> { self.run_capture(&["stop", "-n", name]).map(|_| ()) }
@@ -218,7 +218,7 @@ pub fn build_nodes(harnesses: &[Harness], plan: &Plan, resolved: &[Resolved]) ->
 }
 
 pub fn build_manifest(plan: &Plan, nodes: Vec<Node>, source: &str, run: &str, trace_dir: &Path, now_ms: u64) -> Manifest {
-    Manifest { version: crate::manifest::VERSION, run: run.to_string(), team: plan.team.clone(), source: source.to_string(), root: plan.root.clone(), created_ms: now_ms, trace_dir: Some(trace_dir.display().to_string()), nodes, edges: plan.edges.clone() }
+    Manifest { version: crate::yah::manifest::VERSION, run: run.to_string(), team: plan.team.clone(), source: source.to_string(), root: plan.root.clone(), created_ms: now_ms, trace_dir: Some(trace_dir.display().to_string()), nodes, edges: plan.edges.clone() }
 }
 
 pub fn write_manifest_to(manifest: &Manifest, dir: &Path) -> Result<PathBuf, String> {
@@ -244,7 +244,7 @@ pub struct UpRequest<'a> {
     pub run: String,
     pub now_ms: u64,
     pub env: &'a dyn Fn(&str) -> Option<String>,
-    /// `${vault.NAME.KEY}` lookup (see `crate::vault::Vaults`). Errors never contain a secret.
+    /// `${vault.NAME.KEY}` lookup (see `crate::yah::vault::Vaults`). Errors never contain a secret.
     pub vault: &'a dyn Fn(&str, &str) -> Result<String, String>,
 }
 
@@ -271,10 +271,10 @@ fn render_steps(req: &UpRequest) -> Result<(Vec<RenderedStep>, Vec<String>), Str
         let mut i = 0;
         while i < step.argv.len() {
             let t = &step.argv[i];
-            let secret_pair = t.display() == "--env" && step.argv.get(i + 1).is_some_and(|n| n.has_vault() || n.0.iter().any(|p| matches!(p, crate::spec::Part::Env(_))));
+            let secret_pair = t.display() == "--env" && step.argv.get(i + 1).is_some_and(|n| n.has_vault() || n.0.iter().any(|p| matches!(p, crate::yah::spec::Part::Env(_))));
             if secret_pair {
                 let from_vault = step.argv[i + 1].has_vault();
-                let pair = step.argv[i + 1].render(&ctx).map_err(|e| format!("harness {}: {}", step.harness, crate::vault::scrub(&e, &secret_values)))?;
+                let pair = step.argv[i + 1].render(&ctx).map_err(|e| format!("harness {}: {}", step.harness, crate::yah::vault::scrub(&e, &secret_values)))?;
                 let (name, value) = pair.split_once('=').ok_or_else(|| format!("harness {}: malformed env entry", step.harness))?;
                 secret_values.push(value.to_owned());
                 if from_vault { vault_env.push(name.to_owned()); }
@@ -282,7 +282,7 @@ fn render_steps(req: &UpRequest) -> Result<(Vec<RenderedStep>, Vec<String>), Str
                 i += 2;
                 continue;
             }
-            argv.push(t.render(&ctx).map_err(|e| format!("harness {}: {}", step.harness, crate::vault::scrub(&e, &secret_values)))?);
+            argv.push(t.render(&ctx).map_err(|e| format!("harness {}: {}", step.harness, crate::yah::vault::scrub(&e, &secret_values)))?);
             i += 1;
         }
         rendered.push((argv, secret_env, vault_env));
@@ -338,7 +338,7 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
             Err(e) => {
                 for name in opened.iter().rev() { let _ = runner.stop(name); }
                 let _ = std::fs::remove_file(&manifest_path);
-                let e = crate::vault::scrub(&e, &secret_values);
+                let e = crate::yah::vault::scrub(&e, &secret_values);
                 let _ = std::fs::write(run_dir.join("error.log"), format!("open {} failed: {e}\n", step.name));
                 return Err(format!("open failed for {}: {e}", step.name));
             }
@@ -392,7 +392,7 @@ fn vault_presence(vault: &Vault, base_dir: &Path, env: &dyn Fn(&str) -> Option<S
     // Readiness is derived from the PROVIDERS table in vault.rs: a provider in the table is
     // ready iff what it needs is present (the dotenv file, nothing for env, or its program on
     // PATH). Only a provider that is not in the table at all is "not available in this build".
-    let Some(info) = crate::vault::provider(&vault.provider) else {
+    let Some(info) = crate::yah::vault::provider(&vault.provider) else {
         return (false, Some(format!("provider {:?} is not available in this build", vault.provider)));
     };
     match info.name {
@@ -434,7 +434,7 @@ struct VaultKeyStatus {
 /// word, else the provider table's program. `None` when the provider needs no program
 /// (`dotenv`, `env`), when no provider by that name exists, or when none is configured.
 fn vault_program(vault: &Vault) -> Option<String> {
-    let info = crate::vault::provider(&vault.provider)?;
+    let info = crate::yah::vault::provider(&vault.provider)?;
     if info.name == "dotenv" || info.name == "env" { return None; }
     let program = vault.command.first().map(String::as_str).unwrap_or(info.program);
     if program.is_empty() { None } else { Some(program.to_string()) }
@@ -444,7 +444,7 @@ fn vault_program(vault: &Vault) -> Option<String> {
 /// contract: true — exit 0 — only when every vault is ready and every key line is ok (with
 /// `fetch`, every key fetched). The third value is every fetched secret value, for scrubbing.
 fn vault_status_report(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Option<String>, command_env: Vec<(String, String)>, fetch: bool) -> (Vec<VaultStatus>, bool, Vec<String>) {
-    let vaults = crate::vault::Vaults::new(&spec.vaults, base_dir.to_path_buf(), env).with_command_env(command_env);
+    let vaults = crate::yah::vault::Vaults::new(&spec.vaults, base_dir.to_path_buf(), env).with_command_env(command_env);
     let mut report = Vec::new();
     let mut all_ok = true;
     for vault in &spec.vaults {
@@ -459,7 +459,7 @@ fn vault_status_report(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Optio
                     "dotenv" => {
                         let path = dotenv_path(vault, base_dir, env);
                         match std::fs::read_to_string(&path) {
-                            Ok(text) => { let map = crate::vault::parse_dotenv(&text); match map.get(reference) { Some(v) if !v.is_empty() => "ok".to_string(), _ => "missing".to_string() } }
+                            Ok(text) => { let map = crate::yah::vault::parse_dotenv(&text); match map.get(reference) { Some(v) if !v.is_empty() => "ok".to_string(), _ => "missing".to_string() } }
                             Err(e) => format!("error: cannot read {}: {e}", path.display()),
                         }
                     }
@@ -490,7 +490,7 @@ pub fn vault_status_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -> Opt
         for key in &vault.keys { out.push_str(&format!("{} {}: {}\n", vault.name, key.name, key.line)); }
     }
     if report.is_empty() { out.push_str("no vaults declared\n"); }
-    (crate::vault::scrub(&out, &values), all_ok)
+    (crate::yah::vault::scrub(&out, &values), all_ok)
 }
 
 /// `graphloop vault status --json`: the same verdicts as [`vault_status_core`], as one JSON
@@ -508,7 +508,7 @@ pub fn vault_status_json_core(spec: &Spec, base_dir: &Path, env: &dyn Fn(&str) -
         "keys": vault.keys.iter().map(|key| serde_json::json!({ "name": key.name, "fetched": key.fetched })).collect::<Vec<_>>(),
     })).collect();
     let out = serde_json::to_string(&serde_json::json!({ "vaults": vaults })).unwrap_or_else(|_| "{\"vaults\":[]}".to_string()) + "\n";
-    (crate::vault::scrub(&out, &values), all_ok)
+    (crate::yah::vault::scrub(&out, &values), all_ok)
 }
 
 /// Pure declaration inventory for `graphloop vault list`: one line per declared
@@ -580,14 +580,14 @@ fn new_run_id(team: &str) -> String {
 fn load_spec(file: &Path, vars: &[String]) -> Result<Spec, String> {
     if !file.is_file() { return Err(format!("cannot read {}: no such file", file.display())); }
     let overrides = parse_vars(vars).map_err(|e| err(&e))?;
-    crate::load::load_file(file, &overrides).map_err(|e| format!("{e:#}"))
+    crate::yah::load::load_file(file, &overrides).map_err(|e| format!("{e:#}"))
 }
 
 /// Format source text: parse only (no resolve/schema — formatting must work on any
 /// syntactically valid file); parse errors render exactly as `check` renders them.
 pub fn format_source(name: &str, src: &str) -> Result<String, String> {
-    let file = crate::parser::parse(name, src).map_err(|d| d.render(src))?;
-    Ok(crate::fmt::print(&file))
+    let file = crate::yah::parser::parse(name, src).map_err(|d| d.render(src))?;
+    Ok(crate::yah::fmt::print(&file))
 }
 
 fn fmt_file(file: &Path, check: bool, write: bool) -> Result<String, String> {
@@ -610,27 +610,27 @@ impl Picker for FailPicker {
 }
 
 fn build_picker(spec: &Spec, yah_file: &Path) -> Box<dyn Picker> {
-    let location = crate::pick::locate_system_one_detailed(Some(yah_file));
+    let location = crate::yah::pick::locate_system_one_detailed(Some(yah_file));
     match location.dir.clone() {
-        Some(dir) => Box::new(crate::pick::SystemOnePicker { python: std::env::var("GRAPHLOOP_PYTHON").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "python3".to_string()), system_one_dir: dir, student: spec.system_one.as_ref().and_then(|s| s.student.as_ref()).map(PathBuf::from), timeout_ms: 10_000 }),
-        None => Box::new(FailPicker { reason: crate::pick::system_one_not_found_reason(&location) }),
+        Some(dir) => Box::new(crate::yah::pick::SystemOnePicker { python: std::env::var("GRAPHLOOP_PYTHON").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| "python3".to_string()), system_one_dir: dir, student: spec.system_one.as_ref().and_then(|s| s.student.as_ref()).map(PathBuf::from), timeout_ms: 10_000 }),
+        None => Box::new(FailPicker { reason: crate::yah::pick::system_one_not_found_reason(&location) }),
     }
 }
 
-fn load_env_files(args: &FileArgs) -> Result<crate::envfile::EnvFiles, String> {
-    crate::envfile::EnvFiles::load(&args.file, &args.env_file, !args.no_env_file).map_err(|e| err(&e))
+fn load_env_files(args: &FileArgs) -> Result<crate::yah::envfile::EnvFiles, String> {
+    crate::yah::envfile::EnvFiles::load(&args.file, &args.env_file, !args.no_env_file).map_err(|e| err(&e))
 }
 
 fn load_and_resolve(args: &FileArgs) -> Result<(Spec, Team, Vec<Resolved>), String> {
     let spec = load_spec(&args.file, &args.var)?;
     let team = select_team(&spec.teams, args.team.as_deref()).map_err(|e| err(&e))?.clone();
     let picker = build_picker(&spec, &args.file);
-    let resolved = crate::pick::resolve_all(&spec, picker.as_ref()).map_err(|d| render_diags(&d))?;
+    let resolved = crate::yah::pick::resolve_all(&spec, picker.as_ref()).map_err(|d| render_diags(&d))?;
     Ok((spec, team, resolved))
 }
 
 fn build_plan(spec: &Spec, team: &Team, resolved: &[Resolved], opts: PlanOpts) -> Result<Plan, String> {
-    crate::plan::build(spec, &team.name, resolved, &opts).map_err(|d| render_diags(&d))
+    crate::yah::plan::build(spec, &team.name, resolved, &opts).map_err(|d| render_diags(&d))
 }
 
 fn absolute_string(path: &Path) -> String {
@@ -757,10 +757,10 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             let real_env = |name: &str| std::env::var(name).ok();
             let env_fn = |name: &str| env_files.lookup(name, &real_env);
             let base_dir = std::path::Path::new(&absolute_string(&args.file)).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
-            let vaults = crate::vault::Vaults::new(&spec.vaults, base_dir, &env_fn).with_command_env(env_files.command_env());
+            let vaults = crate::yah::vault::Vaults::new(&spec.vaults, base_dir, &env_fn).with_command_env(env_files.command_env());
             let vault_fn = |vault: &str, key: &str| vaults.get(vault, key);
-            let req = UpRequest { plan: &plan, nodes, source: absolute_string(&args.file), home, manifest_dir: crate::manifest::dir(), run, now_ms: now_ms(), env: &env_fn, vault: &vault_fn };
-            if dry_run { up_dry_run_core(&req).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values()))) } else { up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&crate::vault::scrub(&e, &vaults.values()))) }
+            let req = UpRequest { plan: &plan, nodes, source: absolute_string(&args.file), home, manifest_dir: crate::yah::manifest::dir(), run, now_ms: now_ms(), env: &env_fn, vault: &vault_fn };
+            if dry_run { up_dry_run_core(&req).map_err(|e| err(&crate::yah::vault::scrub(&e, &vaults.values()))) } else { up_core(&req, &runner).map(|o| o.output).map_err(|e| err(&crate::yah::vault::scrub(&e, &vaults.values()))) }
         }
         Cmd::Vault { action } => match action {
             VaultCmd::List { file } => {
@@ -769,7 +769,7 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             }
             VaultCmd::Status { file, fetch, json, var, env_file, no_env_file } => {
                 let spec = load_spec(&file, &var)?;
-                let env_files = crate::envfile::EnvFiles::load(&file, &env_file, !no_env_file).map_err(|e| err(&e))?;
+                let env_files = crate::yah::envfile::EnvFiles::load(&file, &env_file, !no_env_file).map_err(|e| err(&e))?;
                 let real_env = |name: &str| std::env::var(name).ok();
                 let env_fn = |name: &str| env_files.lookup(name, &real_env);
                 let base_dir = std::path::Path::new(&absolute_string(&file)).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
@@ -796,7 +796,7 @@ fn dispatch(cli: Cli) -> Result<String, String> {
                 (None, None) => return Err(err("down needs a FILE or --run RUN")),
             };
             let runner = ProcessRunner::from_env();
-            down_core(&manifest, &runner, &crate::manifest::dir(), &graphloop_home(), purge).map_err(|e| err(&e))
+            down_core(&manifest, &runner, &crate::yah::manifest::dir(), &graphloop_home(), purge).map_err(|e| err(&e))
         }
         Cmd::Runs => { let manifests = Manifest::list(); let live = ProcessRunner::from_env().list_names().unwrap_or_default(); Ok(runs_output(&manifests, &live, now_ms())) }
         Cmd::Trace { run } => { let manifests = Manifest::list(); let manifest = manifests.iter().find(|m| m.run == run).ok_or_else(|| err(&format!("unknown run {run}")))?; trace_output(manifest).map_err(|e| err(&e)) }

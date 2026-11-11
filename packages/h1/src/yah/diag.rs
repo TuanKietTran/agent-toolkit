@@ -4,7 +4,7 @@
 
 use serde::Serialize;
 
-use crate::ast::Span;
+use crate::yah::ast::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]

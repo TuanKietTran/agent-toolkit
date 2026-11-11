@@ -10,6 +10,7 @@ mod ipc;
 mod keys;
 mod session;
 mod state;
+pub mod yah;
 #[cfg(windows)]
 mod windows_killer;
 

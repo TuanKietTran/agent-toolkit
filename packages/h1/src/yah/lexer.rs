@@ -5,8 +5,8 @@
 //! may span lines, no escapes); raw backtick strings; numbers; `{ } [ ] = , .`.
 //! The header is lexed as the identifier `yah` followed by a number.
 
-use crate::ast::Span;
-use crate::diag::{Diagnostic, Diagnostics};
+use crate::yah::ast::Span;
+use crate::yah::diag::{Diagnostic, Diagnostics};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Tok {

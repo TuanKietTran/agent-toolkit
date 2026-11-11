@@ -3,15 +3,15 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::diag::Diagnostics;
-use crate::spec::Spec;
+use crate::yah::diag::Diagnostics;
+use crate::yah::spec::Spec;
 
 /// parse -> resolve -> schema. Diagnostics carry the file name given here.
 pub fn load_str(name: &str, src: &str, overrides: &BTreeMap<String, String>) -> Result<Spec, Diagnostics> {
-    let file = crate::parser::parse(name, src)?;
-    let scope = crate::scope::Scope::build(&file);
-    let resolved = crate::resolve::resolve(file, overrides, &scope)?;
-    crate::schema::build(&resolved, &scope)
+    let file = crate::yah::parser::parse(name, src)?;
+    let scope = crate::yah::scope::Scope::build(&file);
+    let resolved = crate::yah::resolve::resolve(file, overrides, &scope)?;
+    crate::yah::schema::build(&resolved, &scope)
 }
 
 /// Reads `path` and runs [`load_str`]. The error message is the rendered, Terraform-style text.
@@ -23,7 +23,7 @@ pub fn load_file(path: &Path, overrides: &BTreeMap<String, String>) -> anyhow::R
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::spec::{ApiType, ModelRef};
+    use crate::yah::spec::{ApiType, ModelRef};
 
     fn no_overrides() -> BTreeMap<String, String> {
         BTreeMap::new()
@@ -112,7 +112,7 @@ mod tests {
         assert!(!plain.open.auto_rearm);
     }
 
-    fn err_diags(src: &str) -> crate::diag::Diagnostics {
+    fn err_diags(src: &str) -> crate::yah::diag::Diagnostics {
         load_str("x.yah", src, &no_overrides()).unwrap_err()
     }
 

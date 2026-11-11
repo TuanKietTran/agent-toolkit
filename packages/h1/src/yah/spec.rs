@@ -156,7 +156,7 @@ pub struct Provider {
 
 /// `vault "label" { provider, path, account, command, secrets }`: where `${vault.label.KEY}`
 /// secrets come from. Holds configuration only, never a value. `provider` selects an adapter in
-/// `crate::vault` (`dotenv`, `env`, `command`, ...); `secrets` optionally maps each KEY to the
+/// `crate::yah::vault` (`dotenv`, `env`, `command`, ...); `secrets` optionally maps each KEY to the
 /// provider-side reference (an `op://` path, a Bitwarden item, a variable name, ...).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Vault {

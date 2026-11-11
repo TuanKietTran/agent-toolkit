@@ -13,11 +13,11 @@
 
 use std::collections::BTreeMap;
 
-use crate::ast::{self, Assign, Block, Expr, ExprKind, Span, Stmt, StrPart};
-use crate::diag::{suggest, Diagnostic, Diagnostics};
-use crate::refs::{self, NotAReference, Reference};
-use crate::scope::Scope;
-use crate::visit::{self, Visitor};
+use crate::yah::ast::{self, Assign, Block, Expr, ExprKind, Span, Stmt, StrPart};
+use crate::yah::diag::{suggest, Diagnostic, Diagnostics};
+use crate::yah::refs::{self, NotAReference, Reference};
+use crate::yah::scope::Scope;
+use crate::yah::visit::{self, Visitor};
 
 fn make_diag(file: &str, span: Span, summary: &str, detail: String, context: Option<&str>, hint: Option<String>) -> Diagnostic {
     let mut d = Diagnostic::error(file, span, summary, detail);
@@ -354,7 +354,7 @@ pub fn resolve(file: ast::File, overrides: &BTreeMap<String, String>, scope: &Sc
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::File;
+    use crate::yah::ast::File;
 
     fn sp(line: u32, col: u32) -> Span {
         Span { line, col, offset: 0, len: 0 }
@@ -812,7 +812,7 @@ mod tests {
     #[test]
     fn canonical_fixture_resolves_via_parser() {
         let src = include_str!("../tests/fixtures/canonical.yah");
-        let parsed = crate::parser::parse("canonical.yah", src).expect("fixture parses");
+        let parsed = crate::yah::parser::parse("canonical.yah", src).expect("fixture parses");
         let out = resolve(parsed, &overrides(&[("work_dir", "/data/work")])).expect("fixture resolves");
         let fs_api = find_block(&out, "api", "fs");
         match &fs_api.assign("command").unwrap().value.kind {
@@ -831,7 +831,7 @@ mod tests {
     #[test]
     fn string_splice_via_parser() {
         let src = "yah 1\nvariable \"root\" {\n  type = \"string\"\n  default = \"/srv\"\n}\nharness \"builder\" {\n  kind = \"h1\"\n  role = \"builder\"\n  open {\n    cwd = \"${var.root}/app\"\n  }\n}\n";
-        let parsed = crate::parser::parse("team.yah", src).expect("parses");
+        let parsed = crate::yah::parser::parse("team.yah", src).expect("parses");
         let out = resolve(parsed, &BTreeMap::new()).expect("resolves");
         let builder = find_block(&out, "harness", "builder");
         let open = builder.block("open").expect("open block");
