@@ -74,6 +74,7 @@ struct Inputs {
     fix_hints: bool,
     skill_source: Option<PathBuf>,
     system_one_lines: Vec<String>,
+    leaked_line: Option<String>,
 }
 
 pub struct Report {
@@ -201,6 +202,10 @@ fn assess(inputs: &Inputs) -> Report {
         if let Some(hint) = finding.hint {
             hints.push(hint);
         }
+    }
+    if let Some(line) = &inputs.leaked_line {
+        attention = true;
+        lines.push(line.clone());
     }
     if inputs.fix_hints && !hints.is_empty() {
         lines.push("fix hints (print only, not executed):".to_string());
@@ -463,6 +468,45 @@ fn probe_port(port: u16) -> bool {
 /// the port probe, `processes` the injected process list and `local_roots`
 /// the injected "this repo" roots for lab-gui processes.
 #[allow(clippy::too_many_arguments)] // every input is injected so tests can fake the whole environment
+/// Line flagging resources whose owning run has no session entry left in
+/// `registry_dir`, or `None` when nothing leaked. Live runs are the stems of
+/// the `.json` session entries in the dir (every `.json` file except the
+/// `resources.json` store itself); an unreadable dir means no live runs.
+fn leaked_line(registry_dir: &Path) -> Option<String> {
+    let items = crate::resources::load(registry_dir);
+    if items.is_empty() {
+        return None;
+    }
+    let live: std::collections::HashSet<String> = fs::read_dir(registry_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .filter(|stem| *stem != "resources")
+                    .map(str::to_string)
+            } else {
+                None
+            }
+        })
+        .collect();
+    let leaks = crate::resources::leaked(&items, &live);
+    if leaks.is_empty() {
+        return None;
+    }
+    let mut runs: Vec<&str> = leaks.iter().map(|record| record.run.as_str()).collect();
+    runs.sort_unstable();
+    runs.dedup();
+    Some(format!(
+        "resources: {} leaked from dead runs: {}",
+        leaks.len(),
+        runs.join(", ")
+    ))
+}
+
 fn diagnose_inner(
     registry_dir: &Path,
     home: &Path,
@@ -518,6 +562,7 @@ fn diagnose_inner(
         labctl_on_path: find_on_path(path_dirs, "labctl"),
         skill_links,
         gui_ports: gui_ports.iter().map(|port| (*port, probe(*port))).collect(),
+        leaked_line: leaked_line(registry_dir),
     };
     assess(&inputs)
 }
@@ -547,6 +592,36 @@ fn diagnose(
         false,
         &[],
     )
+}
+
+#[test]
+fn leaked_resources_need_attention() {
+    let base = std::env::temp_dir().join(format!("h1-doctor-leak-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let home = base.join("home");
+    let temp = base.join("temp");
+    fs::create_dir_all(&registry).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&temp).unwrap();
+    crate::resources::alloc(
+        &registry,
+        crate::resources::Kind::Tmp,
+        "/tmp/leaked-thing",
+        "dead-run",
+    )
+    .unwrap();
+    let report = diagnose(&registry, &home, &temp, &[], &[], &|_| false, &[], &[]);
+    assert!(report.attention, "lines: {:?}", report.lines);
+    assert!(
+        report
+            .lines
+            .iter()
+            .any(|line| line.contains("leaked") && line.contains("dead-run")),
+        "lines: {:?}",
+        report.lines
+    );
+    let _ = fs::remove_dir_all(&base);
 }
 
 /// The verbatim target of a link that already resolves: its stored symlink

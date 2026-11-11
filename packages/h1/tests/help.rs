@@ -38,6 +38,10 @@ const SUBCOMMANDS: &[&str] = &[
     "close",
     "resume",
     "renew",
+    "alloc",
+    "release",
+    "gc",
+    "resources",
 ];
 
 fn binary() -> &'static str {

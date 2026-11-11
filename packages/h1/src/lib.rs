@@ -14,6 +14,7 @@ mod keys;
 mod observe;
 mod preview;
 mod relations;
+mod resources;
 mod session;
 mod signals;
 mod state;
@@ -134,6 +135,14 @@ enum Commands {
     Close(commander::CloseArgs),
     /// Resume a lab from recent ledger notes.
     Resume(commander::ResumeArgs),
+    /// Record a resource (worktree, clone, tmp dir, port or process) as owned by a run.
+    Alloc(AllocArgs),
+    /// Release resources recorded for a run (all runs when --run is omitted).
+    Release(RunFilterArgs),
+    /// Garbage-collect resources: the same release operation, called by teardown.
+    Gc(RunFilterArgs),
+    /// List the resources recorded for runs, with their age.
+    Resources(RunFilterArgs),
     /// Graphspec (.yah) team commands, formerly the graphloop binary:
     /// check, fmt, plan, graph, up, down, vault, runs, trace.
     #[command(flatten)]
@@ -597,6 +606,26 @@ struct ListArgs {
 }
 
 #[derive(Debug, Args)]
+struct AllocArgs {
+    /// Resource kind: worktree|clone|tmp|port|proc.
+    #[arg(value_name = "KIND")]
+    kind: String,
+    /// Resource value: a path, a port number or a process id, by kind.
+    #[arg(value_name = "VALUE")]
+    value: String,
+    /// The run that owns this resource.
+    #[arg(long, value_name = "RUN")]
+    run: String,
+}
+
+#[derive(Debug, Args)]
+struct RunFilterArgs {
+    /// Only act on resources owned by this run.
+    #[arg(long, value_name = "RUN")]
+    run: Option<String>,
+}
+
+#[derive(Debug, Args)]
 struct OpenArgs {
     /// Session name: `-n NAME` reaches it afterwards. Defaults to `lab-<process id>`.
     #[arg(long, short = 'n', value_name = "NAME")]
@@ -714,10 +743,77 @@ pub fn execute(cli: Cli) -> Result<i32> {
         Commands::Ledger(args) => commander::ledger(args),
         Commands::Close(args) => commander::close(args),
         Commands::Resume(args) => commander::resume(args),
+        Commands::Alloc(args) => alloc_resource(args),
+        Commands::Release(args) => release_resources(args),
+        Commands::Gc(args) => release_resources(args),
+        Commands::Resources(args) => list_resources(args),
         Commands::Renew(args) => commands::renew(args),
         Commands::Recover(args) => commands::recover(args),
         Commands::Yah(cmd) => Ok(crate::yah::cli::run(cmd)),
     }
+}
+
+fn alloc_resource(args: AllocArgs) -> Result<i32> {
+    let kind = match resources::Kind::parse(&args.kind) {
+        Ok(kind) => kind,
+        Err(_) => {
+            eprintln!(
+                "alloc: unknown kind '{}' (want worktree|clone|tmp|port|proc)",
+                args.kind
+            );
+            return Ok(2);
+        }
+    };
+    let record = resources::alloc(&session::session_dir(), kind, &args.value, &args.run)?;
+    println!(
+        "alloc {} {} run={}",
+        record.kind.as_str(),
+        record.value,
+        record.run
+    );
+    Ok(0)
+}
+
+fn release_resources(args: RunFilterArgs) -> Result<i32> {
+    let freed = resources::release(&session::session_dir(), args.run.as_deref());
+    if freed.is_empty() {
+        println!("no resources released");
+    } else {
+        for record in &freed {
+            println!(
+                "released {} {} run={}",
+                record.kind.as_str(),
+                record.value,
+                record.run
+            );
+        }
+    }
+    Ok(0)
+}
+
+fn list_resources(args: RunFilterArgs) -> Result<i32> {
+    let items = resources::load(&session::session_dir());
+    let now = resources::now_unix();
+    let mut shown = 0;
+    for record in &items {
+        if let Some(run) = &args.run {
+            if run != &record.run {
+                continue;
+            }
+        }
+        println!(
+            "{} {} run={} age={}s",
+            record.kind.as_str(),
+            record.value,
+            record.run,
+            resources::age_secs(record, now)
+        );
+        shown += 1;
+    }
+    if shown == 0 {
+        println!("no resources");
+    }
+    Ok(0)
 }
 
 fn default_socket() -> PathBuf {
