@@ -24,7 +24,7 @@
 //!   h1 relation remove FROM KIND TO
 //!   h1 relation graph [--json]
 //! Streams print one JSON object per line (the `Frame` for event/signal).
-//! Console: `r` toggles a relations overlay on `:graph`; `:events` (key 4) is the events pane.
+//! Console: `r` toggles a relations overlay on `:graph`; `:events` (key 5) is the events pane.
 
 #![allow(dead_code)]
 

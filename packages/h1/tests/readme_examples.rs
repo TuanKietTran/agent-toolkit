@@ -84,7 +84,7 @@ const EXPECTED: &[&str] = &[
     "h1 relation add producer parent consumer --cascade",
     "h1 relation add consumer depends_on producer",
     "h1 signal emit -n producer --to consumer data.ready --text ready",
-    "h1 signal listen -n consumer --name data.ready --count 1",
+    "h1 signal listen -n consumer --signal data.ready --count 1",
     "h1 event subscribe -n consumer --kind exited,relation_ended --count 2",
     "h1 relation list -n consumer --json",
     "h1 relation graph",
@@ -183,7 +183,7 @@ const SKIPPED: &[(&str, &str)] = &[
         "needs the running producer and consumer sessions; the signal emit form is exercised by the signals integration tests on disposable cat labs",
     ),
     (
-        "h1 signal listen -n consumer --name data.ready --count 1",
+        "h1 signal listen -n consumer --signal data.ready --count 1",
         "blocks until a matching signal arrives; the signal listen form is exercised by the signals integration tests on disposable cat labs",
     ),
     (

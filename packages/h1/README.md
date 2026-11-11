@@ -50,14 +50,14 @@ Sessions can message each other, watch each other's state, and declare how they 
 h1 relation add producer parent consumer --cascade   # producer is consumer's parent; ending producer stops consumer
 h1 relation add consumer depends_on producer         # consumer needs producer; producer ending raises relation_ended on consumer
 h1 signal emit -n producer --to consumer data.ready --text ready   # deliver a named signal to consumer's listeners
-h1 signal listen -n consumer --name data.ready --count 1           # print one matching signal and exit
+h1 signal listen -n consumer --signal data.ready --count 1           # print one matching signal and exit
 h1 event subscribe -n consumer --kind exited,relation_ended --count 2   # consumer's state changes, one JSON event per line
 h1 relation list -n consumer --json                  # every edge this host knows, both directions
 h1 relation graph                                    # every edge across the running sessions
 h1 relation remove consumer depends_on producer
 ```
 
-- **Signals** are named, typed messages between sessions: `signal emit [-n FROM] (--to APP | --all) NAME [--type T] [--data JSON | --text TEXT]`, `signal listen -n APP [--name N] [--type T] [--count N] [--timeout-ms MS]`. A name is `[A-Za-z0-9._-]{1,64}` (e.g. `data.ready`); `--type` is a payload label and defaults to `json`.
+- **Signals** are named, typed messages between sessions: `signal emit [-n FROM] (--to APP | --all) NAME [--type T] [--data JSON | --text TEXT]`, `signal listen -n APP [--signal N] [--type T] [--count N] [--timeout-ms MS]`. A name is `[A-Za-z0-9._-]{1,64}` (e.g. `data.ready`); `--type` is a payload label and defaults to `json`.
 - **Events** are a host's own state changes: `started`, `asking`, `stalled`, `idle`, `exited` (detail carries `exit_code`), `closed` (the last event of a session) and `relation_ended`. `event subscribe (-n APP... | --all) [--kind K,K] [--count N] [--timeout-ms MS]` streams them; a new subscriber first gets the current state replayed as one event. A `relation_ended` event is delivered to the receiving session, with detail `{"ended": <name>, "relation": <kind>, "role": "from"|"to"}` (the role of the ended session in that edge).
 - **Relations** are typed edges: `parent`, `supervises`, `depends_on`, `pairs_with` (symmetric). `relation add FROM KIND TO [--cascade]` is sent to `from` and mirrored to `to`. When a host ends it releases its edges to its peers: they drop the edge, raise `relation_ended`, and stop their children on `--cascade` parent edges (cascade is only meaningful for `parent`). In the console, `r` toggles a relations overlay on the graph view and `:events` is the events pane.
 

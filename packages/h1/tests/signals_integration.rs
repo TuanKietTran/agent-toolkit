@@ -219,7 +219,7 @@ fn signal_emit_reaches_a_named_listener_on_cat_labs() {
         "listen",
         "-n",
         "consumer",
-        "--name",
+        "--signal",
         "data.ready",
         "--count",
         "1",
