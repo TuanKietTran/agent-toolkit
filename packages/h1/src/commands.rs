@@ -962,6 +962,23 @@ fn emit(args: &WatchArgs, state: State, look: &Look, begun: Instant) {
     }
 }
 
+/// Whether `watch --rearm` should re-arm now: the watch flag is on, the session's registry entry
+/// allows auto re-arm, this stall episode has not already been re-armed, and the session has just
+/// transitioned into `Stalled` (it was not stalled at the previous look).
+pub(crate) fn should_rearm(
+    previous: Option<crate::state::State>,
+    next: crate::state::State,
+    entry_auto_rearm: bool,
+    already_fired: bool,
+    flag_on: bool,
+) -> bool {
+    flag_on
+        && entry_auto_rearm
+        && !already_fired
+        && next == crate::state::State::Stalled
+        && previous != Some(crate::state::State::Stalled)
+}
+
 /// Prints an event each time a session starts asking, stalls, or ends, and stays silent while it is
 /// busy. A session that ends its turn with a question in plain words is `stalled`, not `asking`:
 /// only a quiet screen tells, which is why this looks at output and not at the words.
@@ -986,6 +1003,8 @@ pub(crate) fn watch(args: WatchArgs) -> Result<i32> {
     // program redraws a clock or a usage meter in between (which flips the state to working and back).
     let mut reported: Option<(State, u64)> = None;
     let mut previous_state: Option<State> = None;
+    // Whether the current stall episode has already been re-armed (`watch --rearm` only).
+    let mut rearm_fired = false;
     loop {
         let (state, look) = match look(&socket, &mut quiet) {
             Ok(look) => (look.state(args.stalled_ms), look),
@@ -1022,12 +1041,40 @@ pub(crate) fn watch(args: WatchArgs) -> Result<i32> {
                 return Ok(0);
             }
         }
+        let rearm_entry = if args.rearm && state == State::Stalled {
+            session::entries()
+                .into_iter()
+                .find(|entry| Path::new(&entry.socket) == socket)
+        } else {
+            None
+        };
+        let do_rearm = should_rearm(
+            previous_state,
+            state,
+            rearm_entry.as_ref().is_some_and(|entry| entry.auto_rearm),
+            rearm_fired,
+            args.rearm,
+        );
+        if state != State::Stalled {
+            rearm_fired = false;
+        }
         previous_state = Some(state);
         if report {
             emit(&args, state, &look, begun);
-            if args.once {
-                return Ok(0);
+        }
+        if do_rearm {
+            rearm_fired = true;
+            if let Some(entry) = &rearm_entry {
+                let name = &entry.name;
+                match auto_rearm(name) {
+                    Ok(0) => println!("rearm {name}: ok"),
+                    Ok(code) => println!("rearm {name}: failed with exit {code}"),
+                    Err(error) => println!("rearm {name}: {error}"),
+                }
             }
+        }
+        if report && args.once {
+            return Ok(0);
         }
         thread::sleep(Duration::from_millis(args.interval_ms.max(50)));
     }
@@ -1252,5 +1299,49 @@ mod tests {
         thread::sleep(Duration::from_millis(30));
         assert!(quiet.observe("a") >= 25);
         assert!(quiet.observe("b") < 25);
+    }
+
+    #[test]
+    fn rearm_fires_once_on_a_fresh_stall_for_flagged_sessions() {
+        // Working -> Stalled, entry allows it, not yet fired, flag on: fire.
+        assert!(should_rearm(
+            Some(State::Working),
+            State::Stalled,
+            true,
+            false,
+            true
+        ));
+        // Asking -> Stalled is also a fresh stall.
+        assert!(should_rearm(
+            Some(State::Asking),
+            State::Stalled,
+            true,
+            false,
+            true
+        ));
+        // Still stalled and already fired for this episode: do not fire again.
+        assert!(!should_rearm(
+            Some(State::Stalled),
+            State::Stalled,
+            true,
+            true,
+            true
+        ));
+        // Entry without auto_rearm: never fire.
+        assert!(!should_rearm(
+            Some(State::Working),
+            State::Stalled,
+            false,
+            false,
+            true
+        ));
+        // Without --rearm: never fire.
+        assert!(!should_rearm(
+            Some(State::Working),
+            State::Stalled,
+            true,
+            false,
+            false
+        ));
     }
 }

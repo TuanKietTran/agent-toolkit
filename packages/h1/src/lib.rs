@@ -559,6 +559,9 @@ struct WatchArgs {
     /// Exit after the first reported event.
     #[arg(long)]
     once: bool,
+    /// Re-arm sessions that stall (only sessions whose registry entry has auto_rearm set).
+    #[arg(long)]
+    rearm: bool,
 }
 
 #[derive(Debug, Args)]
