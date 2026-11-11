@@ -163,6 +163,7 @@ enum Class {
 struct Walker<'a> {
     file: &'a str,
     vars: &'a BTreeMap<String, Expr>,
+    defaults: &'a BTreeMap<String, Expr>,
     declared: &'a [String],
     harnesses: &'a [String],
     vaults: &'a [String],
@@ -205,6 +206,18 @@ impl Walker<'_> {
                     )
                 }
             }
+            Ok(Reference::Defaults(key)) => match self.defaults.get(&key) {
+                Some(v) => Class::Value(v.clone()),
+                None => {
+                    let keys: Vec<String> = self.defaults.keys().cloned().collect();
+                    unknown(
+                        format!(
+                            "The reference \"{joined}\" does not match a string set in the defaults block. {forms}"
+                        ),
+                        did_you_mean(&key, &keys),
+                    )
+                }
+            },
             Ok(Reference::Env(_)) => Class::LateBound,
             Ok(Reference::Vault { vault, .. }) => {
                 if self.vaults.iter().any(|v| v == &vault) {
@@ -408,10 +421,41 @@ pub fn resolve(
         }
     }
 
+    // The `defaults` strings, with `var.*` already folded in, for `${defaults.<key>}`.
+    let mut defaults: BTreeMap<String, Expr> = BTreeMap::new();
+    {
+        let none = BTreeMap::new();
+        let mut pre = Walker {
+            file: &file_name,
+            vars: &vars,
+            defaults: &none,
+            declared: &scope.variables,
+            harnesses: &scope.harnesses,
+            vaults: &scope.vaults,
+            context: None,
+            diags: Diagnostics::default(),
+        };
+        for stmt in &file.stmts {
+            let Stmt::Block(b) = stmt else { continue };
+            if b.kind != "defaults" {
+                continue;
+            }
+            let mut copy = b.clone();
+            pre.visit_block(&mut copy);
+            for st in &copy.body {
+                if let Stmt::Assign(a) = st
+                    && matches!(&a.value.kind, ExprKind::Str(p) if p.iter().all(|x| matches!(x, StrPart::Lit(_))))
+                {
+                    defaults.insert(a.key.clone(), a.value.clone());
+                }
+            }
+        }
+    }
     // Pass 2: walk every value, substituting and checking references.
     let mut walker = Walker {
         file: &file_name,
         vars: &vars,
+        defaults: &defaults,
         declared: &scope.variables,
         harnesses: &scope.harnesses,
         vaults: &scope.vaults,

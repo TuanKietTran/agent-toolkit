@@ -248,7 +248,7 @@ fn interp_part(
             Some(Part::Vault(vault, secret))
         }
         // `var.*` is gone after resolve; anything else is not a reference form this position accepts.
-        Ok(Reference::Var(_)) | Err(_) => {
+        Ok(Reference::Var(_) | Reference::Defaults(_)) | Err(_) => {
             cx.err(
                 span,
                 "Unsupported reference",
@@ -644,8 +644,9 @@ pub fn build(
                     }
                     "prototype" => {
                         let n = spec.harnesses.len();
+                        let plain = effective_harness(&mut cx, block, &HashMap::new(), &mut Vec::new());
                         if let Some(mut r) =
-                            parse_harness(&mut cx, block, &mut spec, &scope.harnesses)
+                            parse_harness(&mut cx, &plain, &mut spec, &scope.harnesses)
                         {
                             r.1 = None;
                             harness_refs.push(r);
@@ -912,17 +913,29 @@ pub fn build(
             );
         }
     }
-    // Pool members join every team rooted at the pool's parent.
+    // Pool members join every team that already holds the pool's parent (root or member);
+    // repeat so a pool whose parent is another pool's member is picked up whatever the order.
     let pools = spec.pools.clone();
-    for pool in &pools {
-        let Some(parent) = &pool.parent else { continue };
-        for team in spec.teams.iter_mut().filter(|t| &t.root == parent) {
-            for i in 1..=pool.min {
-                let name = format!("{}-{i}", pool.name);
-                if !team.members.contains(&name) {
-                    team.members.push(name);
+    loop {
+        let mut changed = false;
+        for pool in &pools {
+            let Some(parent) = &pool.parent else { continue };
+            for team in spec
+                .teams
+                .iter_mut()
+                .filter(|t| &t.root == parent || t.members.contains(parent))
+            {
+                for i in 1..=pool.min {
+                    let name = format!("{}-{i}", pool.name);
+                    if !team.members.contains(&name) {
+                        team.members.push(name);
+                        changed = true;
+                    }
                 }
             }
+        }
+        if !changed {
+            break;
         }
     }
     cx.diags.0.sort_by_key(|d| (d.line, d.col));
@@ -1739,6 +1752,7 @@ fn effective_harness(
     let ctx = block_ctx("harness", Some(&label));
     let mut own: Vec<Stmt> = Vec::new();
     let mut proto_name: Option<StrRef> = None;
+    let mut own_has_ask = false;
     for st in &block.body {
         match st {
             Stmt::Assign(a) if a.key == "prototype" => {
@@ -1747,6 +1761,7 @@ fn effective_harness(
                 }
             }
             Stmt::Assign(a) if a.key == "can_ask" => {
+                own_has_ask = true;
                 for d in string_list(cx, a, &ctx).unwrap_or_default() {
                     asks.push((label.clone(), (d, a.span)));
                 }
@@ -1782,6 +1797,13 @@ fn effective_harness(
     let mut body: Vec<Stmt> = Vec::new();
     for st in &proto.body {
         match st {
+            Stmt::Assign(a) if a.key == "can_ask" => {
+                if !own_has_ask {
+                    for d in string_list(cx, a, &ctx).unwrap_or_default() {
+                        asks.push((label.clone(), (d, a.span)));
+                    }
+                }
+            }
             Stmt::Assign(a) if !own_keys.contains(&a.key) => body.push(st.clone()),
             Stmt::Block(b) if b.kind == "open" => {
                 let mut merged = b.clone();

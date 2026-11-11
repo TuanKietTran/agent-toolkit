@@ -299,4 +299,24 @@ team "t" { root = "boss" }
         assert!(all.contains("Unknown reference"), "{all}");
         assert!(d.0.len() >= 3, "{all}");
     }
+
+    #[test]
+    fn pool_under_another_pools_member_joins_the_team() {
+        let src = POOLED.replace(
+            "team \"t\"",
+            "pool \"sub\" { prototype = \"w\" parent = \"workers-1\" min = 1 }\nteam \"t\"",
+        );
+        let spec = load_str("p.yah", &src, &no_overrides()).expect("loads");
+        assert!(spec.team("t").unwrap().members.contains(&"sub-1".to_string()));
+    }
+
+    #[test]
+    fn defaults_reference_resolves_with_vars_folded_in() {
+        let src = "yah 1\nvariable \"lab\" { type = \"string\" default = \"/x\" }\ndefaults { status_dir = \"${var.lab}/status\" }\nprovider \"p\" { type = \"anthropic\" }\nmodel \"m\" { provider = \"p\" id = \"i\" capabilities = [\"chat\"] }\nharness \"h\" { kind = \"h1\" role = \"r\" model = \"m\" open { command = [\"tail\", \"${defaults.status_dir}/a.log\"] } }\nteam \"t\" { root = \"h\" }\n";
+        let spec = load_str("d.yah", src, &no_overrides()).expect("loads");
+        let arg = &spec.harness("h").unwrap().open.command[1];
+        assert_eq!(format!("{arg:?}").contains("/x/status/a.log"), true);
+        let bad = src.replace("defaults.status_dir", "defaults.nope");
+        assert!(load_str("d.yah", &bad, &no_overrides()).is_err());
+    }
 }

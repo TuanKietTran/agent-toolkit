@@ -20,6 +20,8 @@ use std::fmt;
 pub enum Reference {
     /// `var.<name>`
     Var(String),
+    /// `defaults.<key>`: a string set in the `defaults` block
+    Defaults(String),
     /// `env.<NAME>`
     Env(String),
     /// `vault.<name>.<KEY>`
@@ -48,6 +50,7 @@ pub struct NotAReference {
 /// Every reference form, in the order messages list them.
 pub const FORMS: &[&str] = &[
     "var.<name>",
+    "defaults.<key>",
     "env.<NAME>",
     "vault.<name>.<KEY>",
     "harnesses.<label>.model",
@@ -66,6 +69,7 @@ impl Reference {
         let word = |i: usize| path[i].clone();
         match (path.first().map(String::as_str), path.len()) {
             (Some("var"), 2) => Ok(Reference::Var(word(1))),
+            (Some("defaults"), 2) if !path[1].is_empty() => Ok(Reference::Defaults(word(1))),
             (Some("env"), 2) if !path[1].is_empty() => Ok(Reference::Env(word(1))),
             (Some("vault"), 3) => Ok(Reference::Vault {
                 vault: word(1),
@@ -83,7 +87,7 @@ impl Reference {
 
     pub fn stage(&self) -> Stage {
         match self {
-            Reference::Var(_) => Stage::Compile,
+            Reference::Var(_) | Reference::Defaults(_) => Stage::Compile,
             Reference::HarnessModel(_) | Reference::HarnessModelId(_) => Stage::Plan,
             Reference::Env(_) | Reference::Vault { .. } => Stage::Apply,
         }
@@ -93,6 +97,7 @@ impl Reference {
     pub fn path(&self) -> Vec<String> {
         match self {
             Reference::Var(n) => vec!["var".into(), n.clone()],
+            Reference::Defaults(n) => vec!["defaults".into(), n.clone()],
             Reference::Env(n) => vec!["env".into(), n.clone()],
             Reference::Vault { vault, key } => vec!["vault".into(), vault.clone(), key.clone()],
             Reference::HarnessModel(h) => vec!["harnesses".into(), h.clone(), "model".into()],
@@ -191,7 +196,7 @@ mod tests {
     fn valid_forms_text_is_exactly_what_diagnostics_have_always_said() {
         assert_eq!(
             valid_forms(),
-            "Valid references are var.<name>, env.<NAME>, vault.<name>.<KEY>, harnesses.<label>.model and harnesses.<label>.model_id."
+            "Valid references are var.<name>, defaults.<key>, env.<NAME>, vault.<name>.<KEY>, harnesses.<label>.model and harnesses.<label>.model_id."
         );
     }
 
