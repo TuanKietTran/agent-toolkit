@@ -161,14 +161,27 @@ mod tests {
                 model_status: ModelStatus::Pending,
                 tools: vec![],
                 cwd: None,
-                env: vec![EnvEntry { key: "K".into(), value: "***".into(), source: EnvSource::Literal, masked: true }],
+                env: vec![EnvEntry {
+                    key: "K".into(),
+                    value: "***".into(),
+                    source: EnvSource::Literal,
+                    masked: true,
+                }],
                 open_command: "h1 open -n r".into(),
             }],
             edges: vec![],
-            warnings: vec![Warning { severity: Severity::Warn, code: WarningCode::MissingCwd, node: Some("r".into()), message: "m".into() }],
+            warnings: vec![Warning {
+                severity: Severity::Warn,
+                code: WarningCode::MissingCwd,
+                node: Some("r".into()),
+                message: "m".into(),
+            }],
         };
         let text = serde_json::to_string(&p).unwrap();
-        assert!(text.contains("\"model_status\":\"pending\"") && text.contains("\"code\":\"missing_cwd\""));
+        assert!(
+            text.contains("\"model_status\":\"pending\"")
+                && text.contains("\"code\":\"missing_cwd\"")
+        );
         assert_eq!(serde_json::from_str::<Preview>(&text).unwrap(), p);
     }
 }
