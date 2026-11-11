@@ -14,6 +14,7 @@ const SUBCOMMANDS: &[&str] = &[
     "ask",
     "screen",
     "attach",
+    "adopt",
     "foreground",
     "socket",
     "open",
