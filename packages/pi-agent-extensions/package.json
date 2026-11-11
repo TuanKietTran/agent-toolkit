@@ -14,7 +14,7 @@
   "bin": { "pi-browser-mcp": "./browser-control/mcp-server.mjs" },
   "scripts": {
     "check": "tsc --noEmit",
-    "test": "npm run build:min && node --test core/dev/*.test.ts claude-cli/*.test.ts muse-proxy/*.test.ts opencode-cli/*.test.ts browser-control/tests/*.test.ts browser-control/tests/*.test.mjs browser-control/helper-extension/*.test.mjs browser-control/native-host/tests/*.test.mjs touchbar-usage/tests/*.test.mjs tests/*.test.mjs",
+    "test": "npm run build:min && node --test core/dev/*.test.ts claude-cli/*.test.ts muse-proxy/*.test.ts opencode-cli/*.test.ts browser-control/tests/*.test.ts browser-control/tests/*.test.mjs browser-control/cdp/tests/*.test.ts browser-control/helper-extension/*.test.mjs browser-control/native-host/tests/*.test.mjs touchbar-usage/tests/*.test.mjs tests/*.test.mjs",
     "install:tui": "node ./tui/install-layout.mjs",
     "build:min": "node scripts/minify.mjs"
   },
