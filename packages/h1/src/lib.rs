@@ -1,3 +1,4 @@
+mod adopt;
 mod agents;
 mod commander;
 mod commands;
@@ -76,6 +77,8 @@ enum Commands {
     Screen(ScreenArgs),
     /// Attach this terminal to a hosted PTY.
     Attach(AttachArgs),
+    /// Adopt a running foreign agent into h1 by resuming its session in a new hosted session.
+    Adopt(AdoptArgs),
     /// Show a hosted PTY in the foreground, opening a terminal when needed.
     Foreground(ForegroundArgs),
     /// Resolve the socket path used by the shorthand commands.
@@ -285,6 +288,22 @@ struct AttachArgs {
     /// Defaults to $H1_TERMINAL, then Ghostty on macOS.
     #[arg(long, value_name = "NAME")]
     terminal: Option<String>,
+    /// Adopt the running agent with this pid or name instead of attaching to a hosted PTY.
+    #[arg(long, value_name = "PID|NAME")]
+    agent: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct AdoptArgs {
+    /// Pid or name of the running agent to adopt.
+    #[arg(value_name = "PID|NAME")]
+    target: String,
+    /// Name for the new h1 session. Defaults to `adopt-<kind>-<pid>`.
+    #[arg(long, short = 'n', value_name = "NAME")]
+    name: Option<String>,
+    /// Host the resumed session in the background instead of attaching to it.
+    #[arg(long)]
+    detached: bool,
 }
 
 #[derive(Debug, Args)]
@@ -631,7 +650,11 @@ pub fn execute(cli: Cli) -> Result<i32> {
             Some(name) => commander::screen(&name),
             None => commands::screen(args),
         },
-        Commands::Attach(args) => attach(args),
+        Commands::Attach(args) => match args.agent.clone() {
+            Some(target) => adopt::run(&target, None, false),
+            None => attach(args),
+        },
+        Commands::Adopt(args) => adopt::run(&args.target, args.name.clone(), args.detached),
         Commands::Foreground(args) => foreground(args),
         Commands::Socket(args) => print_default_socket(args),
         Commands::Open(args) => commands::open(args),
