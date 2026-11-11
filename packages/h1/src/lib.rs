@@ -8,6 +8,7 @@ mod doctor;
 mod graphspec;
 mod ipc;
 mod keys;
+mod preview;
 mod session;
 mod state;
 #[cfg(windows)]
