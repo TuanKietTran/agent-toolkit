@@ -24,13 +24,13 @@ use std::time::{Duration, Instant};
 
 use std::collections::BTreeMap;
 
-use graphloop::cli::{ProcessRunner, UpOutcome, UpRequest, check_line, graph_output, plan_json, plan_output, render_diags, up_core};
-use graphloop::load::load_str;
-use graphloop::manifest::{Edge, Node, PickInfo};
-use graphloop::pick::{Resolved, Via};
-use graphloop::plan::{OpenStep, Plan, PlanOpts};
-use graphloop::spec::{Part, Templ, Vault};
-use graphloop::vault::Vaults;
+use h1::yah::cli::{ProcessRunner, UpOutcome, UpRequest, check_line, graph_output, plan_json, plan_output, render_diags, up_core};
+use h1::yah::load::load_str;
+use h1::yah::manifest::{Edge, Node, PickInfo};
+use h1::yah::pick::{Resolved, Via};
+use h1::yah::plan::{OpenStep, Plan, PlanOpts};
+use h1::yah::spec::{Part, Templ, Vault};
+use h1::yah::vault::Vaults;
 
 const SECRET_A: &str = "H2-FAKE-SECRET-stderr-7f3a9c";
 const SECRET_B: &str = "H2-FAKE-SECRET-framing-5b2d8e";
@@ -307,7 +307,7 @@ team "t" {
     assert!(!checked.contains(MARKER_CMD), "check LEAKED the marker: {checked}");
     let resolved = vec![Resolved { harness: "alpha".into(), requested: "haiku".into(), label: "haiku".into(), id: "claude-haiku-5-5".into(), provider_type: "anthropic".into(), via: Via::Pinned, rule: None, reason: "pinned".into(), degraded_level: 0 }];
     let opts = PlanOpts { prefix: None, run: "t-1-aaaa".into(), trace_dir: None, detached: false };
-    let built = graphloop::plan::build(&spec, "t", &resolved, &opts).map_err(|d| render_diags(&d)).unwrap();
+    let built = h1::yah::plan::build(&spec, "t", &resolved, &opts).map_err(|d| render_diags(&d)).unwrap();
     let surfaces = [("plan", plan_output(&built, &resolved)), ("plan --json", plan_json(&built, &resolved).to_string()), ("graph", graph_output(spec.team("t").unwrap(), &built, &resolved))];
     for (name, out) in surfaces {
         assert!(!out.contains(MARKER_CMD), "{name} LEAKED the marker:\n{out}");

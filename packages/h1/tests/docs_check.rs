@@ -55,7 +55,7 @@ fn graphspec_yah_check_blocks_pass_check() {
         let n = i + 1;
         let file = dir.join(format!("block-{n}.yah"));
         fs::write(&file, block).unwrap();
-        let out = Command::new(env!("CARGO_BIN_EXE_graphloop"))
+        let out = Command::new(env!("CARGO_BIN_EXE_h1"))
             .arg("check")
             .arg(&file)
             .output()

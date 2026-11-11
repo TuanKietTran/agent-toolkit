@@ -1,4 +1,4 @@
-//! Integration tests for `--env-file` loading (`graphloop::envfile::EnvFiles`).
+//! Integration tests for `--env-file` loading (`h1::yah::envfile::EnvFiles`).
 //!
 //! Priority contract: the real process environment wins over every file; among files an
 //! earlier `--env-file` wins over a later one, and every explicit file wins over the
@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use graphloop::envfile::EnvFiles;
+use h1::yah::envfile::EnvFiles;
 
 fn write(dir: &Path, name: &str, text: &str) -> PathBuf {
     let path = dir.join(name);
@@ -98,8 +98,8 @@ fn utf8_bom_at_file_start_first_key_parses_cleanly() {
 
 #[test]
 fn duplicate_keys_last_occurrence_wins() {
-    use graphloop::spec::Vault;
-    use graphloop::vault::Vaults;
+    use h1::yah::spec::Vault;
+    use h1::yah::vault::Vaults;
     let dir = tempfile::tempdir().unwrap();
     let yah = write(dir.path(), "fleet.yah", "yah 1\n");
     let env = write(dir.path(), "dup.env", "DUP=first\nDUP=second\nDUP=third\n");

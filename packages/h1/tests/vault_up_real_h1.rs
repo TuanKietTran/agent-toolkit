@@ -1,4 +1,4 @@
-//! H10: end-to-end `graphloop up` against the REAL `h1` binary.
+//! H10: end-to-end `h1 up` against the REAL `h1` binary.
 //!
 //! Gate: if `H1_BIN` is unset or does not point at an executable file, this
 //! test passes immediately (skipped). When `H1_BIN` is set to an executable,
@@ -8,7 +8,7 @@
 //!
 //! Flow: a one-harness `cat` spec whose `open.env` takes `FLEET_TOKEN` from a
 //! `command`-provider vault (a tiny script echoing a fixed fake sentinel).
-//! `graphloop up` hands the secret to `h1 open` in its process environment
+//! `h1 up` hands the secret to `h1 open` in its process environment
 //! only (never argv). Delivery is verified through the real h1: the session
 //! registry file `$H1_DIR/<name>.json` names the h1 host pid, and on macOS
 //! `ps eww -p <host pid>` shows that host's environment, which must contain
@@ -19,7 +19,7 @@
 //! under the run dir, the session registry file, or `h1 list --json`.
 //!
 //! Cleanup runs even on assertion failure: a Drop guard runs
-//! `graphloop down --run <run>` (once the run is known) and `h1 stop` for
+//! `h1 down --run <run>` (once the run is known) and `h1 stop` for
 //! the lab, then removes the isolated temp root. No lab or temp dir is
 //! left behind.
 
@@ -80,8 +80,8 @@ struct Iso {
 }
 
 impl Iso {
-    fn graphloop(&self, args: &[&str]) -> Output {
-        Command::new(env!("CARGO_BIN_EXE_graphloop"))
+    fn driver(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_h1"))
             .args(args)
             .env("GRAPHLOOP_HOME", &self.home)
             .env("H1_DIR", &self.h1_dir)
@@ -97,7 +97,7 @@ impl Iso {
 impl Drop for Iso {
     fn drop(&mut self) {
         if let Some(run) = &self.run {
-            let _ = self.graphloop(&["down", "--run", run]);
+            let _ = self.driver(&["down", "--run", run]);
         }
         let _ = self.h1(&["stop", "-n", SESSION]);
         let _ = std::fs::remove_dir_all(&self.root);
@@ -150,7 +150,7 @@ fn h1_bin_gate() -> Option<PathBuf> {
 
 #[cfg(unix)]
 #[test]
-fn graphloop_up_against_real_h1_delivers_vault_secret_without_leaking_it() {
+fn h1_up_against_real_h1_delivers_vault_secret_without_leaking_it() {
     let Some(h1_bin) = h1_bin_gate() else {
         eprintln!("H10_SKIPPED: H1_BIN unset or not executable");
         return;
@@ -173,9 +173,9 @@ fn graphloop_up_against_real_h1_delivers_vault_secret_without_leaking_it() {
     }
     let yah = root.join("fleet.yah").display().to_string();
 
-    // up: real graphloop, real h1, real cat lab.
-    let out = iso.graphloop(&["up", &yah]);
-    let up_text = assert_clean("graphloop up", &out);
+    // up: real h1 (built bin as driver, H1_BIN as the child it opens labs through), real cat lab.
+    let out = iso.driver(&["up", &yah]);
+    let up_text = assert_clean("h1 up", &out);
     let run = up_text.lines().next().and_then(|l| l.strip_prefix("up: ")).and_then(|r| r.split_whitespace().next()).expect("up output has no run name").to_owned();
     iso.run = Some(run.clone());
 
@@ -209,15 +209,15 @@ fn graphloop_up_against_real_h1_delivers_vault_secret_without_leaking_it() {
     assert!(list_text.contains(SESSION), "h1 list does not name the lab: {list_text}");
 
     // runs / trace: read-only surfaces over the live run.
-    let out = iso.graphloop(&["runs"]);
-    let runs_text = assert_clean("graphloop runs", &out);
+    let out = iso.driver(&["runs"]);
+    let runs_text = assert_clean("h1 runs", &out);
     assert!(runs_text.contains(&run), "runs does not list the run: {runs_text}");
-    let out = iso.graphloop(&["trace", &run]);
-    assert_clean("graphloop trace", &out);
+    let out = iso.driver(&["trace", &run]);
+    assert_clean("h1 trace", &out);
 
     // down: stops the lab, removes the manifest and the registry entry.
-    let out = iso.graphloop(&["down", "--run", &run]);
-    let down_text = assert_clean("graphloop down", &out);
+    let out = iso.driver(&["down", "--run", &run]);
+    let down_text = assert_clean("h1 down", &out);
     assert!(down_text.contains(SESSION), "down did not report the lab: {down_text}");
     assert!(!manifest_path.exists(), "down left the manifest behind");
     assert!(!session_path.exists(), "down left the session registry behind");

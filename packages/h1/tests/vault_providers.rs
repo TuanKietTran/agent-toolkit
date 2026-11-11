@@ -10,8 +10,8 @@ use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-use graphloop::spec::Vault;
-use graphloop::vault::Vaults;
+use h1::yah::spec::Vault;
+use h1::yah::vault::Vaults;
 
 const VALUE: &str = "fake-secret-value-123";
 

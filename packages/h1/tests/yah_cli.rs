@@ -7,11 +7,11 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use graphloop::cli::*;
-use graphloop::manifest::{Edge, EdgeKind, Manifest, Node, PickInfo};
-use graphloop::pick::{Resolved, Via};
-use graphloop::plan::{OpenStep, Plan};
-use graphloop::spec::{Part, Team, Templ};
+use h1::yah::cli::*;
+use h1::yah::manifest::{Edge, EdgeKind, Manifest, Node, PickInfo};
+use h1::yah::pick::{Resolved, Via};
+use h1::yah::plan::{OpenStep, Plan};
+use h1::yah::spec::{Part, Team, Templ};
 
 fn t(s: &str) -> Templ { Templ::lit(s) }
 
@@ -171,7 +171,7 @@ fn shell_line_quotes_args_with_spaces() {
 
 #[test]
 fn build_nodes_uses_resolved_and_tools() {
-    use graphloop::spec::{Harness, ModelRef, Open};
+    use h1::yah::spec::{Harness, ModelRef, Open};
     let harnesses = vec![
         Harness { name: "commander".into(), kind: "h1".into(), role: "commander".into(), parent: None, model: ModelRef::SystemOne, tools: vec!["fs".into()], complexity: None, open: Open::default(), line: 1 },
         Harness { name: "builder".into(), kind: "h1".into(), role: "builder".into(), parent: Some("commander".into()), model: ModelRef::SystemOne, tools: vec![], complexity: None, open: Open::default(), line: 9 },
@@ -313,7 +313,7 @@ fn dry_run_missing_secret_fails_like_up_and_creates_nothing() {
 
 #[test]
 fn process_up_help_lists_dry_run() {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["up", "--help"]).output().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_h1")).args(["up", "--help"]).output().unwrap();
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     assert!(text.contains("--dry-run"), "{text}");
@@ -440,7 +440,7 @@ fn trace_missing_dir_errors() {
 
 #[test]
 fn process_help_lists_commands() {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).arg("--help").output().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_h1")).arg("--help").output().unwrap();
     assert!(out.status.success());
     let text = String::from_utf8_lossy(&out.stdout);
     for cmd in ["check", "plan", "graph", "up", "down", "runs", "trace"] { assert!(text.contains(cmd), "{cmd} missing from help: {text}"); }
@@ -448,13 +448,13 @@ fn process_help_lists_commands() {
 
 #[test]
 fn process_no_args_is_usage_error() {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).output().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_h1")).output().unwrap();
     assert_eq!(out.status.code(), Some(2));
 }
 
 #[test]
 fn process_check_missing_file_exits_1() {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["check", "/nonexistent-gl-cli/team.yah"]).output().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_h1")).args(["check", "/nonexistent-gl-cli/team.yah"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("no such file"), "{err}");
@@ -462,6 +462,6 @@ fn process_check_missing_file_exits_1() {
 
 #[test]
 fn process_plan_missing_file_exits_1() {
-    let out = std::process::Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["plan", "/nonexistent-gl-cli/team.yah"]).output().unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_h1")).args(["plan", "/nonexistent-gl-cli/team.yah"]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
 }

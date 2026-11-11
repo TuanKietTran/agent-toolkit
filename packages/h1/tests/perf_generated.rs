@@ -30,9 +30,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::time::Instant;
 
-use graphloop::load::load_file;
-use graphloop::pick::{PickDecision, PickRequest, Picker, resolve_all};
-use graphloop::plan::{PlanOpts, build};
+use h1::yah::load::load_file;
+use h1::yah::pick::{PickDecision, PickRequest, Picker, resolve_all};
+use h1::yah::plan::{PlanOpts, build};
 
 /// Deterministic picker for the `system-one` harnesses: always chooses
 /// the haiku catalog entry, in-process, so the timing measures

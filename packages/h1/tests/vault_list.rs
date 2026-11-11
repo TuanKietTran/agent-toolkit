@@ -1,4 +1,4 @@
-//! Integration tests for `graphloop vault list` (`graphloop::cli::vault_list_core`).
+//! Integration tests for `graphloop vault list` (`h1::yah::cli::vault_list_core`).
 //!
 //! Contract: a pure declaration inventory — one `<vault>\t<provider>\t<key>` line per
 //! declared secret key, sorted by vault then key; a vault with no `secrets` map prints
@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
-use graphloop::cli::vault_list_core;
-use graphloop::load::load_str;
-use graphloop::spec::Spec;
+use h1::yah::cli::vault_list_core;
+use h1::yah::load::load_str;
+use h1::yah::spec::Spec;
 
 const SKELETON_TAIL: &str = r#"
 provider "anthropic" {
@@ -55,7 +55,7 @@ fn write_yah(dir: &Path, vault_blocks: &str) -> PathBuf {
 }
 
 fn run_list(file: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_graphloop")).args(["vault", "list"]).arg(file).output().unwrap()
+    Command::new(env!("CARGO_BIN_EXE_h1")).args(["vault", "list"]).arg(file).output().unwrap()
 }
 
 #[test]

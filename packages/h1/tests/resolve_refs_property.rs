@@ -12,10 +12,10 @@
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
-use graphloop::ast::{Assign, Block, Expr, ExprKind, File, Span, Stmt, StrPart};
-use graphloop::refs::{Reference, Stage};
-use graphloop::resolve::resolve;
-use graphloop::scope::Scope;
+use h1::yah::ast::{Assign, Block, Expr, ExprKind, File, Span, Stmt, StrPart};
+use h1::yah::refs::{Reference, Stage};
+use h1::yah::resolve::resolve;
+use h1::yah::scope::Scope;
 
 const SEED: u64 = 0x9E37_79B9_7F4A_7C15;
 
@@ -210,7 +210,7 @@ fn check_one_path(path: &[String], interp: bool) {
             "path {joined:?}: diagnostic must name the path as written, got: {rendered}"
         );
         assert!(
-            rendered.contains(&graphloop::refs::valid_forms()),
+            rendered.contains(&h1::yah::refs::valid_forms()),
             "path {joined:?}: diagnostic must spell out the valid forms, got: {rendered}"
         );
         assert!(

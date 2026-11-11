@@ -6,9 +6,9 @@
 //! For every source: `parse -> print -> parse` is AST-equal ignoring
 //! spans, and printing a second time yields the identical text.
 
-use graphloop::ast::{ExprKind, File, Span, Stmt, StrPart};
-use graphloop::fmt::print;
-use graphloop::parser::parse;
+use h1::yah::ast::{ExprKind, File, Span, Stmt, StrPart};
+use h1::yah::fmt::print;
+use h1::yah::parser::parse;
 
 fn strip(file: &mut File) {
     for stmt in &mut file.stmts {
@@ -31,7 +31,7 @@ fn strip_stmt(stmt: &mut Stmt) {
     }
 }
 
-fn strip_expr(expr: &mut graphloop::ast::Expr) {
+fn strip_expr(expr: &mut h1::yah::ast::Expr) {
     expr.span = Span::default();
     match &mut expr.kind {
         ExprKind::Str(parts) => {
