@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Fixture Form</title>
+<h1>Fixture Form</h1>
+<form id="order-form" action="/submitted.html" method="get">
+<p><label for="name">Full name</label> <input id="name" name="name" type="text"></p>
+<p><label for="email">Email</label> <input id="email" name="email" type="email"></p>
+<p><label for="colour">Colour</label> <select id="colour" name="colour"><option value="red">Red</option><option value="green">Green</option><option value="blue">Blue</option></select></p>
+<p><label><input id="agree" name="agree" type="checkbox"> I agree to the terms</label></p>
+<p><label for="notes">Notes</label> <textarea id="notes" name="notes" rows="3" cols="30"></textarea></p>
+<p><label for="attachment">Attachment</label> <input id="attachment" name="attachment" type="file"></p>
+<p><button id="ping" type="button">Ping</button> <button id="place-order" type="submit">Place order</button> <button id="delete-item" type="button">Delete item</button></p>
+</form>
+<div id="output" aria-live="polite">idle</div>
+<h2>Scroll area</h2>
+<div id="scroller" style="height:180px;overflow-y:auto;border:1px solid #999"><div style="height:1200px">Scrollable inner content</div><p id="scroll-bottom">Scroll bottom marker</p></div>
+<div id="late-zone"></div>
+<div style="height:2400px"></div>
+<footer id="bottom-marker">Bottom marker</footer>
+<script>
+document.getElementById('ping').addEventListener('click', () => { document.getElementById('output').textContent = 'pong'; });
+document.getElementById('delete-item').addEventListener('click', () => { document.getElementById('output').textContent = 'deleted'; });
+setTimeout(() => { const el = document.createElement('div'); el.id = 'late'; el.textContent = 'Delayed content loaded'; document.getElementById('late-zone').appendChild(el); }, 900);
+</script>
