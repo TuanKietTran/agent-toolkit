@@ -285,7 +285,7 @@ mod tests {
         let taken = hub.take_edges_involving("b");
         assert_eq!(taken.len(), 2);
         assert!(hub.edges().is_empty());
-        assert!(hub.remove_edge(&edge("x", RelationKind::Parent, "y", false)) == false);
+        assert!(!hub.remove_edge(&edge("x", RelationKind::Parent, "y", false)));
     }
 
     #[test]

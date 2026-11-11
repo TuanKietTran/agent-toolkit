@@ -281,6 +281,98 @@ pub(crate) fn graph_text(edges: &[Edge], apps: &[String]) -> String {
     text
 }
 
+/// Events kept for the console's events pane.
+const FEED_LINES: usize = 200;
+
+/// Follows the events of every running session for the console: one reader thread per session,
+/// fed over the host's own socket; lines are kept in memory only and a thread ends with its host.
+#[derive(Default)]
+pub(crate) struct EventsFeed {
+    followed: Arc<Mutex<std::collections::HashSet<String>>>,
+    lines: Arc<Mutex<std::collections::VecDeque<String>>>,
+}
+
+impl EventsFeed {
+    /// Starts following sessions in `names` that are not followed yet.
+    pub(crate) fn sync(&self, names: &[String]) {
+        for name in names {
+            if !self.followed.lock().unwrap().insert(name.clone()) {
+                continue;
+            }
+            let (followed, lines, name) = (self.followed.clone(), self.lines.clone(), name.clone());
+            thread::spawn(move || {
+                let _ = follow(&name, &lines);
+                followed.lock().unwrap().remove(&name);
+            });
+        }
+    }
+
+    /// The newest `count` lines, oldest first.
+    pub(crate) fn recent(&self, count: usize) -> Vec<String> {
+        let lines = self.lines.lock().unwrap();
+        let skip = lines.len().saturating_sub(count);
+        lines.iter().skip(skip).cloned().collect()
+    }
+}
+
+fn follow(name: &str, lines: &Mutex<std::collections::VecDeque<String>>) -> Result<()> {
+    let socket = session::socket_for(name)?;
+    let stream = ipc::connect(&socket)?;
+    let message = serde_json::to_vec(&Request::EventSubscribe {
+        kinds: Vec::new(),
+        replay: false,
+    })?;
+    (&stream).write_all(&message)?;
+    (&stream).write_all(b"\n")?;
+    (&stream).flush()?;
+    let mut reader = BufReader::new(&stream);
+    let mut line = String::new();
+    reader.read_line(&mut line)?; // handshake
+    loop {
+        line.clear();
+        if reader.read_line(&mut line)? == 0 {
+            return Ok(());
+        }
+        match serde_json::from_str::<crate::wire::Frame>(line.trim()) {
+            Ok(crate::wire::Frame::Event(event)) => {
+                let mut lines = lines.lock().unwrap();
+                lines.push_back(event_line(&event));
+                while lines.len() > FEED_LINES {
+                    lines.pop_front();
+                }
+            }
+            Ok(crate::wire::Frame::End) => return Ok(()),
+            _ => {}
+        }
+    }
+}
+
+/// `HH:MM:SS app kind detail` (UTC).
+pub(crate) fn event_line(event: &crate::wire::Event) -> String {
+    let seconds = event.ts_ms / 1000 % 86_400;
+    let kind = serde_json::to_value(event.kind)
+        .ok()
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .unwrap_or_default();
+    let detail = event
+        .detail
+        .as_ref()
+        .map(|detail| format!(" {detail}"))
+        .unwrap_or_default();
+    format!(
+        "{:02}:{:02}:{:02} {} {kind}{detail}",
+        seconds / 3600,
+        seconds / 60 % 60,
+        seconds % 60,
+        event.app
+    )
+}
+
+/// Edges of all sessions, for the console (empty when nothing answers).
+pub(crate) fn current_edges() -> Vec<Edge> {
+    all_edges().0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +412,21 @@ mod tests {
             ..args(RelationKind::Parent)
         };
         assert!(edge_of(&bad).is_err());
+    }
+
+    #[test]
+    fn event_lines_show_utc_time_app_kind_and_detail() {
+        let event = crate::wire::Event {
+            kind: EventKind::RelationEnded,
+            app: "a".into(),
+            ts_ms: (3600 * 13 + 60 * 5 + 7) * 1000,
+            seq: 1,
+            detail: Some(json!({"ended": "b"})),
+        };
+        assert_eq!(
+            event_line(&event),
+            "13:05:07 a relation_ended {\"ended\":\"b\"}"
+        );
     }
 
     #[test]
