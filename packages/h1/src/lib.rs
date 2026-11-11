@@ -6,12 +6,15 @@ mod console;
 mod control;
 mod doctor;
 mod graphspec;
+mod hub;
 mod ipc;
 mod keys;
 mod session;
+mod signals;
 mod state;
 #[cfg(windows)]
 mod windows_killer;
+mod wire;
 
 use std::{
     env,
@@ -97,6 +100,8 @@ enum Commands {
     Recover(RecoverCmdArgs),
     /// Print an event whenever a session starts asking, stalls, or ends.
     Watch(WatchArgs),
+    /// Emit or listen for signals between sessions.
+    Signal(signals::SignalArgs),
     /// Start a named agent lab.
     Spawn(commander::SpawnArgs),
     /// Record a lab checkpoint in the persistent ledger.
@@ -625,6 +630,7 @@ pub fn execute(cli: Cli) -> Result<i32> {
             None => commands::wait(args),
         },
         Commands::Watch(args) => commands::watch(args),
+        Commands::Signal(args) => signals::run(args),
         Commands::Spawn(args) => commander::spawn(args),
         Commands::Checkpoint(args) => commander::checkpoint(args),
         Commands::Decide(args) => commander::decide(args),
@@ -907,6 +913,7 @@ fn host(mut args: HostArgs) -> Result<i32> {
 
     let shared = Arc::new(control::HostShared {
         writer: writer.clone(),
+        hub: Arc::new(crate::hub::Hub::new()),
         parser: parser.clone(),
         resizer,
         recorder: recorder.clone(),

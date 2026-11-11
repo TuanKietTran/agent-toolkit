@@ -33,6 +33,7 @@ pub(crate) struct HostInfo {
 
 pub(crate) struct HostShared {
     pub writer: SharedWriter,
+    pub hub: Arc<crate::hub::Hub>,
     pub parser: Arc<Mutex<vt100::Parser>>,
     pub resizer: Resizer,
     pub recorder: Option<Arc<Mutex<Recorder>>>,
@@ -131,7 +132,7 @@ impl HostShared {
         activity.bytes += bytes as u64;
     }
 
-    fn quiet_ms(&self) -> u64 {
+    pub(crate) fn quiet_ms(&self) -> u64 {
         self.activity
             .lock()
             .unwrap()
@@ -188,11 +189,139 @@ fn reply(stream: &ipc::Stream, value: &Value) -> Result<()> {
 fn handle_control(stream: ipc::Stream, shared: &Arc<HostShared>) -> Result<()> {
     let mut line = String::new();
     BufReader::new(&stream).read_line(&mut line)?;
-    let response = match serde_json::from_str::<Value>(&line) {
-        Ok(request) => dispatch(&request, shared),
-        Err(error) => failure(format!("invalid request: {error}")),
+    let value: Value = match serde_json::from_str(&line) {
+        Ok(value) => value,
+        Err(error) => return reply(&stream, &failure(format!("invalid request: {error}"))),
     };
-    reply(&stream, &response)
+    let op = value
+        .get("op")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    // Wire ops (signals/events/relations) are tried through `wire::Request` before
+    // `dispatch` answers "unknown operation" (see the wire contract header).
+    if matches!(
+        op.as_str(),
+        "signal_emit" | "signal_listen" | "event_subscribe"
+    ) {
+        let request: crate::wire::Request = match serde_json::from_value(value) {
+            Ok(request) => request,
+            Err(error) => {
+                return reply(&stream, &failure(format!("invalid request: {error}")));
+            }
+        };
+        return handle_wire(stream, shared, request);
+    }
+    reply(&stream, &dispatch(&value, shared))
+}
+
+fn response_value(response: crate::wire::Response) -> Value {
+    serde_json::to_value(response)
+        .unwrap_or_else(|_| json!({ "ok": false, "error": "failed to serialize response" }))
+}
+
+fn write_frame(stream: &ipc::Stream, frame: &crate::wire::Frame) -> Result<()> {
+    let mut bytes = serde_json::to_vec(frame)?;
+    bytes.push(b'\n');
+    let mut stream = stream;
+    stream.write_all(&bytes)?;
+    stream.flush()?;
+    Ok(())
+}
+
+fn handle_wire(
+    stream: ipc::Stream,
+    shared: &Arc<HostShared>,
+    request: crate::wire::Request,
+) -> Result<()> {
+    use crate::wire::{Frame, Request, Response};
+    match request {
+        Request::SignalEmit { signal } => {
+            if !crate::hub::valid_signal_name(&signal.name) {
+                return reply(
+                    &stream,
+                    &response_value(Response::Plain {
+                        ok: false,
+                        error: Some(format!("invalid signal name: {}", signal.name)),
+                    }),
+                );
+            }
+            let mut signal = signal;
+            // The receiving host stamps the envelope: target, time and per-host seq.
+            signal.to = shared.info.name.clone();
+            signal.ts_ms = crate::hub::now_ms();
+            signal.seq = shared.hub.next_seq();
+            let delivered = shared.hub.deliver_signal(&signal);
+            reply(
+                &stream,
+                &response_value(Response::Delivered {
+                    ok: true,
+                    delivered,
+                }),
+            )
+        }
+        Request::SignalListen { names, types } => handle_stream(
+            stream,
+            shared,
+            move |hub, tx| hub.add_signal_sub(names, types, tx),
+            None,
+        ),
+        Request::EventSubscribe { kinds, replay } => {
+            let replay_frame = if replay {
+                shared
+                    .hub
+                    .last_event()
+                    .filter(|event| kinds.is_empty() || kinds.contains(&event.kind))
+                    .map(Frame::Event)
+            } else {
+                None
+            };
+            handle_stream(
+                stream,
+                shared,
+                move |hub, tx| hub.add_event_sub(kinds, tx),
+                replay_frame,
+            )
+        }
+        _ => reply(
+            &stream,
+            &failure("unknown operation: wire op not implemented yet".to_owned()),
+        ),
+    }
+}
+
+/// Serve one streaming subscription: register the caller's sender with the hub,
+/// answer `{"ok":true,"stream":true}`, then write one `Frame` per line until the
+/// client disconnects or the host goes away (then a final `end` frame).
+fn handle_stream(
+    stream: ipc::Stream,
+    shared: &Arc<HostShared>,
+    register: impl FnOnce(&crate::hub::Hub, mpsc::Sender<crate::wire::Frame>),
+    replay: Option<crate::wire::Frame>,
+) -> Result<()> {
+    let (tx, rx) = mpsc::channel();
+    register(&shared.hub, tx);
+    reply(&stream, &json!({ "ok": true, "stream": true }))?;
+    if let Some(frame) = &replay {
+        write_frame(&stream, frame)?;
+    }
+    loop {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(frame) => {
+                if write_frame(&stream, &frame).is_err() {
+                    break;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                if shared.stopped.load(Ordering::Acquire) || shared.hub.is_closed() {
+                    break;
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        }
+    }
+    let _ = write_frame(&stream, &crate::wire::Frame::End);
+    Ok(())
 }
 
 fn dispatch(request: &Value, shared: &Arc<HostShared>) -> Value {
