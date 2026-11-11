@@ -796,10 +796,8 @@ fn list_resources(args: RunFilterArgs) -> Result<i32> {
     let now = resources::now_unix();
     let mut shown = 0;
     for record in &items {
-        if let Some(run) = &args.run {
-            if run != &record.run {
-                continue;
-            }
+        if args.run.as_ref().is_some_and(|run| run != &record.run) {
+            continue;
         }
         println!(
             "{} {} run={} age={}s",

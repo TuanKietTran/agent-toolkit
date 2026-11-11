@@ -144,7 +144,9 @@ pub fn release(dir: &Path, run: Option<&str>) -> Vec<Resource> {
     for item in &freed {
         free_one(item);
     }
-    let _ = save(dir, &remainder);
+    if !freed.is_empty() {
+        let _ = save(dir, &remainder);
+    }
     freed
 }
 
