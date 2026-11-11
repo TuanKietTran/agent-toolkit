@@ -1,8 +1,5 @@
-<<<<<<< HEAD
-mod agent_start;
-=======
 mod adopt;
->>>>>>> feat/h1-agents-adopt
+mod agent_start;
 mod agents;
 mod commander;
 mod commands;
