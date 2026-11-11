@@ -1,0 +1,8 @@
+=== check ===
+ok: 1 harnesses, 1 teams
+=== plan ===
+# harness worker: anthropic/claude-haiku-5-5 (via system-one R3: validator fallback: strict constraints)
+h1 open -n worker --role worker --model anthropic/claude-haiku-5-5 --env FLEET_TOKEN=${vault.local.FLEET_TOKEN} --detached -- cat
+=== graph ===
+team default (root worker)
+worker  [worker]  anthropic/claude-haiku-5-5  (system-one R3)
