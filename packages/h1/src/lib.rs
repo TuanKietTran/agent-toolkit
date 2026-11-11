@@ -12,6 +12,7 @@ mod session;
 mod state;
 #[cfg(windows)]
 mod windows_killer;
+mod wire;
 
 use std::{
     env,
@@ -468,7 +469,12 @@ struct RenewCmdArgs {
 #[derive(Debug, Args)]
 struct RecoverCmdArgs {
     /// Session name given to `host --name` or `open --name`.
-    #[arg(long, short = 'n', value_name = "NAME", required_unless_present = "all")]
+    #[arg(
+        long,
+        short = 'n',
+        value_name = "NAME",
+        required_unless_present = "all"
+    )]
     name: Option<String>,
     /// Recover every session that has a record but no host.
     #[arg(long, conflicts_with = "name")]

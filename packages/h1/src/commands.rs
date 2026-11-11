@@ -528,8 +528,8 @@ fn recover_one(entry: &session::Entry, timeout_secs: u64) -> Result<(), String> 
             missing.join(", ")
         ));
     }
-    let exe = env::current_exe()
-        .map_err(|error| format!("failed to resolve h1 executable: {error}"))?;
+    let exe =
+        env::current_exe().map_err(|error| format!("failed to resolve h1 executable: {error}"))?;
     let mut argv: Vec<OsString> = vec![
         "open".into(),
         "--detached".into(),
