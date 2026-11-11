@@ -601,7 +601,7 @@ mod tests {
 
     #[test]
     fn canonical_fixture_structure() {
-        let src = include_str!("../tests/fixtures/canonical.yah");
+        let src = include_str!("../../tests/fixtures/canonical.yah");
         let f = ok(src);
         assert_eq!(f.version, 1);
         assert_eq!(f.name, "test.yah");
@@ -616,7 +616,7 @@ mod tests {
 
     #[test]
     fn canonical_refs_lists_and_nested_open() {
-        let src = include_str!("../tests/fixtures/canonical.yah");
+        let src = include_str!("../../tests/fixtures/canonical.yah");
         let f = ok(src);
         // provider api_key = env.ANTHROPIC_API_KEY
         let provider = match &f.stmts[2] { Stmt::Block(b) => b, _ => panic!() };
@@ -998,7 +998,7 @@ mod tests {
 
     #[test]
     fn truncations_never_panic() {
-        let src = include_str!("../tests/fixtures/canonical.yah");
+        let src = include_str!("../../tests/fixtures/canonical.yah");
         for (i, _) in src.char_indices() {
             let _ = parse("test.yah", &src[..i]);
         }

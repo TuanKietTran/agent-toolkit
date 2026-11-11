@@ -45,7 +45,7 @@ mod tests {
 
     #[test]
     fn load_str_canonical_succeeds_once_schema_lands() {
-        let src = include_str!("../tests/fixtures/canonical.yah");
+        let src = include_str!("../../tests/fixtures/canonical.yah");
         let spec = load_str("canonical.yah", src, &no_overrides()).expect("canonical must load");
         assert_eq!(spec.version, 1);
         assert_eq!(spec.file, "canonical.yah");

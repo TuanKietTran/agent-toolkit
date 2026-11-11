@@ -811,7 +811,7 @@ mod tests {
 
     #[test]
     fn canonical_fixture_resolves_via_parser() {
-        let src = include_str!("../tests/fixtures/canonical.yah");
+        let src = include_str!("../../tests/fixtures/canonical.yah");
         let parsed = crate::yah::parser::parse("canonical.yah", src).expect("fixture parses");
         let out = resolve(parsed, &overrides(&[("work_dir", "/data/work")])).expect("fixture resolves");
         let fs_api = find_block(&out, "api", "fs");
