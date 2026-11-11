@@ -1,6 +1,6 @@
 //! The `graphloop` command line.
 //!
-//! check | plan | graph | up | down | runs | trace. Core functions take an already-built
+//! check | plan | graph | preview | up | down | runs | trace. Core functions take an already-built
 //! `Plan`/`Resolved` plus a `LabRunner` trait object; the load -> pick -> plan wrappers
 //! are thin and separate, so tests drive the cores with a hand-built plan and a fake lab.
 
@@ -20,6 +20,26 @@ use crate::spec::{Harness, RenderCtx, Spec, Team, Vault};
 
 pub fn check_line(harnesses: usize, teams: usize) -> String {
     format!("ok: {harnesses} harnesses, {teams} teams")
+}
+
+/// Build the preview JSON for an already-loaded spec and team. Never picks a
+/// model through system-one, never fetches a vault secret, never expands
+/// `${env.*}` and writes nothing: the document is returned as a string.
+pub fn preview_core(
+    spec: &Spec,
+    team: &Team,
+    prefix: Option<String>,
+    detached: bool,
+) -> Result<String, String> {
+    let opts = crate::preview::PreviewOpts {
+        prefix,
+        detached,
+        check_cwd: true,
+    };
+    let preview = crate::preview::build_preview(spec, &team.name, &opts);
+    serde_json::to_string_pretty(&preview)
+        .map(|s| s + "\n")
+        .map_err(|e| err(&e.to_string()))
 }
 
 pub fn parse_vars(items: &[String]) -> Result<BTreeMap<String, String>, String> {
@@ -677,6 +697,8 @@ enum Cmd {
     /// Print the h1 open commands for a team
     Plan { #[command(flatten)] args: FileArgs, /// Emit one JSON document instead of text
         #[arg(long)] json: bool },
+    /// Print a dry-run preview of a team as JSON: open nothing, pick nothing, fetch nothing
+    Preview { #[command(flatten)] args: FileArgs },
     /// Print the team graph as a tree
     Graph { #[command(flatten)] args: FileArgs },
     /// Open every lab in a team and write a run manifest
@@ -736,6 +758,11 @@ fn dispatch(cli: Cli) -> Result<String, String> {
             load_env_files(&args)?;
             let plan = build_plan(&spec, &team, &resolved, opts)?;
             if json { serde_json::to_string_pretty(&plan_json(&plan, &resolved)).map(|s| s + "\n").map_err(|e| err(&e.to_string())) } else { Ok(plan_output(&plan, &resolved)) }
+        }
+        Cmd::Preview { args } => {
+            let spec = load_spec(&args.file, &args.var)?;
+            let team = select_team(&spec.teams, args.team.as_deref()).map_err(|e| err(&e))?.clone();
+            preview_core(&spec, &team, args.prefix.clone(), args.detached)
         }
         Cmd::Graph { args } => {
             let (spec, team, resolved) = load_and_resolve(&args)?;
