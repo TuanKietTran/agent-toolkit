@@ -1,0 +1,104 @@
+yah 1
+
+// research-team.yah - planner at the root; researcher, builder and
+// reviewer all under the planner. The planner is pinned to a model
+// label; every other harness uses system-one, with complexity as a
+// hint for the pick. All harnesses share the MCP filesystem tool.
+// Commands pass the model as ${harnesses.<label>.model_id}: pi with
+// --provider claude-cli expects the bare id (claude-sonnet-5-5), not
+// the provider/id form that ${harnesses.<label>.model} yields.
+
+variable "work_dir" {
+  type = "string"
+  default = "./work"
+}
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+  api_key = env.ANTHROPIC_API_KEY
+}
+
+model "sonnet" {
+  provider = "anthropic"
+  id = "claude-sonnet-5-5"
+  capabilities = ["chat", "tools", "vision"]
+}
+
+model "haiku" {
+  provider = "anthropic"
+  id = "claude-haiku-5-5"
+  capabilities = ["chat", "tools"]
+}
+
+system_one {
+  fallback = "haiku"
+  student = "data/student_model.json"
+}
+
+api "fs" {
+  type = "mcp"
+  command = ["npx", "-y", "@modelcontextprotocol/server-filesystem", var.work_dir]
+}
+
+harness "planner" {
+  kind = "h1"
+  role = "planner"
+  model = "sonnet"
+  complexity = "high"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.planner.model_id}", "--no-session"]
+    cols = 140
+    rows = 40
+  }
+}
+
+harness "researcher" {
+  kind = "h1"
+  role = "researcher"
+  parent = "planner"
+  model = "system-one"
+  complexity = "medium"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.researcher.model_id}", "--no-session"]
+    cwd = var.work_dir
+  }
+}
+
+harness "builder" {
+  kind = "h1"
+  role = "builder"
+  parent = "planner"
+  model = "system-one"
+  complexity = "high"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.builder.model_id}", "--no-session"]
+    cwd = var.work_dir
+  }
+}
+
+harness "reviewer" {
+  kind = "h1"
+  role = "reviewer"
+  parent = "planner"
+  model = "system-one"
+  complexity = "low"
+  tools = ["fs"]
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.reviewer.model_id}", "--no-session"]
+    cwd = var.work_dir
+  }
+}
+
+team "research" {
+  root = "planner"
+  members = ["researcher", "builder", "reviewer"]
+  graph = true
+}

@@ -1,11 +1,20 @@
 {
   "_doc": "Single source of truth for per-package workflows. Every package exposes the same verbs (install, check, test, build); a missing verb means 'nothing to do'. `dependsOn` lists sibling packages whose changes should also trigger this one. `os` is the CI runner.",
   "packages": {
+    "yah": {
+      "dir": "yah",
+      "os": "ubuntu-latest",
+      "toolchain": "rust",
+      "check": "cargo check --locked",
+      "test": "cargo test --locked",
+      "build": "cargo build --locked"
+    },
     "h1": {
       "os": "ubuntu-latest",
       "toolchain": "rust",
       "dependsOn": [
-        "system-one"
+        "system-one",
+        "yah"
       ],
       "check": "cargo check --locked",
       "test": "cargo test --locked",

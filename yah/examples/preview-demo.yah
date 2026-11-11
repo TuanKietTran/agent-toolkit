@@ -1,0 +1,64 @@
+yah 1
+
+// preview-demo.yah - a preview that deliberately warns. Two of the
+// three warning triggers the preview brief asks this file to show can
+// live in a file that still loads:
+//
+//   empty_variable - variable "note" below defaults to "" and is used
+//                    as the NOTE env value, so it resolves empty.
+//   missing_cwd    - the harness cwd "./preview-demo-work" does not
+//                    exist (preview stats literal cwd paths).
+//
+// The third, unknown_model, cannot: a harness that names a model
+// label with no matching model block fails `graphloop check` -
+// schema validation rejects the unknown reference and the file does
+// not load at all, so no preview document is ever produced for it.
+// The contract's `unknown` model_status / `unknown_model` warning
+// covers specs a caller builds without that load step. Its shape:
+//
+//   harness "ghost" { kind = "h1" role = "lead" model = "ghost"
+//                     open { command = ["cat"] } }
+//
+// The hosted program is plain cat, so even `graphloop up` on this
+// file would run no model.
+
+variable "note" {
+  type = "string"
+  default = ""
+}
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+}
+
+model "sonnet" {
+  provider = "anthropic"
+  id = "claude-sonnet-5-5"
+  capabilities = ["chat"]
+}
+
+system_one {
+  fallback = "sonnet"
+}
+
+harness "demo" {
+  kind  = "h1"
+  role  = "lead"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    cwd     = "./preview-demo-work"
+    env = {
+      NOTE = var.note
+    }
+  }
+}
+
+team "preview-demo" {
+  root = "demo"
+}

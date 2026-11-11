@@ -1,0 +1,56 @@
+yah 1
+
+// vault.yah - secrets without secret values: a dotenv vault declares
+// where a token lives, and a harness env map references it as
+// ${vault.NAME.KEY}. The value is fetched only at graphloop up time,
+// held in memory, and passed in the process environment (never argv).
+// The hosted program is plain cat, so trying it opens no model.
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+}
+
+model "haiku" {
+  provider = "anthropic"
+  id = "claude-haiku-5-5"
+  capabilities = ["chat"]
+}
+
+system_one {
+  fallback = "haiku"
+}
+
+vault "local" {
+  provider = "dotenv"
+  path     = "fleet.env"
+  secrets  = {
+    FLEET_TOKEN = "FLEET_TOKEN"
+  }
+}
+
+harness "worker" {
+  kind  = "h1"
+  role  = "worker"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    detached = true
+    env = {
+      FLEET_TOKEN = "${vault.local.FLEET_TOKEN}"
+    }
+  }
+}
+
+// The team makes the example runnable end to end: plan|up need a
+// team, and this one is the vault-carrying worker on its own, so
+// vault + team are demonstrated together.
+team "default" {
+  root = "worker"
+  members = []
+  graph = true
+}

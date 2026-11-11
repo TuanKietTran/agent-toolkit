@@ -18,7 +18,7 @@ mod state;
 #[cfg(windows)]
 mod windows_killer;
 mod wire;
-pub mod yah;
+pub use ::yah;
 
 use std::{
     env,

@@ -16,6 +16,7 @@ regex = "1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 vt100 = "0.15"
+yah = { path = "../../yah" }
 
 [target.'cfg(windows)'.dependencies]
 widestring = "1"

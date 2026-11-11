@@ -1,0 +1,65 @@
+yah 1
+
+// renewable-team.yah - team.yah's commander -> builder pair, with the
+// builder's open block carrying the renew fields: brief and resume_log
+// are stored by `h1 open` (--brief / --resume-log) so `h1 renew` can
+// re-arm the session with its brief contents plus the last resume_log
+// lines, and auto_rearm (--auto-rearm) makes that re-arm happen on its
+// own when the session's new-command is submitted. All three are
+// optional; a harness without them opens exactly as before.
+
+variable "work_dir" {
+  type = "string"
+  default = "./work"
+}
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+  api_key = env.ANTHROPIC_API_KEY
+}
+
+model "sonnet" {
+  provider = "anthropic"
+  id = "claude-sonnet-5-5"
+  capabilities = ["chat", "tools", "vision"]
+}
+
+system_one {
+  fallback = "sonnet"
+}
+
+harness "commander" {
+  kind = "h1"
+  role = "commander"
+  model = "system-one"
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.commander.model_id}", "--no-session"]
+    cols = 140
+    rows = 40
+  }
+}
+
+harness "builder" {
+  kind = "h1"
+  role = "builder"
+  parent = "commander"
+  model = "system-one"
+  open {
+    command = ["pi", "--provider", "claude-cli", "--model", "${harnesses.builder.model_id}", "--no-session"]
+    cwd = var.work_dir
+    brief = "briefs/builder.md"
+    resume_log = "status/builder.log"
+    auto_rearm = true
+  }
+}
+
+team "default" {
+  root = "commander"
+  members = ["builder"]
+  graph = true
+}
