@@ -9,6 +9,7 @@
 //!     that is an error naming the harness and its line. system-one only ever decides `model_pick`;
 //!     never route anything else through it.
 
+use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -226,9 +227,11 @@ impl Picker for SystemOnePicker {
     }
 }
 
-/// Find `packages/system-one`: `$GRAPHLOOP_SYSTEM_ONE_DIR`, then walking up from the `.yah`
-/// file, then walking up from the executable and the current directory, looking for
-/// `packages/system-one/src/system_one`.
+/// Find `packages/system-one`, in order: `$H1_SYSTEM_ONE_DIR`, `$GRAPHLOOP_SYSTEM_ONE_DIR`,
+/// walking up from the `.yah` file, next to the executable (`<exe dir>/system-one`,
+/// `<exe dir>/../system-one`, `<exe dir>/../share/h1/system-one`), the path stored in
+/// `<config dir>/system-one-dir`, then walking up from the executable and the current
+/// directory, looking for `packages/system-one/src/system_one`.
 fn is_system_one_dir(path: &Path) -> bool {
     path.join("src").join("system_one").is_dir()
 }
@@ -247,7 +250,7 @@ fn search_ancestors(start: &Path) -> Option<PathBuf> {
 }
 
 /// Outcome of a system-one search: the directory found (if any), the raw
-/// `GRAPHLOOP_SYSTEM_ONE_DIR` value when it was set but invalid, and a short
+/// env-override value when one was set but invalid, and a short
 /// label for every place that was looked, in search order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SystemOneLocation {
@@ -257,45 +260,212 @@ pub struct SystemOneLocation {
 }
 
 /// Pure search core (no process env / exe / cwd reads) so tests do not race on env vars.
-/// Order: env override, upward from the `.yah` file, then `extra_starts` (exe, cwd).
-pub fn locate_system_one_from(env_val: Option<&str>, yah_file: Option<&Path>, extra_starts: &[PathBuf]) -> SystemOneLocation {
+/// Order: `$H1_SYSTEM_ONE_DIR`, `$GRAPHLOOP_SYSTEM_ONE_DIR`, upward from the `.yah`
+/// file, next to the exe, the stored dir, then `extra_starts` (exe, cwd) upward.
+pub fn locate_system_one_from(
+    h1_env_val: Option<&str>,
+    legacy_env_val: Option<&str>,
+    yah_file: Option<&Path>,
+    exe_dir: Option<&Path>,
+    stored_dir: Option<&Path>,
+    extra_starts: &[PathBuf],
+) -> SystemOneLocation {
     let mut looked: Vec<String> = Vec::new();
     let mut env_invalid: Option<String> = None;
-    if let Some(raw) = env_val.filter(|v| !v.is_empty()) {
-        looked.push(format!("GRAPHLOOP_SYSTEM_ONE_DIR={raw}"));
-        let candidate = PathBuf::from(raw);
-        if is_system_one_dir(&candidate) {
-            return SystemOneLocation { dir: Some(candidate), env_invalid: None, looked };
+    for (name, raw_opt) in [
+        ("H1_SYSTEM_ONE_DIR", h1_env_val),
+        ("GRAPHLOOP_SYSTEM_ONE_DIR", legacy_env_val),
+    ] {
+        if let Some(raw) = raw_opt.filter(|v| !v.is_empty()) {
+            looked.push(format!("{name}={raw}"));
+            let candidate = PathBuf::from(raw);
+            if is_system_one_dir(&candidate) {
+                return SystemOneLocation {
+                    dir: Some(candidate),
+                    env_invalid,
+                    looked,
+                };
+            }
+            if env_invalid.is_none() {
+                env_invalid = Some(raw.to_string());
+            }
+        } else {
+            looked.push(format!("{name} (unset)"));
         }
-        env_invalid = Some(raw.to_string());
-    } else {
-        looked.push("GRAPHLOOP_SYSTEM_ONE_DIR (unset)".to_string());
     }
     if let Some(yah) = yah_file {
-        let start = if yah.is_dir() { yah.to_path_buf() } else { yah.parent().map(|p| p.to_path_buf()).unwrap_or_default() };
+        let start = if yah.is_dir() {
+            yah.to_path_buf()
+        } else {
+            yah.parent().map(|p| p.to_path_buf()).unwrap_or_default()
+        };
         if !start.as_os_str().is_empty() {
             looked.push(format!("upward from {}", start.display()));
             if let Some(found) = search_ancestors(&start) {
-                return SystemOneLocation { dir: Some(found), env_invalid, looked };
+                return SystemOneLocation {
+                    dir: Some(found),
+                    env_invalid,
+                    looked,
+                };
             }
         }
+    }
+    if let Some(exe_dir) = exe_dir {
+        for candidate in [
+            exe_dir.join("system-one"),
+            exe_dir.join("..").join("system-one"),
+            exe_dir
+                .join("..")
+                .join("share")
+                .join("h1")
+                .join("system-one"),
+        ] {
+            looked.push(format!("next to exe: {}", candidate.display()));
+            if is_system_one_dir(&candidate) {
+                return SystemOneLocation {
+                    dir: Some(candidate),
+                    env_invalid,
+                    looked,
+                };
+            }
+        }
+    }
+    match stored_dir {
+        Some(stored) => {
+            looked.push(format!("stored: {}", stored.display()));
+            if is_system_one_dir(stored) {
+                return SystemOneLocation {
+                    dir: Some(stored.to_path_buf()),
+                    env_invalid,
+                    looked,
+                };
+            }
+        }
+        None => looked.push("stored: (none)".to_string()),
     }
     for start in extra_starts {
         looked.push(format!("upward from {}", start.display()));
         if let Some(found) = search_ancestors(start) {
-            return SystemOneLocation { dir: Some(found), env_invalid, looked };
+            return SystemOneLocation {
+                dir: Some(found),
+                env_invalid,
+                looked,
+            };
         }
     }
-    SystemOneLocation { dir: None, env_invalid, looked }
+    SystemOneLocation {
+        dir: None,
+        env_invalid,
+        looked,
+    }
+}
+
+/// The h1 config directory: `$H1_CONFIG_DIR`, else `%APPDATA%\\h1` (Windows only),
+/// else `$XDG_CONFIG_HOME/h1`, else `~/.config/h1`.
+pub fn config_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let app_data = if cfg!(windows) {
+        std::env::var("APPDATA").ok()
+    } else {
+        None
+    };
+    config_dir_from(
+        std::env::var("H1_CONFIG_DIR").ok().as_deref(),
+        std::env::var("XDG_CONFIG_HOME").ok().as_deref(),
+        app_data.as_deref(),
+        home.as_deref(),
+    )
+}
+
+/// Pure core of `config_dir` (no process env reads) so tests do not race on env vars.
+pub fn config_dir_from(
+    h1_config_dir: Option<&str>,
+    xdg_config_home: Option<&str>,
+    app_data: Option<&str>,
+    home: Option<&Path>,
+) -> Option<PathBuf> {
+    if let Some(raw) = h1_config_dir.filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(raw));
+    }
+    if let Some(raw) = app_data.filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(raw).join("h1"));
+    }
+    if let Some(raw) = xdg_config_home.filter(|v| !v.is_empty()) {
+        return Some(PathBuf::from(raw).join("h1"));
+    }
+    home.map(|h| h.join(".config").join("h1"))
+}
+
+/// File inside the config directory holding the stored system-one path (one line).
+const SYSTEM_ONE_DIR_FILE: &str = "system-one-dir";
+
+/// The system-one directory stored by `h1 doctor --set-system-one`, if any.
+pub fn stored_system_one_dir() -> Option<PathBuf> {
+    config_dir().and_then(|dir| stored_system_one_dir_in(&dir))
+}
+
+pub fn stored_system_one_dir_in(config_dir: &Path) -> Option<PathBuf> {
+    let text = fs::read_to_string(config_dir.join(SYSTEM_ONE_DIR_FILE)).ok()?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(trimmed))
+    }
+}
+
+/// Validate `dir` as a system-one package directory and store it for later picks.
+pub fn store_system_one_dir(dir: &Path) -> anyhow::Result<()> {
+    let config_dir =
+        config_dir().context("cannot find the h1 config directory: set H1_CONFIG_DIR or HOME")?;
+    store_system_one_dir_in(&config_dir, dir)
+}
+
+pub fn store_system_one_dir_in(config_dir: &Path, dir: &Path) -> anyhow::Result<()> {
+    if !is_system_one_dir(dir) {
+        anyhow::bail!(
+            "{} is not a system-one package directory (no src/system_one)",
+            dir.display()
+        );
+    }
+    fs::create_dir_all(config_dir)
+        .with_context(|| format!("cannot create config directory {}", config_dir.display()))?;
+    let file = config_dir.join(SYSTEM_ONE_DIR_FILE);
+    fs::write(&file, format!("{}\n", dir.display()))
+        .with_context(|| format!("cannot write {}", file.display()))?;
+    Ok(())
 }
 
 pub fn locate_system_one_detailed(yah_file: Option<&Path>) -> SystemOneLocation {
-    let env_val = std::env::var("GRAPHLOOP_SYSTEM_ONE_DIR").ok();
+    let h1_env_val = std::env::var("H1_SYSTEM_ONE_DIR").ok();
+    let legacy_env_val = std::env::var("GRAPHLOOP_SYSTEM_ONE_DIR").ok();
     let mut starts: Vec<PathBuf> = Vec::new();
-    if let Ok(exe) = std::env::current_exe() { starts.push(exe); }
-    if let Ok(cwd) = std::env::current_dir() { starts.push(cwd); }
-    let abs_yah: Option<PathBuf> = yah_file.map(|p| if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().map(|cwd| cwd.join(p)).unwrap_or_else(|_| p.to_path_buf()) });
-    locate_system_one_from(env_val.as_deref(), abs_yah.as_deref(), &starts)
+    let mut exe_dir: Option<PathBuf> = None;
+    if let Ok(exe) = std::env::current_exe() {
+        exe_dir = exe.parent().map(|p| p.to_path_buf());
+        starts.push(exe);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        starts.push(cwd);
+    }
+    let stored = stored_system_one_dir();
+    let abs_yah: Option<PathBuf> = yah_file.map(|p| {
+        if p.is_absolute() {
+            p.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map(|cwd| cwd.join(p))
+                .unwrap_or_else(|_| p.to_path_buf())
+        }
+    });
+    locate_system_one_from(
+        h1_env_val.as_deref(),
+        legacy_env_val.as_deref(),
+        abs_yah.as_deref(),
+        exe_dir.as_deref(),
+        stored.as_deref(),
+        &starts,
+    )
 }
 
 pub fn locate_system_one() -> Option<PathBuf> {
@@ -306,8 +476,100 @@ pub fn locate_system_one() -> Option<PathBuf> {
 pub fn system_one_not_found_reason(location: &SystemOneLocation) -> String {
     let looked = location.looked.join(", ");
     match &location.env_invalid {
-        Some(raw) => format!("system-one not found: GRAPHLOOP_SYSTEM_ONE_DIR={raw:?} is not a system-one package directory (no src/system_one); looked in {looked}; set GRAPHLOOP_SYSTEM_ONE_DIR to a valid system-one package directory"),
-        None => format!("system-one not found: looked in {looked} for packages/system-one; set GRAPHLOOP_SYSTEM_ONE_DIR to the system-one package directory"),
+        Some(raw) => format!(
+            "system-one not found: env override {raw:?} is not a system-one package directory (no src/system_one); looked in {looked}; set H1_SYSTEM_ONE_DIR (or GRAPHLOOP_SYSTEM_ONE_DIR) to a valid system-one package directory"
+        ),
+        None => format!(
+            "system-one not found: looked in {looked} for packages/system-one; set H1_SYSTEM_ONE_DIR to the system-one package directory"
+        ),
+    }
+}
+
+/// Sample catalog for the doctor sample pick, mirroring `examples/team.yah`.
+fn sample_catalog() -> Vec<CatalogEntry> {
+    vec![
+        CatalogEntry {
+            label: "sonnet".to_string(),
+            id: "claude-sonnet-5-5".to_string(),
+            provider_type: "anthropic".to_string(),
+            capabilities: Vec::new(),
+        },
+        CatalogEntry {
+            label: "haiku".to_string(),
+            id: "claude-haiku-5-5".to_string(),
+            provider_type: "anthropic".to_string(),
+            capabilities: Vec::new(),
+        },
+        CatalogEntry {
+            label: "opus".to_string(),
+            id: "claude-opus-5".to_string(),
+            provider_type: "anthropic".to_string(),
+            capabilities: Vec::new(),
+        },
+    ]
+}
+
+struct UnavailablePicker;
+impl Picker for UnavailablePicker {
+    fn pick(&self, _request: &PickRequest) -> anyhow::Result<PickDecision> {
+        Err(anyhow!("system-one is not available"))
+    }
+}
+
+/// Two informational lines for `h1 doctor`: where system-one was found (or that
+/// it was not, and where was looked), plus a sample pick against the sample
+/// catalog (the catalog fallback, `claude-sonnet-5-5`, when the picker fails
+/// or chooses an unknown id).
+pub fn doctor_report_with(location: &SystemOneLocation, picker: &dyn Picker) -> Vec<String> {
+    let first = match &location.dir {
+        Some(dir) => format!("system-one: found at {}", dir.display()),
+        None => format!(
+            "system-one: not found (looked: {})",
+            location.looked.join(", ")
+        ),
+    };
+    let available = sample_catalog();
+    let request = PickRequest {
+        harness: "doctor".to_string(),
+        role: "builder".to_string(),
+        complexity: Complexity::Medium,
+        available: available.clone(),
+        needs_images: false,
+    };
+    let second = match picker.pick(&request) {
+        Ok(decision) if available.iter().any(|e| e.id == decision.model_id) => format!(
+            "system-one sample pick: {} (via system-one: {} {})",
+            decision.model_id, decision.rule, decision.reason
+        ),
+        Ok(decision) => format!(
+            "system-one sample pick: claude-sonnet-5-5 (via fallback: system-one chose unknown model {})",
+            decision.model_id
+        ),
+        Err(e) => format!(
+            "system-one sample pick: claude-sonnet-5-5 (via fallback: system-one unavailable: {e})"
+        ),
+    };
+    vec![first, second]
+}
+
+/// Doctor lines for the real environment: locate system-one, then sample-pick
+/// with the real picker when one was found.
+pub fn doctor_report(yah_file: Option<&Path>) -> Vec<String> {
+    let location = locate_system_one_detailed(yah_file);
+    match &location.dir {
+        Some(dir) => {
+            let picker = SystemOnePicker {
+                python: std::env::var("GRAPHLOOP_PYTHON")
+                    .ok()
+                    .filter(|v| !v.is_empty())
+                    .unwrap_or_else(|| "python3".to_string()),
+                system_one_dir: dir.clone(),
+                student: None,
+                timeout_ms: 10_000,
+            };
+            doctor_report_with(&location, &picker)
+        }
+        None => doctor_report_with(&location, &UnavailablePicker),
     }
 }
 
@@ -923,7 +1185,8 @@ mod tests {
 
     fn make_system_one_tree(root: &Path) -> PathBuf {
         let dir = root.join("packages").join("system-one");
-        std::fs::create_dir_all(dir.join("src").join("system_one")).expect("create system-one tree");
+        std::fs::create_dir_all(dir.join("src").join("system_one"))
+            .expect("create system-one tree");
         dir
     }
 
@@ -934,7 +1197,7 @@ mod tests {
         let yah = tmp.path().join("proj").join("a").join("b").join("team.yah");
         std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
         std::fs::write(&yah, "yah 1\n").expect("yah file");
-        let loc = locate_system_one_from(None, Some(&yah), &[]);
+        let loc = locate_system_one_from(None, None, Some(&yah), None, None, &[]);
         assert_eq!(loc.dir, Some(want));
         assert_eq!(loc.env_invalid, None);
     }
@@ -947,7 +1210,14 @@ mod tests {
         let yah = tmp.path().join("proj").join("nested").join("team.yah");
         std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
         std::fs::write(&yah, "yah 1\n").expect("yah file");
-        let loc = locate_system_one_from(Some(&env_dir.to_string_lossy()), Some(&yah), &[]);
+        let loc = locate_system_one_from(
+            None,
+            Some(&env_dir.to_string_lossy()),
+            Some(&yah),
+            None,
+            None,
+            &[],
+        );
         assert_eq!(loc.dir, Some(env_dir));
         assert_eq!(loc.env_invalid, None);
     }
@@ -960,7 +1230,14 @@ mod tests {
         std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
         std::fs::write(&yah, "yah 1\n").expect("yah file");
         let bogus = tmp.path().join("no-such-system-one");
-        let loc = locate_system_one_from(Some(&bogus.to_string_lossy()), Some(&yah), &[]);
+        let loc = locate_system_one_from(
+            None,
+            Some(&bogus.to_string_lossy()),
+            Some(&yah),
+            None,
+            None,
+            &[],
+        );
         assert_eq!(loc.dir, Some(want));
         assert_eq!(loc.env_invalid, Some(bogus.to_string_lossy().to_string()));
     }
@@ -971,19 +1248,168 @@ mod tests {
         let yah = tmp.path().join("bare").join("team.yah");
         std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
         std::fs::write(&yah, "yah 1\n").expect("yah file");
-        let loc = locate_system_one_from(None, Some(&yah), &[]);
+        let loc = locate_system_one_from(None, None, Some(&yah), None, None, &[]);
         assert_eq!(loc.dir, None);
         let reason = system_one_not_found_reason(&loc);
         assert!(!reason.contains('\n'), "reason must be one line: {reason}");
         assert!(reason.contains("system-one not found"), "{reason}");
         assert!(reason.contains("GRAPHLOOP_SYSTEM_ONE_DIR"), "{reason}");
-        assert!(reason.contains(&yah.parent().unwrap().to_string_lossy().to_string()), "reason must say where it looked: {reason}");
+        assert!(
+            reason.contains(&yah.parent().unwrap().to_string_lossy().to_string()),
+            "reason must say where it looked: {reason}"
+        );
         let bogus = tmp.path().join("bogus");
-        let loc2 = locate_system_one_from(Some(&bogus.to_string_lossy()), Some(&yah), &[]);
+        let loc2 = locate_system_one_from(
+            None,
+            Some(&bogus.to_string_lossy()),
+            Some(&yah),
+            None,
+            None,
+            &[],
+        );
         assert_eq!(loc2.dir, None);
         let reason2 = system_one_not_found_reason(&loc2);
         assert!(!reason2.contains('\n'), "{reason2}");
-        assert!(reason2.contains("GRAPHLOOP_SYSTEM_ONE_DIR") && reason2.contains("bogus"), "invalid env must be named in fallback reason: {reason2}");
+        assert!(
+            reason2.contains("GRAPHLOOP_SYSTEM_ONE_DIR") && reason2.contains("bogus"),
+            "invalid env must be named in fallback reason: {reason2}"
+        );
+    }
+
+    #[test]
+    fn locate_h1_env_wins_over_legacy_and_upward() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let h1_dir = make_system_one_tree(&tmp.path().join("h1tree"));
+        let legacy_dir = make_system_one_tree(&tmp.path().join("legacytree"));
+        let _yah_dir = make_system_one_tree(&tmp.path().join("proj"));
+        let yah = tmp.path().join("proj").join("nested").join("team.yah");
+        std::fs::create_dir_all(yah.parent().unwrap()).expect("yah dir");
+        std::fs::write(&yah, "yah 1\n").expect("yah file");
+        let loc = locate_system_one_from(
+            Some(&h1_dir.to_string_lossy()),
+            Some(&legacy_dir.to_string_lossy()),
+            Some(&yah),
+            None,
+            None,
+            &[],
+        );
+        assert_eq!(loc.dir, Some(h1_dir));
+        assert_eq!(loc.env_invalid, None);
+    }
+
+    #[test]
+    fn locate_h1_env_invalid_falls_through_to_legacy() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let legacy_dir = make_system_one_tree(&tmp.path().join("legacytree"));
+        let bogus = tmp.path().join("no-such-system-one");
+        let loc = locate_system_one_from(
+            Some(&bogus.to_string_lossy()),
+            Some(&legacy_dir.to_string_lossy()),
+            None,
+            None,
+            None,
+            &[],
+        );
+        assert_eq!(loc.dir, Some(legacy_dir));
+        assert_eq!(loc.env_invalid, Some(bogus.to_string_lossy().to_string()));
+    }
+
+    #[test]
+    fn locate_exe_sibling_share_dir_is_found() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let exe_dir = tmp.path().join("bin");
+        std::fs::create_dir_all(&exe_dir).expect("exe dir");
+        let want = tmp.path().join("share").join("h1").join("system-one");
+        std::fs::create_dir_all(want.join("src").join("system_one"))
+            .expect("share system-one tree");
+        let loc = locate_system_one_from(None, None, None, Some(&exe_dir), None, &[]);
+        assert_eq!(
+            loc.dir,
+            Some(
+                exe_dir
+                    .join("..")
+                    .join("share")
+                    .join("h1")
+                    .join("system-one")
+            )
+        );
+    }
+
+    #[test]
+    fn locate_stored_dir_beats_exe_cwd_upward() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let stored = make_system_one_tree(&tmp.path().join("storedtree"));
+        let _upward = make_system_one_tree(&tmp.path().join("proj"));
+        let start = tmp.path().join("proj").join("nested");
+        std::fs::create_dir_all(&start).expect("start dir");
+        let loc = locate_system_one_from(None, None, None, None, Some(&stored), &[start]);
+        assert_eq!(loc.dir, Some(stored));
+    }
+
+    #[test]
+    fn config_dir_priority_is_h1_then_appdata_then_xdg_then_home() {
+        let home = Path::new("/home/u");
+        assert_eq!(
+            config_dir_from(Some("/cfg"), Some("/xdg"), Some("/app"), Some(home)),
+            Some(PathBuf::from("/cfg"))
+        );
+        assert_eq!(
+            config_dir_from(None, Some("/xdg"), Some("/app"), Some(home)),
+            Some(PathBuf::from("/app").join("h1"))
+        );
+        assert_eq!(
+            config_dir_from(None, Some("/xdg"), None, Some(home)),
+            Some(PathBuf::from("/xdg").join("h1"))
+        );
+        assert_eq!(
+            config_dir_from(None, None, None, Some(home)),
+            Some(home.join(".config").join("h1"))
+        );
+        assert_eq!(config_dir_from(None, None, None, None), None);
+    }
+
+    #[test]
+    fn store_and_stored_system_one_dir_round_trip() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config = tmp.path().join("config");
+        let dir = make_system_one_tree(&tmp.path().join("tree"));
+        store_system_one_dir_in(&config, &dir).expect("store");
+        assert_eq!(stored_system_one_dir_in(&config), Some(dir));
+        assert!(
+            store_system_one_dir_in(&config, tmp.path()).is_err(),
+            "non system-one dir must be rejected"
+        );
+    }
+
+    #[test]
+    fn doctor_report_found_and_not_found_lines() {
+        let found = SystemOneLocation {
+            dir: Some(PathBuf::from("/x/system-one")),
+            env_invalid: None,
+            looked: vec![],
+        };
+        let lines = doctor_report_with(&found, &FixedPicker(decision("claude-haiku-5-5")));
+        assert_eq!(lines[0], "system-one: found at /x/system-one");
+        assert!(
+            lines[1].starts_with("system-one sample pick: claude-haiku-5-5 (via system-one"),
+            "{}",
+            lines[1]
+        );
+        let missing = SystemOneLocation {
+            dir: None,
+            env_invalid: None,
+            looked: vec!["H1_SYSTEM_ONE_DIR (unset)".to_string()],
+        };
+        let lines = doctor_report_with(&missing, &ErrPicker);
+        assert_eq!(
+            lines[0],
+            "system-one: not found (looked: H1_SYSTEM_ONE_DIR (unset))"
+        );
+        assert!(
+            lines[1].starts_with("system-one sample pick: claude-sonnet-5-5 (via fallback"),
+            "{}",
+            lines[1]
+        );
     }
 
     #[test]
