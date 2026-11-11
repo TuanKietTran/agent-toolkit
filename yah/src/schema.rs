@@ -913,6 +913,31 @@ pub fn build(
             );
         }
     }
+    // A team without `members` owns its whole tree: every harness whose parent chain reaches the root.
+    {
+        let parents: HashMap<String, String> = spec
+            .harnesses
+            .iter()
+            .filter_map(|h| h.parent.clone().map(|p| (h.name.clone(), p)))
+            .collect();
+        let names: Vec<String> = spec.harnesses.iter().map(|h| h.name.clone()).collect();
+        for team in spec.teams.iter_mut().filter(|t| t.members.is_empty()) {
+            for n in &names {
+                let (mut cur, mut hops) = (n.clone(), 0);
+                while let Some(p) = parents.get(&cur) {
+                    hops += 1;
+                    if *p == team.root {
+                        team.members.push(n.clone());
+                        break;
+                    }
+                    if hops > names.len() {
+                        break;
+                    }
+                    cur = p.clone();
+                }
+            }
+        }
+    }
     // Pool members join every team that already holds the pool's parent (root or member);
     // repeat so a pool whose parent is another pool's member is picked up whatever the order.
     let pools = spec.pools.clone();

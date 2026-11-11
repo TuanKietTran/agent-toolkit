@@ -319,4 +319,13 @@ team "t" { root = "boss" }
         let bad = src.replace("defaults.status_dir", "defaults.nope");
         assert!(load_str("d.yah", &bad, &no_overrides()).is_err());
     }
+
+    #[test]
+    fn team_without_members_owns_its_whole_tree() {
+        let src = POOLED.replace("harness \"scout\"", "harness \"loner\" { kind = \"h1\" role = \"x\" model = \"m\" open { command = [\"sh\"] } }\nharness \"scout\"");
+        let spec = load_str("p.yah", &src, &no_overrides()).expect("loads");
+        let m = &spec.team("t").unwrap().members;
+        assert!(m.contains(&"workers-1".to_string()));
+        assert!(!m.contains(&"loner".to_string()), "no parent chain to the root");
+    }
 }
