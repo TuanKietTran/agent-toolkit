@@ -21,6 +21,9 @@ use super::*;
 use agents::{AgentRec, Registry};
 use commands::{human_duration, request_with_timeout};
 
+mod preview_view;
+use preview_view::{PreviewState, draw_preview_command, draw_preview_summary, draw_preview_view};
+
 const AQUA: Color = Color::Rgb(0, 255, 255);
 const BLUE: Color = Color::Rgb(30, 144, 255);
 const PINK: Color = Color::Rgb(255, 0, 255);
@@ -59,6 +62,9 @@ pub(crate) struct ConsoleArgs {
     /// Agent registry written by the observer (default: $H1_AGENTS, then ~/.h1/agents.json).
     #[arg(long, value_name = "PATH")]
     agents: Option<PathBuf>,
+    /// Preview a team without deploying it: a .yah file (via `graphloop preview`) or a preview .json.
+    #[arg(long, value_name = "FILE")]
+    preview: Option<String>,
     /// Width of the --snapshot frame.
     #[arg(long, default_value_t = 150)]
     width: u16,
@@ -68,7 +74,10 @@ pub(crate) struct ConsoleArgs {
 }
 
 pub(crate) fn run(args: ConsoleArgs) -> Result<i32> {
-    let view = View::parse(&args.view).ok_or_else(|| anyhow!("unknown view {:?}: use labs, graph or models", args.view))?;
+    let mut view = View::parse(&args.view).ok_or_else(|| anyhow!("unknown view {:?}: use labs, graph, models or preview", args.view))?;
+    if args.preview.is_some() {
+        view = View::Preview;
+    }
     if args.snapshot {
         return snapshot(&args, view);
     }
@@ -83,6 +92,11 @@ pub(crate) fn run(args: ConsoleArgs) -> Result<i32> {
             "--stalled-ms".to_owned(),
             args.stalled_ms.to_string(),
         ];
+        let mut argv = argv;
+        if let Some(file) = &args.preview {
+            argv.push("--preview".to_owned());
+            argv.push(file.clone());
+        }
         open_terminal_window(&argv, args.terminal.as_deref())?;
         println!("opened the lab console in a new window");
         return Ok(0);
@@ -102,6 +116,7 @@ enum View {
     Graph,
     Models,
     Agents,
+    Preview,
 }
 
 impl View {
@@ -111,6 +126,7 @@ impl View {
             "graph" | "g" | "topology" | "tree" | "xray" => Some(View::Graph),
             "models" | "model" | "m" => Some(View::Models),
             "agents" | "all" | "fleet" | "everyone" => Some(View::Agents),
+            "preview" | "plan" | "pv" => Some(View::Preview),
             _ => None,
         }
     }
@@ -120,6 +136,7 @@ impl View {
             View::Graph => "graph",
             View::Models => "models",
             View::Agents => "agents",
+            View::Preview => "preview",
         }
     }
 }
@@ -708,6 +725,9 @@ enum Mode {
     Peek,
     Describe,
     Help,
+    PreviewCommand,
+    PreviewSummary,
+    LoadPreview(String),
 }
 
 struct App {
@@ -728,6 +748,8 @@ struct App {
     agents: AgentsFeed,
     agents_table: TableState,
     overlay: crate::graphspec::Overlay,
+    preview: Option<PreviewState>,
+    view_before_preview: View,
 }
 
 impl App {
@@ -750,6 +772,8 @@ impl App {
             agents: AgentsFeed::default(),
             agents_table: TableState::default(),
             overlay: crate::graphspec::Overlay::default(),
+            preview: None,
+            view_before_preview: View::Labs,
         }
     }
 
@@ -1006,6 +1030,12 @@ impl App {
                 }
                 self.mode = Mode::Normal;
             }
+            Mode::LoadPreview(text) => self.load_prompt_key(text, key),
+            Mode::PreviewCommand | Mode::PreviewSummary => {
+                if matches!(key.code, KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter) {
+                    self.mode = Mode::Normal;
+                }
+            }
             Mode::Peek | Mode::Describe | Mode::Help => match key.code {
                 KeyCode::Esc | KeyCode::Char('q') | KeyCode::Enter if !matches!(self.mode, Mode::Peek) || key.code != KeyCode::Enter => {
                     self.mode = Mode::Normal;
@@ -1019,6 +1049,9 @@ impl App {
                 _ => {}
             },
             Mode::Normal => match key.code {
+                _ if self.view == View::Preview && self.preview_key(key) => {}
+                KeyCode::Char('p') => self.toggle_preview(),
+                KeyCode::Char('P') => self.mode = Mode::LoadPreview(String::new()),
                 KeyCode::Char('q') | KeyCode::Esc if self.filter.is_empty() => self.quit = true,
                 KeyCode::Esc => {
                     self.filter.clear();
@@ -1073,6 +1106,7 @@ impl App {
                         View::Graph => View::Models,
                         View::Models => View::Agents,
                         View::Agents => View::Labs,
+                        View::Preview => View::Labs,
                     };
                 }
                 KeyCode::Char('1') => self.view = View::Labs,
@@ -1103,7 +1137,7 @@ fn key_hint<'a>(key: &'a str, text: &'a str) -> Line<'a> {
 
 fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
-    let prompt_rows = if matches!(app.mode, Mode::Filter(_) | Mode::Command(_) | Mode::Message(_)) { 3 } else { 0 };
+    let prompt_rows = if matches!(app.mode, Mode::Filter(_) | Mode::Command(_) | Mode::Message(_) | Mode::LoadPreview(_)) { 3 } else { 0 };
     let [header, prompt, main, crumbs] = Layout::vertical([
         Constraint::Length(6),
         Constraint::Length(prompt_rows),
@@ -1120,12 +1154,15 @@ fn draw(frame: &mut Frame, app: &mut App) {
         View::Graph => draw_graph_view(frame, main, app),
         View::Models => draw_models(frame, main, app),
         View::Agents => draw_agents(frame, main, app),
+        View::Preview => draw_preview_view(frame, main, app),
     }
     draw_crumbs(frame, crumbs, app);
     match app.mode {
         Mode::Peek => draw_peek(frame, area, app),
         Mode::Describe => draw_describe(frame, area, app),
         Mode::Help => draw_help(frame, area),
+        Mode::PreviewCommand => draw_preview_command(frame, area, app),
+        Mode::PreviewSummary => draw_preview_summary(frame, area, app),
         Mode::Confirm(ref name) => draw_confirm(frame, area, name),
         Mode::ConfirmRenew(ref name) => draw_confirm_renew(frame, area, name),
         _ => {}
@@ -1177,6 +1214,10 @@ fn draw_header(frame: &mut Frame, area: Rect, app: &App) {
             vec![key_hint("1", "Labs"), key_hint("2", "Graph"), key_hint("3", "Models"), key_hint("4", "All agents"), key_hint("j k", "Move")],
             vec![key_hint("/", "Filter"), key_hint(":", "Command"), key_hint("tab", "Next view"), key_hint("?", "Help"), key_hint("q", "Quit")],
         ),
+        View::Preview => (
+            vec![key_hint("enter", "Open command"), key_hint("u", "Would-up summary"), key_hint("↑↓ ←→", "Node / parent,child"), key_hint("P", "Load a file")],
+            vec![key_hint("p", "Back"), key_hint("q", "Back"), key_hint(":", "Command"), key_hint("?", "Help")],
+        ),
         View::Models => (
             vec![key_hint("1", "Labs"), key_hint("2", "Graph"), key_hint("3", "Models"), key_hint("4", "All agents")],
             vec![key_hint("/", "Filter"), key_hint(":", "Command"), key_hint("?", "Help"), key_hint("q", "Quit")],
@@ -1207,6 +1248,7 @@ fn draw_prompt(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Filter(t) => ("/", t.as_str(), AQUA, ""),
         Mode::Command(t) => (":", t.as_str(), ORANGE, "  labs · graph · models · stop [lab] · attach [lab] · quit"),
         Mode::Message(t) => ("send>", t.as_str(), PINK, ""),
+        Mode::LoadPreview(t) => ("preview>", t.as_str(), RED, "  path to a .yah or preview .json"),
         _ => return,
     };
     let target = match &app.mode {
@@ -1656,6 +1698,8 @@ fn draw_crumbs(frame: &mut Frame, area: Rect, app: &App) {
         Mode::Peek => Some("peek"),
         Mode::Describe => Some("describe"),
         Mode::Help => Some("help"),
+        Mode::PreviewCommand => Some("command"),
+        Mode::PreviewSummary => Some("would-up"),
         Mode::Confirm(_) => Some("stop?"),
         Mode::ConfirmRenew(_) => Some("renew?"),
         _ => None,
@@ -1778,7 +1822,7 @@ fn draw_describe(frame: &mut Frame, area: Rect, app: &App) {
 }
 
 fn draw_help(frame: &mut Frame, area: Rect) {
-    let rect = centered(area, 74, 27);
+    let rect = centered(area, 74, 31);
     frame.render_widget(Clear, rect);
     let section = |t: &str| Line::from(Span::styled(t.to_owned(), Style::default().fg(AQUA).add_modifier(Modifier::BOLD)));
     let row = |k: &str, d: &str| {
@@ -1801,6 +1845,8 @@ fn draw_help(frame: &mut Frame, area: Rect) {
         row("m", "type a message into the lab (Enter sends)"),
         row("ctrl-d  ctrl-k", "stop the lab (asks first)"),
         row("R", "renew the lab (asks first)"),
+        row("P  p", "preview a .yah/.json (load a path) / toggle the preview view"),
+        row("(preview)", "enter: command   u: would-up summary   q: back"),
         Line::from(""),
         section("Filtering and commands"),
         row("/", "filter by name, role, state, model or parent"),
@@ -1868,6 +1914,9 @@ fn tui(args: &ConsoleArgs, view: View) -> Result<()> {
         })
     };
     let mut app = App::new(view, args.interval_ms);
+    if let Some(file) = &args.preview {
+        app.load_preview(file);
+    }
     let mut terminal = ratatui::init();
     let result = (|| -> Result<()> {
         let mut dirty = true;
@@ -1913,6 +1962,12 @@ fn snapshot(args: &ConsoleArgs, view: View) -> Result<i32> {
     let first = probe_all(args.stalled_ms);
     app.apply(first.clone());
     app.apply(first);
+    if let Some(file) = &args.preview {
+        app.load_preview(file);
+        if app.preview.is_none() {
+            return Err(anyhow!("cannot preview {file}"));
+        }
+    }
     match scan_registry(&args.agents, args.stalled_ms) {
         Ok(registry) => app.agents.set(registry),
         Err(error) => app.agents.error = Some(error),

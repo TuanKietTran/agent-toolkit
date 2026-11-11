@@ -238,7 +238,9 @@ mod tests {
     fn missing_fields_default_at_the_serde_level() {
         let preview: Preview = serde_json::from_str("{}").expect("empty object parses");
         assert_eq!(preview.version, 0);
-        assert!(preview.nodes.is_empty() && preview.edges.is_empty() && preview.warnings.is_empty());
+        assert!(
+            preview.nodes.is_empty() && preview.edges.is_empty() && preview.warnings.is_empty()
+        );
         let node: Node = serde_json::from_str("{}").expect("empty node parses");
         assert_eq!(node.model_status, ModelStatus::Unknown);
         let edge: Edge = serde_json::from_str("{}").expect("empty edge parses");
@@ -247,10 +249,16 @@ mod tests {
 
     #[test]
     fn parse_rejects_foreign_version_and_malformed_json() {
-        assert!(parse(r#"{"version": 2, "team": "x"}"#)
-            .unwrap_err()
-            .contains("unsupported preview version 2"));
-        assert!(parse("{ not json").unwrap_err().contains("invalid preview JSON"));
+        assert!(
+            parse(r#"{"version": 2, "team": "x"}"#)
+                .unwrap_err()
+                .contains("unsupported preview version 2")
+        );
+        assert!(
+            parse("{ not json")
+                .unwrap_err()
+                .contains("invalid preview JSON")
+        );
     }
 
     #[test]
@@ -260,7 +268,11 @@ mod tests {
         let path = dir.join("preview.json");
         std::fs::write(&path, FIXTURE).unwrap();
         assert_eq!(load(&path).unwrap().team, "default");
-        assert!(load(&dir.join("nope.json")).unwrap_err().contains("cannot read preview"));
+        assert!(
+            load(&dir.join("nope.json"))
+                .unwrap_err()
+                .contains("cannot read preview")
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
