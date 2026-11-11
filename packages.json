@@ -4,15 +4,7 @@
     "h1": {
       "os": "ubuntu-latest",
       "toolchain": "rust",
-      "check": "cargo check --locked",
-      "test": "cargo test --locked",
-      "build": "cargo build --locked"
-    },
-    "graphloop": {
-      "os": "ubuntu-latest",
-      "toolchain": "rust",
       "dependsOn": [
-        "h1",
         "system-one"
       ],
       "check": "cargo check --locked",
