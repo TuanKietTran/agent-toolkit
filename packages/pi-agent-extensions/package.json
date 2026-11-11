@@ -34,6 +34,7 @@
       "./remote-control.ts",
       "./touchbar-usage/index.ts",
       "./browser-control/index.ts",
+      "./browser-control/cdp/index.ts",
       "./claude-cli/index.ts",
       "./muse-proxy/index.ts",
       "./opencode-cli/index.ts"
