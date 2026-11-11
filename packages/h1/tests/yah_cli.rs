@@ -511,7 +511,7 @@ fn up_opens_in_order_writes_manifest_and_reports() {
     assert!(out.output.contains("FAKE GRAPH SNAPSHOT"), "{}", out.output);
     assert!(out.output.contains("h1 console"), "{}", out.output);
     assert!(
-        out.output.contains(&format!("graphloop down --run {RUN}")),
+        out.output.contains(&format!("h1 down --run {RUN}")),
         "{}",
         out.output
     );

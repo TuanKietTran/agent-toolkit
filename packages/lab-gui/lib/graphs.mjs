@@ -1,5 +1,5 @@
-// Graphspec run manifests: the files graphloop writes into <session dir>/graphs/*.json
-// (manifest contract version 1, see packages/graphloop/src/manifest.rs). Readers are
+// Graphspec run manifests: the files `h1 up` writes into <session dir>/graphs/*.json
+// (manifest contract version 1, see yah/src/manifest.rs). Readers are
 // tolerant: unreadable files, malformed JSON, foreign versions and unknown fields are
 // all skipped, and a manifest whose nodes are all gone is stale and ignored.
 import { readdir, readFile } from 'node:fs/promises';

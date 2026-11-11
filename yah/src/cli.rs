@@ -1,4 +1,4 @@
-//! The `graphloop` command line.
+//! The yah command line (`h1 up`, `h1 check`, ...).
 //!
 //! check | plan | graph | preview | up | down | runs | trace. Core functions take an already-built
 //! `Plan`/`Resolved` plus a `LabRunner` trait object; the load -> pick -> plan wrappers
@@ -673,7 +673,7 @@ pub fn up_core(req: &UpRequest, runner: &dyn LabRunner) -> Result<UpOutcome, Str
         }
     }
     output.push_str(&format!(
-        "watch it live: h1 console\nclose it: graphloop down --run {}\n",
+        "watch it live: h1 console\nclose it: h1 down --run {}\n",
         req.run
     ));
     Ok(UpOutcome {
@@ -900,7 +900,7 @@ fn vault_status_report(
     (report, all_ok, vaults.values())
 }
 
-/// `graphloop vault status`: one line per vault, then one line per declared secret key.
+/// `h1 vault status`: one line per vault, then one line per declared secret key.
 /// Without `fetch`, only presence is checked and no provider is run; with `fetch`, each key
 /// is fetched and only its ok/error is printed. A value is never printed. The returned bool
 /// is true only when every printed line is ok/ready.
@@ -937,7 +937,7 @@ pub fn vault_status_core(
     (crate::vault::scrub(&out, &values), all_ok)
 }
 
-/// `graphloop vault status --json`: the same verdicts as [`vault_status_core`], as one JSON
+/// `h1 vault status --json`: the same verdicts as [`vault_status_core`], as one JSON
 /// object — {"vaults":[{"name","provider","ready","program","keys":[{"name","fetched"}]}]} —
 /// where `program` is null when the provider needs none and `fetched` is null unless `fetch`
 /// was passed. Names only: the object is scrubbed with every fetched value before returning,
@@ -963,7 +963,7 @@ pub fn vault_status_json_core(
     (crate::vault::scrub(&out, &values), all_ok)
 }
 
-/// Pure declaration inventory for `graphloop vault list`: one line per declared
+/// Pure declaration inventory for `h1 vault list`: one line per declared
 /// secret key, `<vault>\t<provider>\t<key>`, sorted by vault then key; a vault
 /// with no `secrets` map prints one line with key `-`. Reads only the validated
 /// `Spec` — never fetches, never spawns a provider program, never reads env values.
@@ -1059,7 +1059,7 @@ pub fn trace_output(manifest: &Manifest) -> Result<String, String> {
 }
 
 fn err(msg: &str) -> String {
-    format!("graphloop: {msg}")
+    format!("h1: {msg}")
 }
 
 fn now_ms() -> u64 {
@@ -1196,7 +1196,7 @@ fn absolute_string(path: &Path) -> String {
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "graphloop",
+    name = "yah",
     version,
     about = "Bring a Graphspec (.yah) team up as h1 labs"
 )]
@@ -1277,7 +1277,7 @@ pub enum Cmd {
     Down {
         /// The .yah file the run was opened from
         file: Option<PathBuf>,
-        /// Run id, as printed by `graphloop up`
+        /// Run id, as printed by `h1 up`
         #[arg(long)]
         run: Option<String>,
         /// Also delete the run directory, including its traces
@@ -1293,7 +1293,7 @@ pub enum Cmd {
     Runs,
     /// List the recordings in a run's trace directory
     Trace {
-        /// Run id, as printed by `graphloop up`
+        /// Run id, as printed by `h1 up`
         run: String,
     },
 }
@@ -1516,7 +1516,7 @@ pub fn dispatch(command: Cmd) -> Result<String, String> {
 /// Run one parsed command with `main`'s exact output/exit semantics: output
 /// to stdout, exit 0; errors to stderr, exit 1. Callers (h1's `execute`) must
 /// return this code as-is rather than wrapping it in their own error
-/// reporting, so the `graphloop: ` prefix and the vault-status
+/// reporting, so the `h1: ` prefix and the vault-status
 /// JSON-on-stdout-on-failure behaviour survive.
 pub fn run(command: Cmd) -> i32 {
     match dispatch(command) {
@@ -1536,8 +1536,8 @@ pub fn run(command: Cmd) -> i32 {
 }
 
 /// Process exit code: 0 ok, 1 error (2 is clap's usage error).
-/// Parses `args` (argv[0] included) with the "graphloop" clap parser;
-/// the deprecated `graphloop` shim bin calls this.
+/// Parses `args` (argv[0] included) with the yah clap parser;
+/// the standalone `yah` bin calls this.
 pub fn main_from<I: IntoIterator<Item = std::ffi::OsString>>(args: I) -> i32 {
     let cli = match Cli::try_parse_from(args) {
         Ok(c) => c,

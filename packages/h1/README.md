@@ -77,7 +77,7 @@ The graph comes from `open --role ROLE --parent NAME [--model PROVIDER/ID]`. A s
 
 ### Preview mode
 
-`h1 console --preview FILE` renders a `graphloop preview` document (see "Previewing a team" in the graphloop README) as a planned graph: the team as it would open, drawn alongside any live labs, with the preview's warnings shown in red. Loading a preview is a pure read — nothing is started, stopped, or written. Preview-mode keys: `P` loads a preview file, `p` toggles the preview overlay, `enter` shows the selected node's `open_command` and env, `u` shows the would-up summary (what would start, what is already running, what would stop), `o` sorts, `q` leaves preview mode.
+`h1 console --preview FILE` renders an `h1 preview` document (see "Previewing a team" in `docs/graphspec.md`) as a planned graph: the team as it would open, drawn alongside any live labs, with the preview's warnings shown in red. Loading a preview is a pure read — nothing is started, stopped, or written. Preview-mode keys: `P` loads a preview file, `p` toggles the preview overlay, `enter` shows the selected node's `open_command` and env, `u` shows the would-up summary (what would start, what is already running, what would stop), `o` sorts, `q` leaves preview mode.
 
 ## All agents on this machine
 
@@ -273,7 +273,7 @@ The standalone `graphloop` binary is gone: its Graphspec (`.yah`) commands are n
 | `graphloop runs` | `h1 runs` |
 | `graphloop trace RUN` | `h1 trace RUN` |
 
-Your `.yah` files need no changes. The Graphspec document and the examples stay where they were, under `packages/graphloop/docs/` and `packages/graphloop/examples/`; only the binary merged.
+Your `.yah` files need no changes. The language lives in the `yah` crate (`yah/`) and its reference is `packages/h1/docs/graphspec.md`; graphloop is retired.
 
 ## Build and test
 

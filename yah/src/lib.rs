@@ -9,7 +9,7 @@
 //!        --schema---> spec::Spec (strict validation, defaults applied)
 //!        --pick-----> pick::Resolved per harness (system-one decides `model = "system-one"`)
 //!        --plan-----> plan::Plan (h1 open argv, edges)
-//!        --cli------> `graphloop up` opens the labs, writes a manifest the console and lab-gui draw
+//!        --cli------> `h1 up` opens the labs, writes a manifest the console and lab-gui draw
 //! ```
 //!
 //! The types in `ast`, `spec`, `diag`, `pick` (the data types) and `manifest` are the stable

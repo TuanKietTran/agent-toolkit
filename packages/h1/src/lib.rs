@@ -143,7 +143,7 @@ enum Commands {
     Gc(RunFilterArgs),
     /// List the resources recorded for runs, with their age.
     Resources(RunFilterArgs),
-    /// Graphspec (.yah) team commands, formerly the graphloop binary:
+    /// Graphspec (.yah) team commands, formerly the standalone graphloop tool, now retired:
     /// check, fmt, plan, graph, up, down, vault, runs, trace.
     #[command(flatten)]
     Yah(crate::yah::cli::Cmd),

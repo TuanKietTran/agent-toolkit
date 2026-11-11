@@ -169,7 +169,7 @@ fn golden_fixtures_parse_and_satisfy_contract_invariants() {
 
 #[test]
 fn preview_cli_matches_goldens_when_available() {
-    let bin = env!("CARGO_BIN_EXE_graphloop");
+    let bin = env!("CARGO_BIN_EXE_h1");
     let probe = Command::new(bin)
         .args(["preview", "examples/demo.yah"])
         .current_dir(pkg())

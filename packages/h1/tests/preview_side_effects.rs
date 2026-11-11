@@ -84,7 +84,7 @@ fn preview_spawns_nothing_writes_nothing_and_fetches_nothing() {
     let h1_dir = root.join("h1dir");
     let fake_home = root.join("fakehome");
     let before = tree(root);
-    let out = Command::new(env!("CARGO_BIN_EXE_graphloop"))
+    let out = Command::new(env!("CARGO_BIN_EXE_h1"))
         .args(["preview", "preview-se.yah"])
         .current_dir(root)
         .env("GRAPHLOOP_HOME", &home)
