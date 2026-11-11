@@ -21,9 +21,13 @@ pub const KNOWN_KINDS: &[&str] = &[
     "team",
     "workflow",
     "output",
+    "prototype",
+    "pool",
+    "decision",
 ];
 const LABELLED: &[&str] = &[
     "variable", "provider", "vault", "model", "api", "harness", "team", "workflow", "output",
+    "prototype", "pool", "decision",
 ];
 const SINGLETONS: &[&str] = &["defaults", "system_one", "image"];
 
@@ -514,6 +518,10 @@ pub fn build(
         teams: Vec::new(),
         workflows: Vec::new(),
         outputs: Vec::new(),
+        prototypes: Vec::new(),
+        pools: Vec::new(),
+        decisions: Vec::new(),
+        asks: Vec::new(),
     };
     let mut seen_labelled: HashSet<(String, String)> = HashSet::new();
     let mut seen_single: HashSet<String> = HashSet::new();
@@ -524,6 +532,17 @@ pub fn build(
     let mut harness_refs: Vec<HarnessRefs> = Vec::new();
     let mut team_refs: Vec<TeamRefs> = Vec::new();
     let mut workflow_refs: Vec<(String, (String, Span))> = Vec::new();
+    let protos: HashMap<String, &crate::ast::Block> = file
+        .stmts
+        .iter()
+        .filter_map(|st| match st {
+            Stmt::Block(b) if b.kind == "prototype" => b.label.clone().map(|l| (l, b)),
+            _ => None,
+        })
+        .collect();
+    let mut ask_refs: Vec<(String, StrRef)> = Vec::new();
+    let mut pool_refs: Vec<(String, Option<StrRef>, Option<StrRef>)> = Vec::new();
+    let mut decision_refs: Vec<(String, Option<StrRef>, Option<StrRef>)> = Vec::new();
     // MARKER_STATE
     for stmt in &file.stmts {
         match stmt {
@@ -618,9 +637,41 @@ pub fn build(
                     }
                     "api" => parse_api(&mut cx, block, &mut spec, &scope.harnesses),
                     "harness" => {
-                        if let Some(r) = parse_harness(&mut cx, block, &mut spec, &scope.harnesses)
-                        {
+                        let eff = effective_harness(&mut cx, block, &protos, &mut ask_refs);
+                        if let Some(r) = parse_harness(&mut cx, &eff, &mut spec, &scope.harnesses) {
                             harness_refs.push(r);
+                        }
+                    }
+                    "prototype" => {
+                        let n = spec.harnesses.len();
+                        if let Some(mut r) =
+                            parse_harness(&mut cx, block, &mut spec, &scope.harnesses)
+                        {
+                            r.1 = None;
+                            harness_refs.push(r);
+                        }
+                        spec.harnesses.truncate(n);
+                        spec.prototypes.push(block.label.clone().unwrap_or_default());
+                    }
+                    "pool" => {
+                        if let Some((pool, refs)) = parse_pool(&mut cx, block) {
+                            for i in 1..=pool.min {
+                                let synth = synth_member(block, &pool, i);
+                                let eff = effective_harness(&mut cx, &synth, &protos, &mut ask_refs);
+                                if let Some(r) =
+                                    parse_harness(&mut cx, &eff, &mut spec, &scope.harnesses)
+                                {
+                                    harness_refs.push(r);
+                                }
+                            }
+                            pool_refs.push((pool.name.clone(), refs.0, refs.1));
+                            spec.pools.push(pool);
+                        }
+                    }
+                    "decision" => {
+                        if let Some((d, refs)) = parse_decision(&mut cx, block) {
+                            decision_refs.push((d.name.clone(), refs.0, refs.1));
+                            spec.decisions.push(d);
                         }
                     }
                     "team" => {
@@ -795,6 +846,85 @@ pub fn build(
             );
         }
     }
+    let decision_labels: Vec<String> = spec.decisions.iter().map(|d| d.name.clone()).collect();
+    let pool_labels: Vec<String> = spec.pools.iter().map(|p| p.name.clone()).collect();
+    for (h, (d, span)) in &ask_refs {
+        if !decision_labels.contains(d) {
+            cx.unknown_ref(
+                *span,
+                format!("The harness \"{h}\" can_ask an unknown decision \"{d}\"."),
+                d,
+                &decision_labels,
+                &block_ctx("harness", Some(h)),
+            );
+        } else {
+            spec.asks.push((h.clone(), d.clone()));
+        }
+    }
+    for (label, proto, parent) in &pool_refs {
+        let ctx = block_ctx("pool", Some(label));
+        if let Some((p, s)) = proto
+            && !spec.prototypes.contains(p)
+        {
+            cx.unknown_ref(
+                *s,
+                format!("The pool \"{label}\" refers to an unknown prototype \"{p}\"."),
+                p,
+                &spec.prototypes,
+                &ctx,
+            );
+        }
+        if let Some((p, s)) = parent
+            && !spec_harnesses.contains(p)
+        {
+            cx.unknown_ref(
+                *s,
+                format!("The pool \"{label}\" refers to an unknown parent harness \"{p}\"."),
+                p,
+                &spec_harnesses,
+                &ctx,
+            );
+        }
+    }
+    for (label, pool, model) in &decision_refs {
+        let ctx = block_ctx("decision", Some(label));
+        if let Some((p, s)) = pool
+            && !pool_labels.contains(p)
+        {
+            cx.unknown_ref(
+                *s,
+                format!("The decision \"{label}\" refers to an unknown pool \"{p}\"."),
+                p,
+                &pool_labels,
+                &ctx,
+            );
+        }
+        if let Some((m, s)) = model
+            && m != "system-one"
+            && !model_labels.contains(m)
+        {
+            cx.unknown_ref(
+                *s,
+                format!("The decision \"{label}\" refers to an unknown model \"{m}\"."),
+                m,
+                &model_labels,
+                &ctx,
+            );
+        }
+    }
+    // Pool members join every team rooted at the pool's parent.
+    let pools = spec.pools.clone();
+    for pool in &pools {
+        let Some(parent) = &pool.parent else { continue };
+        for team in spec.teams.iter_mut().filter(|t| &t.root == parent) {
+            for i in 1..=pool.min {
+                let name = format!("{}-{i}", pool.name);
+                if !team.members.contains(&name) {
+                    team.members.push(name);
+                }
+            }
+        }
+    }
     cx.diags.0.sort_by_key(|d| (d.line, d.col));
     cx.diags.into_result(spec)
 }
@@ -856,7 +986,16 @@ fn parse_defaults(
     spec: &mut Spec,
 ) -> Option<(String, Span)> {
     let ctx = block_ctx("defaults", None);
-    let (assigns, _) = collect_body(cx, block, &["model_policy", "sandbox"], &[], &ctx);
+    let (assigns, _) = collect_body(
+        cx,
+        block,
+        &["model_policy", "sandbox", "worktree_root", "status_dir", "target_dir"],
+        &[],
+        &ctx,
+    );
+    spec.defaults.worktree_root = assigns.get("worktree_root").and_then(|a| static_string(cx, a, &ctx));
+    spec.defaults.status_dir = assigns.get("status_dir").and_then(|a| static_string(cx, a, &ctx));
+    spec.defaults.target_dir = assigns.get("target_dir").and_then(|a| static_string(cx, a, &ctx));
     let mut policy = None;
     if let Some(a) = assigns.get("model_policy")
         && let Some(v) = static_string(cx, a, &ctx)
@@ -1548,5 +1687,222 @@ fn parse_output(
         description,
         line: block.span.line,
     });
+}
+
+fn str_expr(text: &str, span: Span) -> Expr {
+    Expr {
+        kind: ExprKind::Str(vec![StrPart::Lit(text.to_owned())]),
+        span,
+    }
+}
+
+fn plain_assign(key: &str, value: Expr, span: Span) -> Stmt {
+    Stmt::Assign(crate::ast::Assign {
+        key: key.to_owned(),
+        value,
+        span,
+        leading: Vec::new(),
+        trailing: None,
+    })
+}
+
+/// A pool member is a harness cut from the pool's prototype.
+fn synth_member(block: &crate::ast::Block, pool: &Pool, i: u32) -> crate::ast::Block {
+    let mut body = vec![plain_assign(
+        "prototype",
+        str_expr(&pool.prototype, block.span),
+        block.span,
+    )];
+    if let Some(p) = &pool.parent {
+        body.push(plain_assign("parent", str_expr(p, block.span), block.span));
+    }
+    crate::ast::Block {
+        kind: "harness".to_owned(),
+        label: Some(format!("{}-{i}", pool.name)),
+        body,
+        span: block.span,
+        leading: Vec::new(),
+        trailing: None,
+    }
+}
+
+/// Fold `prototype` into a harness block: the prototype's keys fill what the harness leaves out
+/// (`open` merges key by key), then `prototype` and `can_ask` are stripped so the ordinary
+/// harness parser sees a complete block. `can_ask` names go to `asks`.
+fn effective_harness(
+    cx: &mut Cx,
+    block: &crate::ast::Block,
+    protos: &HashMap<String, &crate::ast::Block>,
+    asks: &mut Vec<(String, StrRef)>,
+) -> crate::ast::Block {
+    let label = block.label.clone().unwrap_or_default();
+    let ctx = block_ctx("harness", Some(&label));
+    let mut own: Vec<Stmt> = Vec::new();
+    let mut proto_name: Option<StrRef> = None;
+    for st in &block.body {
+        match st {
+            Stmt::Assign(a) if a.key == "prototype" => {
+                if let Some(v) = static_string(cx, a, &ctx) {
+                    proto_name = Some((v, a.span));
+                }
+            }
+            Stmt::Assign(a) if a.key == "can_ask" => {
+                for d in string_list(cx, a, &ctx).unwrap_or_default() {
+                    asks.push((label.clone(), (d, a.span)));
+                }
+            }
+            other => own.push(other.clone()),
+        }
+    }
+    let Some((pname, pspan)) = proto_name else {
+        return crate::ast::Block { body: own, ..block.clone() };
+    };
+    let Some(proto) = protos.get(&pname) else {
+        let cands: Vec<String> = protos.keys().cloned().collect();
+        cx.unknown_ref(
+            pspan,
+            format!("The harness \"{label}\" refers to an unknown prototype \"{pname}\"."),
+            &pname,
+            &cands,
+            &ctx,
+        );
+        return crate::ast::Block { body: own, ..block.clone() };
+    };
+    let own_keys: HashSet<String> = own
+        .iter()
+        .filter_map(|st| match st {
+            Stmt::Assign(a) => Some(a.key.clone()),
+            _ => None,
+        })
+        .collect();
+    let own_open: Option<&crate::ast::Block> = own.iter().find_map(|st| match st {
+        Stmt::Block(b) if b.kind == "open" => Some(b),
+        _ => None,
+    });
+    let mut body: Vec<Stmt> = Vec::new();
+    for st in &proto.body {
+        match st {
+            Stmt::Assign(a) if !own_keys.contains(&a.key) => body.push(st.clone()),
+            Stmt::Block(b) if b.kind == "open" => {
+                let mut merged = b.clone();
+                if let Some(o) = own_open {
+                    let over: HashSet<String> = o
+                        .body
+                        .iter()
+                        .filter_map(|x| match x {
+                            Stmt::Assign(a) => Some(a.key.clone()),
+                            _ => None,
+                        })
+                        .collect();
+                    merged.body.retain(|x| match x {
+                        Stmt::Assign(a) => !over.contains(&a.key),
+                        _ => true,
+                    });
+                    merged.body.extend(o.body.iter().cloned());
+                }
+                body.push(Stmt::Block(merged));
+            }
+            _ => {}
+        }
+    }
+    for st in own {
+        match &st {
+            Stmt::Block(b) if b.kind == "open" => {}
+            _ => body.push(st),
+        }
+    }
+    crate::ast::Block { body, ..block.clone() }
+}
+
+type PoolRefs = (Option<StrRef>, Option<StrRef>);
+
+fn uint_value(cx: &mut Cx, a: &crate::ast::Assign, ctx: &str) -> Option<u32> {
+    match &a.value.kind {
+        ExprKind::Num(v) if v.fract() == 0.0 && *v >= 0.0 && *v <= 1000.0 => Some(*v as u32),
+        ExprKind::Num(v) => {
+            cx.invalid_value(a.value.span, &a.key, format!("Invalid value for attribute \"{}\": expected an integer between 0 and 1000, got {v}.", a.key), ctx);
+            None
+        }
+        _ => {
+            cx.type_err(a.value.span, &a.key, "a number", ctx);
+            None
+        }
+    }
+}
+
+fn parse_pool(cx: &mut Cx, block: &crate::ast::Block) -> Option<(Pool, PoolRefs)> {
+    let label = block.label.clone().unwrap_or_default();
+    let ctx = block_ctx("pool", Some(&label));
+    let (assigns, _) = collect_body(
+        cx,
+        block,
+        &["prototype", "parent", "min", "max", "idle_ttl", "constraints"],
+        &[],
+        &ctx,
+    );
+    let proto = assigns.get("prototype").and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
+    if proto.is_none() && !assigns.contains_key("prototype") {
+        cx.missing(block.span, "prototype", &ctx);
+    }
+    let parent = assigns.get("parent").and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
+    let min = assigns.get("min").and_then(|a| uint_value(cx, a, &ctx)).unwrap_or(1);
+    let max = assigns.get("max").and_then(|a| uint_value(cx, a, &ctx));
+    if let Some(m) = max
+        && m < min
+    {
+        cx.err(
+            block.span,
+            "Invalid value",
+            format!("The pool \"{label}\" has max {m} below min {min}."),
+            Some(&ctx),
+            None,
+        );
+    }
+    let idle_ttl = assigns.get("idle_ttl").and_then(|a| static_string(cx, a, &ctx));
+    let constraints = assigns
+        .get("constraints")
+        .and_then(|a| json_value(cx, &a.value, "constraints", &ctx))
+        .unwrap_or(serde_json::Value::Null);
+    let pool = Pool {
+        name: label,
+        prototype: proto.as_ref().map(|p| p.0.clone()).unwrap_or_default(),
+        parent: parent.as_ref().map(|p| p.0.clone()),
+        min,
+        max,
+        idle_ttl,
+        constraints,
+        line: block.span.line,
+    };
+    Some((pool, (proto, parent)))
+}
+
+fn parse_decision(cx: &mut Cx, block: &crate::ast::Block) -> Option<(Decision, PoolRefs)> {
+    let label = block.label.clone().unwrap_or_default();
+    let ctx = block_ctx("decision", Some(&label));
+    let (assigns, _) = collect_body(
+        cx,
+        block,
+        &["pool", "model", "input", "output", "constraints"],
+        &[],
+        &ctx,
+    );
+    let pool = assigns.get("pool").and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
+    let model = assigns.get("model").and_then(|a| static_string(cx, a, &ctx).map(|v| (v, a.span)));
+    let val = |k: &str, cx: &mut Cx| {
+        assigns
+            .get(k)
+            .and_then(|a| json_value(cx, &a.value, k, &ctx))
+            .unwrap_or(serde_json::Value::Null)
+    };
+    let d = Decision {
+        name: label,
+        pool: pool.as_ref().map(|p| p.0.clone()),
+        model: model.as_ref().map(|p| p.0.clone()),
+        input: val("input", cx),
+        output: val("output", cx),
+        constraints: val("constraints", cx),
+        line: block.span.line,
+    };
+    Some((d, (pool, model)))
 }
 // MARKER_PARSERS

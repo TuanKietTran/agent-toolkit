@@ -621,3 +621,12 @@ Example 1 with `provider = var.secrets` and a `variable "secrets"` defaulting to
 AliasVault cannot be read from h1. Its vault is end-to-end encrypted: no CLI or plain HTTP API returns a plaintext credential or creates an item, and the in-container `aliasvault` CLI is admin-only (`reset-admin-password`, `hash-password`). Decryption is client-side after unlock, so no `command` provider can fetch from it.
 
 The only interop is the other direction: importing into AliasVault via its web UI, Settings -> Import / Export, Generic CSV with columns `service_name,url,username,password,totp_secret,notes,folder`.
+
+## Prototypes, pools and decisions
+
+- `prototype "label" { kind, role, model, open { ... } }`: a harness template. A `harness` with `prototype = "label"` inherits every key it leaves out; its `open` block merges key by key.
+- `pool "label" { prototype, parent, min, max, idle_ttl, constraints }`: a conventional way to say "several workers". `min` members `label-1..` are expanded into harnesses and joined to every team rooted at `parent`; `max`, `idle_ttl` and `constraints` are recorded for the runtime.
+- `decision "label" { pool, model, input, output, constraints }`: a named request type; a harness lists the ones it may use in `can_ask`.
+- `defaults` also accepts `worktree_root`, `status_dir` and `target_dir` (strings; use `${var.*}` inside them).
+
+See `yah/examples/rolepool.yah`.

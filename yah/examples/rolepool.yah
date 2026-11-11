@@ -1,0 +1,164 @@
+yah 1
+// rolepool.yah — hard parallel work
+// Dynamic pools + single decision model.
+// Non-workers ask; human only sets goal + three checkpoints.
+variable "lab" {
+  type = "string"
+  default = "."
+}
+variable "max_workers" {
+  type = "number"
+  default = 8
+}
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+  worktree_root = "${var.lab}/wt"
+  status_dir = "${var.lab}/status"
+}
+vault "fleet" {
+  provider = "dotenv"
+  path = "fleet.env"
+  secrets = {
+    FLEET_RUN_TOKEN = "FLEET_RUN_TOKEN"
+  }
+}
+provider "muse" {
+  type = "muse"
+}
+provider "anthropic" {
+  type = "anthropic"
+}
+model "muse" {
+  provider = "muse"
+  id = "muse"
+  capabilities = ["chat", "tools"]
+}
+model "sonnet" {
+  provider = "anthropic"
+  id = "claude-sonnet-5-5"
+  capabilities = ["chat", "tools", "vision"]
+}
+model "haiku" {
+  provider = "anthropic"
+  id = "claude-haiku-5-5"
+  capabilities = ["chat", "tools"]
+}
+model "opus" {
+  provider = "anthropic"
+  id = "claude-opus-5-5"
+  capabilities = ["chat", "tools", "vision"]
+}
+system_one {
+  fallback = "muse"
+}
+prototype "muse-worker" {
+  kind = "h1"
+  role = "worker"
+  model = "system-one"
+  open {
+    detached = true
+    command = ["pi", "--provider", "muse", "--model", "muse", "--thinking", "off", "--no-session"]
+    env = {
+      FLEET_RUN_TOKEN = "${vault.fleet.FLEET_RUN_TOKEN}"
+    }
+  }
+}
+prototype "claude-explorer" {
+  kind = "h1"
+  role = "explorer"
+  model = "haiku"
+  open {
+    detached = true
+    command = ["pi", "--provider", "claude-cli", "--model", "claude-haiku-5-5", "--no-session"]
+  }
+}
+prototype "claude-advisor" {
+  kind = "h1"
+  role = "advisor"
+  model = "opus"
+  open {
+    detached = true
+    command = ["pi", "--provider", "claude-cli", "--model", "claude-opus-5-5", "--no-session"]
+  }
+}
+harness "claude" {
+  kind = "h1"
+  role = "commander"
+  model = "sonnet"
+  open {
+    title = "status board"
+    cwd = "${var.lab}"
+    detached = true
+    command = ["sh", "-c", "cd ${var.lab}/status && tail -n 3 -F *.log"]
+  }
+}
+pool "workers" {
+  prototype = "muse-worker"
+  parent = "claude"
+  min = 1
+  max = var.max_workers
+  idle_ttl = "5m"
+  constraints = {
+    require_brief = true
+    max_runtime = "30m"
+  }
+}
+pool "explorers" {
+  prototype = "claude-explorer"
+  parent = "claude"
+  min = 0
+  max = 2
+  idle_ttl = "10m"
+}
+pool "advisors" {
+  prototype = "claude-advisor"
+  parent = "claude"
+  min = 0
+  max = 1
+  constraints = {
+    max_runtime = "10m"
+  }
+}
+// single decision model — blocks are just named request types
+decision "ask-worker" {
+  pool = "workers"
+  model = "system-one"
+  input = {
+    brief = "string"
+    cwd = "string"
+    timeout = "duration"
+  }
+  output = {
+    status = "string"
+    result = "string"
+    log = "string"
+  }
+  constraints = {
+    require_brief = true
+    max_timeout = "20m"
+    deny_if_pool_full = true
+  }
+}
+harness "explorer" {
+  prototype = "claude-explorer"
+  parent = "claude"
+  can_ask = ["ask-worker"]
+  open {
+    title = "explorer"
+    cwd = "${var.lab}/wt/explorer"
+  }
+}
+harness "advisor" {
+  prototype = "claude-advisor"
+  parent = "claude"
+  can_ask = ["ask-worker"]
+  open {
+    title = "advisor"
+    cwd = "${var.lab}/wt/advisor"
+  }
+}
+team "fleet" {
+  root = "claude"
+  graph = true
+}

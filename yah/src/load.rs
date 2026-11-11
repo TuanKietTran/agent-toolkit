@@ -251,4 +251,52 @@ mod tests {
         assert!(msg.starts_with("Error:"), "message: {msg}");
         assert!(msg.contains(&path.display().to_string()), "message: {msg}");
     }
+
+    const POOLED: &str = r#"yah 1
+provider "p" { type = "anthropic" }
+model "m" { provider = "p" id = "claude-haiku-5-5" capabilities = ["chat"] }
+prototype "w" {
+  kind = "h1"
+  role = "worker"
+  model = "m"
+  open { command = ["pi"] detached = true }
+}
+harness "boss" { kind = "h1" role = "commander" model = "m" open { command = ["sh"] } }
+pool "workers" { prototype = "w" parent = "boss" min = 2 max = 4 }
+decision "ask" { pool = "workers" model = "m" input = { brief = "string" } }
+harness "scout" { prototype = "w" can_ask = ["ask"] open { title = "scout" } }
+team "t" { root = "boss" }
+"#;
+
+    #[test]
+    fn pool_expands_into_team_members_from_the_prototype() {
+        let spec = load_str("p.yah", POOLED, &no_overrides()).expect("loads");
+        let w2 = spec.harness("workers-2").expect("member 2");
+        assert_eq!(w2.parent.as_deref(), Some("boss"));
+        assert_eq!(w2.role, "worker");
+        assert_eq!(spec.team("t").unwrap().members, vec!["workers-1", "workers-2"]);
+        assert_eq!(spec.pools[0].max, Some(4));
+    }
+
+    #[test]
+    fn harness_open_merges_with_prototype_open() {
+        let spec = load_str("p.yah", POOLED, &no_overrides()).expect("loads");
+        let open = &spec.harness("scout").unwrap().open;
+        assert_eq!(open.command.len(), 1);
+        assert!(open.detached);
+        assert!(open.title.is_some());
+        assert_eq!(spec.asks, vec![("scout".to_string(), "ask".to_string())]);
+    }
+
+    #[test]
+    fn unknown_prototype_pool_and_decision_refs_are_errors() {
+        let bad = POOLED
+            .replace("prototype = \"w\" parent", "prototype = \"nope\" parent")
+            .replace("pool = \"workers\" model", "pool = \"ghost\" model")
+            .replace("can_ask = [\"ask\"]", "can_ask = [\"zzz\"]");
+        let d = load_str("p.yah", &bad, &no_overrides()).unwrap_err();
+        let all: String = d.0.iter().map(|x| x.summary.clone()).collect::<Vec<_>>().join("|");
+        assert!(all.contains("Unknown reference"), "{all}");
+        assert!(d.0.len() >= 3, "{all}");
+    }
 }

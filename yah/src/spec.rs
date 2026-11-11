@@ -127,6 +127,13 @@ pub struct Spec {
     pub teams: Vec<Team>,
     pub workflows: Vec<Workflow>,
     pub outputs: Vec<Output>,
+    /// Names of `prototype` blocks (harness templates; already folded into harnesses).
+    pub prototypes: Vec<String>,
+    /// `pool` blocks: N workers cut from a prototype (already expanded into harnesses).
+    pub pools: Vec<Pool>,
+    pub decisions: Vec<Decision>,
+    /// `(harness, decision)` pairs from `can_ask`.
+    pub asks: Vec<(String, String)>,
 }
 
 /// `variable "name" { type, default, description }`. `value` is the effective value after
@@ -148,6 +155,36 @@ pub struct Defaults {
     pub model_policy: Option<String>,
     /// `local` | `container`
     pub sandbox: Option<String>,
+    pub worktree_root: Option<String>,
+    pub status_dir: Option<String>,
+    pub target_dir: Option<String>,
+}
+
+/// `pool "label" { prototype, parent, min, max, idle_ttl, constraints }`: a conventional way to
+/// say "several workers". `min` instances `<label>-1..` are expanded into harnesses and joined
+/// to every team rooted at `parent`; `max` and the rest are recorded for the runtime.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Pool {
+    pub name: String,
+    pub prototype: String,
+    pub parent: Option<String>,
+    pub min: u32,
+    pub max: Option<u32>,
+    pub idle_ttl: Option<String>,
+    pub constraints: serde_json::Value,
+    pub line: u32,
+}
+
+/// `decision "label" { pool, model, input, output, constraints }`: a named request type.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Decision {
+    pub name: String,
+    pub pool: Option<String>,
+    pub model: Option<String>,
+    pub input: serde_json::Value,
+    pub output: serde_json::Value,
+    pub constraints: serde_json::Value,
+    pub line: u32,
 }
 
 /// `provider "label" { type, api_key, base_url }`. `api_key` must be a bare `env.NAME` reference:

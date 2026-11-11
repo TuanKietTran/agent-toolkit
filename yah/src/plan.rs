@@ -615,6 +615,10 @@ mod tests {
             workflows: Vec::new(),
             vaults: Vec::new(),
             outputs: Vec::new(),
+            prototypes: Vec::new(),
+            pools: Vec::new(),
+            decisions: Vec::new(),
+            asks: Vec::new(),
         }
     }
 
