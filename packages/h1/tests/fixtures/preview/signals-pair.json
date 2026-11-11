@@ -1,0 +1,45 @@
+{
+  "version": 1,
+  "team": "pair",
+  "source": "examples/signals-pair.yah",
+  "root": "producer",
+  "prefix": null,
+  "nodes": [
+    {
+      "name": "producer",
+      "harness": "producer",
+      "role": "producer",
+      "parent": null,
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": null,
+      "env": [],
+      "open_command": "h1 open -n producer --role producer --model system-one --detached -- cat"
+    },
+    {
+      "name": "consumer",
+      "harness": "consumer",
+      "role": "consumer",
+      "parent": "producer",
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": null,
+      "env": [],
+      "open_command": "h1 open -n consumer --role consumer --parent producer --model system-one --detached -- cat"
+    }
+  ],
+  "edges": [
+    {
+      "from": "producer",
+      "to": "consumer",
+      "kind": "parent"
+    }
+  ],
+  "warnings": []
+}

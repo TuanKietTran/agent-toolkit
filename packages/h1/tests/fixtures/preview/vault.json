@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "team": "default",
+  "source": "examples/vault.yah",
+  "root": "worker",
+  "prefix": null,
+  "nodes": [
+    {
+      "name": "worker",
+      "harness": "worker",
+      "role": "worker",
+      "parent": null,
+      "requested_model": "system-one",
+      "model": null,
+      "model_label": null,
+      "model_status": "pending",
+      "tools": [],
+      "cwd": null,
+      "env": [
+        {
+          "key": "FLEET_TOKEN",
+          "value": "${vault.local.FLEET_TOKEN}",
+          "source": "vault",
+          "masked": false
+        }
+      ],
+      "open_command": "h1 open -n worker --role worker --model system-one --env 'FLEET_TOKEN=${vault.local.FLEET_TOKEN}' --detached -- cat"
+    }
+  ],
+  "edges": [],
+  "warnings": []
+}

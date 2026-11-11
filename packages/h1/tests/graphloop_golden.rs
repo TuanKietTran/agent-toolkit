@@ -40,10 +40,10 @@ fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
-/// The graphloop crate root (`packages/graphloop`), used as the
-/// working directory so example paths stay relative (`examples/…`).
+/// The examples now live in the h1 package (the graphloop crate folded into h1); the package
+/// root is the working directory so example paths stay relative (`examples/…`).
 fn graphloop_root() -> PathBuf {
-    root().join("../graphloop")
+    root()
 }
 
 fn run(args: &[&str]) -> String {

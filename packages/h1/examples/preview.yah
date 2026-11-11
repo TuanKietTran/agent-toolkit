@@ -1,0 +1,85 @@
+yah 1
+
+// preview.yah - one file that exercises everything `graphloop preview`
+// reports, so the preview JSON can be eyeballed and golden-tested:
+// a parent edge, a cwd, cols/rows, and all three env flavours - a
+// literal value, an ${env.*} reference, and a ${vault.*} reference.
+// Preview never fetches a value: env entries carry only their key and
+// whether the value is masked (late-bound), and nothing is opened,
+// written, or manifested. The hosted programs are plain cat, so even
+// `graphloop up` on this file would run no model.
+
+variable "work_dir" {
+  type = "string"
+  default = "./work"
+}
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+  api_key = env.ANTHROPIC_API_KEY
+}
+
+model "sonnet" {
+  provider = "anthropic"
+  id = "claude-sonnet-5-5"
+  capabilities = ["chat", "tools"]
+}
+
+model "haiku" {
+  provider = "anthropic"
+  id = "claude-haiku-5-5"
+  capabilities = ["chat"]
+}
+
+system_one {
+  fallback = "sonnet"
+}
+
+vault "local" {
+  provider = "dotenv"
+  path     = "fleet.env"
+  secrets  = {
+    PREVIEW_TOKEN = "PREVIEW_TOKEN"
+  }
+}
+
+harness "lead" {
+  kind  = "h1"
+  role  = "lead"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    cols = 120
+    rows = 36
+    env = {
+      MODE          = "preview"
+      PREVIEW_TOKEN = "${vault.local.PREVIEW_TOKEN}"
+    }
+  }
+}
+
+harness "worker" {
+  kind   = "h1"
+  role   = "worker"
+  parent = "lead"
+  model  = "system-one"
+  open {
+    command  = ["cat"]
+    cwd      = var.work_dir
+    detached = true
+    env = {
+      GREETING = "${env.PREVIEW_GREETING}"
+    }
+  }
+}
+
+team "preview" {
+  root = "lead"
+  members = ["worker"]
+  graph = true
+}

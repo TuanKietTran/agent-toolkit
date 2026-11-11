@@ -1,5 +1,7 @@
 # graphloop
 
+> **Moved:** the graphloop binary has merged into `h1` — `graphloop check|plan|graph|up|down|vault|runs|trace` are now `h1 check|plan|graph|up|down|vault|runs|trace`, same arguments and flags. See the Migration section of [`packages/h1/README.md`](../h1/README.md). This directory keeps the Graphspec document and the examples.
+
 Graphloop is the first concrete implementation of **prompts -> agents -> loops -> graphs**: a Rust crate that parses Graphspec (`.yah`) files and brings a team up as `h1` labs.
 
 Each layer is owned by an existing piece, not reinvented here:
@@ -29,8 +31,23 @@ graphloop down examples/demo.yah
 - `src/` — the crate: `lexer.rs` / `parser.rs` (tokens, recursive-descent parser), `resolve.rs` / `load.rs` (substitution, references, pipeline glue), `schema.rs` (strict validation), `pick.rs` (system-one resolution), `plan.rs` (team -> open steps, edges, manifest), `cli.rs` (`check|plan|graph|up|down|runs|trace`), plus the shared-contract modules `ast.rs`, `spec.rs`, `diag.rs`, `manifest.rs`.
 - `docs/graphspec.md` — the Graphspec specification.
 - `editors/` — TextMate grammar (`yah.tmLanguage.json`), `language-configuration.json`, install notes (`README.md`), and the dependency-free validator `check.mjs`.
-- `examples/` — `team.yah` (commander -> builder), `research-team.yah` (planner with researcher / builder / reviewer), `demo.yah` (harmless detached `cat` labs), `renewable-team.yah` (builder with `brief` / `resume_log` / `auto_rearm` renew fields).
+- `examples/` — `team.yah` (commander -> builder), `research-team.yah` (planner with researcher / builder / reviewer), `demo.yah` (harmless detached `cat` labs), `renewable-team.yah` (builder with `brief` / `resume_log` / `auto_rearm` renew fields), `vault.yah` (a dotenv vault referenced from an env map), `preview.yah` (lead -> worker pair that exercises every field `graphloop preview` reports), `preview-demo.yah` (a preview that deliberately warns: an empty variable and a missing cwd, in a file that still loads).
 - `tests/fixtures/canonical.yah` — the canonical example the grammar checks run against.
+
+## Previewing a team
+
+`graphloop preview examples/preview.yah` prints, as JSON, what `graphloop up` would open for a team — without opening anything: no sessions are started, no process is spawned (system-one included), no files are written, and no run manifest is created. Vault secrets are never fetched and `${env.*}` references are never expanded, so a preview is safe to run anywhere, including in tests, and is deterministic: same file, same output.
+
+The document is versioned (version 1) and stable enough to golden-test — `tests/fixtures/preview/` holds one golden per file in `examples/`:
+
+- Top level: `version`, `team`, `source`, `root`, `prefix`, `nodes`, `edges`, `warnings`.
+- Each node: `name`, `harness`, `role`, `parent`, `requested_model`, `model`, `model_label`, `model_status`, `tools`, `cwd`, `env`, and `open_command` (the printable `h1 open ...` string). A pinned node names its catalog label and concrete `provider/id`; a `system-one` node stays `pending` with `model: null` — preview never asks system-one to choose.
+- `env` entries carry `key`, `value`, `source` (`literal` / `env` / `vault` / `mixed`) and `masked`. `value` is the template as written: literals in full, `${env.*}` / `${vault.*}` shown as references. The one exception is a literal whose key looks secret-bearing (it contains `KEY`, `TOKEN`, `SECRET`, `PASSWORD` or `PASSWD`): its value is replaced by `***` and `masked` is true.
+- Non-fatal findings are collected in `warnings` (sorted by node, then code) instead of failing the preview; hard errors fail exactly as `check` does. Codes include `empty_variable` (a variable that resolves to an empty string), `missing_cwd` (a literal cwd that does not exist) and `unknown_model` (a model label outside the catalog — reachable when a preview is built from a spec in code; a `.yah` file that names an unknown model fails `check`, so it never reaches preview).
+
+`examples/preview-demo.yah` is the warning case on purpose: an empty variable and a missing cwd, in a file that still loads. Its header shows the `unknown_model` shape as a comment, for the reason above.
+
+The `h1` console can render the same document as a planned graph (its `--preview` mode), so the JSON and the picture never drift. In the console, `P` loads a preview file and `o` sorts; the full preview-mode key list is in the h1 README's "Preview mode" section.
 
 ## Secrets
 
