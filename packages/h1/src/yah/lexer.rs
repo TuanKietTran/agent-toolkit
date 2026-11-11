@@ -472,7 +472,7 @@ mod tests {
 
     #[test]
     fn canonical_fixture_lexes_to_eof() {
-        let src = include_str!("../tests/fixtures/canonical.yah");
+        let src = include_str!("../../tests/fixtures/canonical.yah");
         let t = toks(src);
         assert_eq!(t.last().unwrap().tok, Tok::Eof);
         assert!(t.len() > 50);

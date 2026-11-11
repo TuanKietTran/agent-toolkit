@@ -296,7 +296,7 @@ mod tests {
 
     #[test]
     fn canonical_fixture_round_trips() {
-        round_trip(include_str!("../tests/fixtures/canonical.yah"));
+        round_trip(include_str!("../../tests/fixtures/canonical.yah"));
     }
 
     #[test]

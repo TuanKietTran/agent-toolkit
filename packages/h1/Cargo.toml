@@ -29,3 +29,8 @@ windows-sys = { version = "0.61", features = [
 
 [dev-dependencies]
 tempfile = "3.20"
+
+# Deprecated `graphloop` shim: one stderr deprecation line, then the yah CLI.
+[[bin]]
+name = "graphloop"
+path = "src/bin/graphloop.rs"
