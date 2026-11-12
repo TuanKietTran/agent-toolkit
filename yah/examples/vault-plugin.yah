@@ -1,0 +1,56 @@
+yah 1
+
+// vault-plugin.yah - a vault backed by an external helper. h1 runs
+// `h1-vault-toy <ref> <key>` and takes its stdout as the value; the
+// helper must be on PATH only when h1 up (or vault status --fetch)
+// actually fetches. check, plan and vault list never run it.
+// No password appears here: a helper reads its own from the keychain
+// or from an environment variable.
+
+defaults {
+  model_policy = "system-one"
+  sandbox = "local"
+}
+
+provider "anthropic" {
+  type = "anthropic"
+}
+
+model "haiku" {
+  provider = "anthropic"
+  id = "claude-haiku-5-5"
+  capabilities = ["chat"]
+}
+
+system_one {
+  fallback = "haiku"
+}
+
+vault "store" {
+  provider = "plugin"
+  plugin   = "toy"
+  account  = "me@example.test"
+  options  = { url = "http://localhost:8090" }
+  secrets  = {
+    FLEET_TOKEN = "fleet-token-item"
+  }
+}
+
+harness "worker" {
+  kind  = "h1"
+  role  = "worker"
+  model = "system-one"
+  open {
+    command = ["cat"]
+    detached = true
+    env = {
+      FLEET_TOKEN = "${vault.store.FLEET_TOKEN}"
+    }
+  }
+}
+
+team "default" {
+  root = "worker"
+  members = []
+  graph = true
+}

@@ -1179,7 +1179,9 @@ fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
     let (assigns, _) = collect_body(
         cx,
         block,
-        &["provider", "path", "account", "command", "secrets"],
+        &[
+            "provider", "path", "account", "command", "plugin", "options", "secrets",
+        ],
         &[],
         &ctx,
     );
@@ -1240,6 +1242,20 @@ fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
             &ctx,
         );
     }
+    let plugin = assigns
+        .get("plugin")
+        .and_then(|a| static_string(cx, a, &ctx));
+    if let (Some(a), Some(name)) = (assigns.get("plugin"), &plugin)
+        && !crate::vault::valid_plugin_name(name)
+    {
+        cx.invalid_value(
+            a.value.span,
+            "plugin",
+            format!("Invalid value for attribute \"plugin\": \"{name}\" must be lowercase letters, digits, \"-\" or \"_\", starting with a letter or digit."),
+            &ctx,
+        );
+    }
+    let options = parse_vault_options(cx, block, &assigns, plugin.as_deref(), &ctx);
     let mut secrets: Vec<(String, String)> = Vec::new();
     if let Some(a) = assigns.get("secrets") {
         match &a.value.kind {
@@ -1277,9 +1293,94 @@ fn parse_vault(cx: &mut Cx, block: &crate::ast::Block, spec: &mut Spec) {
         path,
         account,
         command: command.unwrap_or_default(),
+        plugin,
+        options,
         secrets,
         line: block.span.line,
     });
+}
+
+/// `options = { KEY = "value" }` of a `plugin` vault: static, non-secret settings. A plugin that
+/// h1 knows (see `vault::KNOWN_PLUGINS`) gets its option names checked at check time; any other
+/// plugin accepts any well-formed option name and validates its own settings when it runs.
+/// Nothing here looks for the helper program or runs it.
+fn parse_vault_options(
+    cx: &mut Cx,
+    block: &crate::ast::Block,
+    assigns: &HashMap<String, &crate::ast::Assign>,
+    plugin: Option<&str>,
+    ctx: &str,
+) -> Vec<(String, String)> {
+    let mut options: Vec<(String, String)> = Vec::new();
+    if let Some(a) = assigns.get("options") {
+        match &a.value.kind {
+            ExprKind::Map(entries) => {
+                for e in entries {
+                    let well_formed = e
+                        .key
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_alphabetic())
+                        && e.key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+                    if !well_formed {
+                        cx.invalid_value(
+                            e.span,
+                            "options",
+                            format!("Invalid option name \"{}\": use letters, digits and \"_\", starting with a letter.", e.key),
+                            ctx,
+                        );
+                        continue;
+                    }
+                    if options.iter().any(|(k, _)| *k == e.key) {
+                        cx.err(
+                            e.span,
+                            "Duplicate argument",
+                            format!("The option \"{}\" was already defined.", e.key),
+                            Some(ctx),
+                            None,
+                        );
+                        continue;
+                    }
+                    if let Some(v) = static_string(cx, e, ctx) {
+                        options.push((e.key.clone(), v));
+                    }
+                }
+            }
+            _ => cx.type_err(a.value.span, "options", "a map", ctx),
+        }
+    }
+    let provider_is_plugin = assigns
+        .get("provider")
+        .and_then(|a| static_string(cx, a, ctx))
+        .is_some_and(|p| p == "plugin");
+    if provider_is_plugin && let Some(info) = plugin.and_then(crate::vault::known_plugin) {
+        for (k, _) in &options {
+            if !info.options.contains(&k.as_str()) {
+                let hint = suggest(k, info.options.iter().copied())
+                    .map(|s| format!("Did you mean \"{s}\"?"));
+                cx.err(
+                    assigns["options"].value.span,
+                    "Unknown plugin option",
+                    format!(
+                        "The \"{}\" plugin has no option \"{k}\". Options: {}.",
+                        info.name,
+                        info.options.join(", ")
+                    ),
+                    Some(ctx),
+                    hint,
+                );
+            }
+        }
+        for req in info.required_options {
+            if !options.iter().any(|(k, _)| k == req) {
+                cx.missing(block.span, &format!("options.{req}"), ctx);
+            }
+        }
+        if info.needs_account && !assigns.contains_key("account") {
+            cx.missing(block.span, "account", ctx);
+        }
+    }
+    options
 }
 
 fn parse_model(

@@ -53,6 +53,8 @@ fn vault(provider: &str, bin: &Path) -> Vault {
         path: None,
         account: None,
         command: vec![bin.to_string_lossy().into_owned()],
+        plugin: None,
+        options: Vec::new(),
         secrets: Vec::new(),
         line: 1,
     }

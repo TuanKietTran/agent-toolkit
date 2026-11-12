@@ -45,6 +45,8 @@ fn setup(provider: &str, dir: &Path, secret: &str) -> (Vault, EnvFn) {
         path: None,
         account: None,
         command: Vec::new(),
+        plugin: None,
+        options: Vec::new(),
         secrets: Vec::new(),
         line: 1,
     };
@@ -94,6 +96,13 @@ fn setup(provider: &str, dir: &Path, secret: &str) -> (Vault, EnvFn) {
             let bin = fake_cli(dir, "security", secret);
             v.command = vec![bin.to_string_lossy().into_owned()];
             v.secrets = vec![("TOKEN".into(), "myservice".into())];
+            (v, no_env())
+        }
+        "plugin" => {
+            let bin = fake_cli(dir, "h1-vault-toy", secret);
+            v.plugin = Some("toy".into());
+            v.command = vec![bin.to_string_lossy().into_owned()];
+            v.secrets = vec![("TOKEN".into(), "item-1".into())];
             (v, no_env())
         }
         other => {

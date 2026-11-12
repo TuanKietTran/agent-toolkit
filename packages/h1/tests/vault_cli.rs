@@ -201,6 +201,8 @@ fn hand_built_spec(provider: &str, command: Vec<String>) -> Spec {
         path: None,
         account: None,
         command,
+        plugin: None,
+        options: Vec::new(),
         secrets: vec![("TOKEN".into(), "some-ref".into())],
         line: 1,
     });
@@ -301,6 +303,8 @@ fn unknown_provider_is_not_ready() {
         path: None,
         account: None,
         command: vec![],
+        plugin: None,
+        options: Vec::new(),
         secrets: vec![("TOKEN".into(), "some-ref".into())],
         line: 1,
     });

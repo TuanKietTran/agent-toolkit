@@ -140,6 +140,8 @@ fn duplicate_keys_last_occurrence_wins() {
         path: Some(env.to_string_lossy().into_owned()),
         account: None,
         command: Vec::new(),
+        plugin: None,
+        options: Vec::new(),
         secrets: Vec::new(),
         line: 1,
     };

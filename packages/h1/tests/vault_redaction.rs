@@ -76,6 +76,8 @@ fn cli_vault(provider: &str, bin: &Path, reference: &str) -> Vault {
         path: None,
         account: None,
         command: vec![bin.to_string_lossy().into_owned()],
+        plugin: None,
+        options: Vec::new(),
         secrets: vec![("TOKEN".into(), reference.into())],
         line: 1,
     }
@@ -489,6 +491,8 @@ fn d_provider_command_string_is_never_rendered() {
             MARKER_CMD.into(),
             "{ref}".into(),
         ],
+        plugin: None,
+        options: Vec::new(),
         secrets: vec![("TOKEN".into(), "cmd-ref".into())],
         line: 1,
     };

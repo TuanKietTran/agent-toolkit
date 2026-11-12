@@ -5,8 +5,10 @@
 //! memory for that run, handed to the program through its ENVIRONMENT (never a command line, which
 //! every process on the machine can read) and scrubbed from every message h1 prints.
 //!
-//! Adapters are listed in [`PROVIDERS`]; `schema` validates a vault block against that table, so
-//! adding an adapter means one table row plus one arm in [`Vaults::fetch`].
+//! Built-in adapters are listed in [`PROVIDERS`]; `schema` validates a vault block against that
+//! table. A NEW backend does not need a core edit: the `plugin` provider runs an external helper
+//! program `h1-vault-<name>` found on PATH (see [`plugin_program`]). The contract is
+//! `h1-vault-<name> <ref> <key>`, settings in `H1_VAULT_OPT_*` env vars, the value on stdout.
 
 use crate::diag::suggest;
 use crate::spec::Vault;
@@ -74,6 +76,13 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         program: "bws",
     },
     ProviderInfo {
+        name: "plugin",
+        keys: &["plugin", "options", "account", "command"],
+        required: &["plugin"],
+        summary: "external helper h1-vault-<plugin> on PATH: called with <ref> <key>, value on stdout, options in H1_VAULT_OPT_* env vars",
+        program: "",
+    },
+    ProviderInfo {
         name: "keychain",
         keys: &["account"],
         required: &[],
@@ -81,6 +90,55 @@ pub const PROVIDERS: &[ProviderInfo] = &[
         program: "security",
     },
 ];
+
+/// A `plugin` vault runs the helper `h1-vault-<plugin>`. The helper is looked up by name on PATH
+/// only when a secret is fetched or `vault status` runs; h1 keeps no registry and scans nothing
+/// at startup, `check` and `plan` never look for it or run it.
+pub fn plugin_program(plugin: &str) -> String {
+    format!("h1-vault-{plugin}")
+}
+
+/// A plugin name is part of a program name, so it must be a plain token: no path separators.
+pub fn valid_plugin_name(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        && name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
+}
+
+/// Optional check-time knowledge about a plugin h1 ships docs for. It only validates option names;
+/// it plays no part in dispatch, and a plugin missing from this table works the same way.
+pub struct PluginInfo {
+    pub name: &'static str,
+    pub options: &'static [&'static str],
+    pub required_options: &'static [&'static str],
+    pub needs_account: bool,
+}
+
+pub const KNOWN_PLUGINS: &[PluginInfo] = &[PluginInfo {
+    name: "aliasvault",
+    options: &["url", "keychain_service", "password_env"],
+    required_options: &["url"],
+    needs_account: true,
+}];
+
+pub fn known_plugin(name: &str) -> Option<&'static PluginInfo> {
+    KNOWN_PLUGINS.iter().find(|p| p.name == name)
+}
+
+/// The program a vault needs on PATH: the vault block's `command` override, else the provider's
+/// own program, else (for `plugin`) `h1-vault-<plugin>`. Empty when it needs none.
+pub fn vault_program(vault: &Vault, info: &ProviderInfo) -> String {
+    if let Some(first) = vault.command.first() {
+        return first.clone();
+    }
+    match (info.name, &vault.plugin) {
+        ("plugin", Some(p)) => plugin_program(p),
+        _ => info.program.to_owned(),
+    }
+}
 
 pub fn provider(name: &str) -> Option<&'static ProviderInfo> {
     PROVIDERS.iter().find(|p| p.name == name)
@@ -397,6 +455,7 @@ impl<'a> Vaults<'a> {
             "bitwarden" => self.fetch_bitwarden(vault, reference),
             "bitwarden-secrets" => self.fetch_bitwarden_secrets(vault, reference),
             "keychain" => self.fetch_keychain(vault, reference),
+            "plugin" => self.fetch_plugin(vault, key, reference),
             other => Err(format!("provider {other:?} is not available in this build")),
         }
     }
@@ -419,13 +478,65 @@ impl<'a> Vaults<'a> {
     /// (timeout, oversized or non-UTF-8 output) carry no provider text by construction and
     /// are scrubbed against already-fetched values as defence in depth.
     fn run_provider(&self, argv: &[String], install_hint: &str) -> Result<String, String> {
-        run_command(argv, &self.command_env, self.timeout).map_err(|e| {
+        self.run_provider_env(argv, &[], install_hint)
+    }
+
+    fn run_provider_env(
+        &self,
+        argv: &[String],
+        extra_env: &[(String, String)],
+        install_hint: &str,
+    ) -> Result<String, String> {
+        let mut env = self.command_env.clone();
+        env.extend(extra_env.iter().cloned());
+        run_command(argv, &env, self.timeout).map_err(|e| {
             if e.starts_with("could not run ") {
                 install_hint.to_owned()
             } else {
                 scrub(&e, &self.values())
             }
         })
+    }
+
+    /// The `plugin` provider: `h1-vault-<plugin> <ref> <key>`. Settings travel in the environment
+    /// (`H1_VAULT_OPT_<KEY>`, `H1_VAULT_ACCOUNT`), never in argv; the helper's stdout is the value,
+    /// through the same failure contract as every other external provider.
+    fn fetch_plugin(&self, vault: &Vault, key: &str, reference: &str) -> Result<String, String> {
+        let plugin = vault
+            .plugin
+            .as_deref()
+            .filter(|p| valid_plugin_name(p))
+            .ok_or_else(|| "the vault has no valid \"plugin\" name".to_owned())?;
+        let program = plugin_program(plugin);
+        let argv = vec![
+            self.provider_bin(vault, &program),
+            reference.to_owned(),
+            key.to_owned(),
+        ];
+        let mut env = vec![("H1_VAULT_PROTOCOL".to_owned(), "1".to_owned())];
+        if let Some(account) = &vault.account {
+            env.push(("H1_VAULT_ACCOUNT".to_owned(), account.clone()));
+        }
+        for (k, v) in &vault.options {
+            let name: String = k
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() {
+                        c.to_ascii_uppercase()
+                    } else {
+                        '_'
+                    }
+                })
+                .collect();
+            env.push((format!("H1_VAULT_OPT_{name}"), v.clone()));
+        }
+        self.run_provider_env(
+            &argv,
+            &env,
+            &format!(
+                "{program} is not installed: put the plugin helper on PATH (see the plugin's docs)"
+            ),
+        )
     }
 
     fn fetch_1password(&self, vault: &Vault, reference: &str) -> Result<String, String> {
@@ -573,6 +684,8 @@ mod tests {
             path: None,
             account: None,
             command: Vec::new(),
+            plugin: None,
+            options: Vec::new(),
             secrets: Vec::new(),
             line: 1,
         }

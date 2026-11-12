@@ -235,6 +235,10 @@ pub struct Vault {
     pub account: Option<String>,
     /// `command`: argv template for the `command` provider; `{ref}` and `{key}` are substituted.
     pub command: Vec<String>,
+    /// `plugin`: helper name for the `plugin` provider; the program is `h1-vault-<plugin>` on PATH.
+    pub plugin: Option<String>,
+    /// `options`: non-secret settings handed to a plugin helper as `H1_VAULT_OPT_<KEY>` env vars.
+    pub options: Vec<(String, String)>,
     /// KEY -> provider-side reference. Empty means any KEY is allowed and the KEY is the reference.
     pub secrets: Vec<(String, String)>,
     pub line: u32,

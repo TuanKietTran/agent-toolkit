@@ -768,11 +768,8 @@ fn vault_presence(
         _ => {
             // CLI providers and `command`: a configured command override replaces the
             // provider's own program (tests point it at a fake CLI; users can pin a path).
-            let program = vault
-                .command
-                .first()
-                .map(String::as_str)
-                .unwrap_or(info.program);
+            let program = crate::vault::vault_program(vault, info);
+            let program = program.as_str();
             if program.is_empty() {
                 return (false, Some("no command configured".to_string()));
             }
@@ -812,15 +809,11 @@ fn vault_program(vault: &Vault) -> Option<String> {
     if info.name == "dotenv" || info.name == "env" {
         return None;
     }
-    let program = vault
-        .command
-        .first()
-        .map(String::as_str)
-        .unwrap_or(info.program);
+    let program = crate::vault::vault_program(vault, info);
     if program.is_empty() {
         None
     } else {
-        Some(program.to_string())
+        Some(program)
     }
 }
 

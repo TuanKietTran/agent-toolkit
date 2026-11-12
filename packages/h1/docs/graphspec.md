@@ -497,6 +497,8 @@ vault "local" {
 | `path` | string | no | File for the `dotenv` provider: a `KEY=VALUE` file, relative to the `.yah` file (a leading `~/` is expanded against `$HOME`). Default `.env`. |
 | `account` | string | no | Provider account or server. Used by `1password` (as the `op --account` value) and by `keychain` (to distinguish entries that share a service); ignored by the other providers. |
 | `command` | list of strings | for `command` only | Argv template for the `command` provider. `{ref}` and `{key}` are substituted in each element; the value is the command's stdout. |
+| `plugin` | string | for `plugin` only | Helper name: the program is `h1-vault-<plugin>` on PATH. Lowercase letters, digits, `-` and `_`. |
+| `options` | map of string to string | no | Non-secret settings for a `plugin` helper, passed as `H1_VAULT_OPT_<KEY>` environment variables. Never put a password here. |
 | `secrets` | map of string to string | no | Maps each KEY used in `${vault.NAME.KEY}` to the provider-side reference for that key. If `secrets` is absent or a key is not listed, any KEY is allowed and the KEY itself is the reference. Duplicate keys are an error. |
 
 Keys a block carries for a provider that does not use them are accepted and ignored on purpose: one block can carry the settings of every backend, which is what makes `provider = var.name` switching (below) work without editing the block.
@@ -531,7 +533,31 @@ harness "worker" {
 | `bitwarden-secrets` | available | A Bitwarden Secrets Manager secret id, read with `bws secret get`; the value is the `value` field of its JSON output. |
 | `keychain` | available | A macOS Keychain service name, read with `security find-generic-password -w`; `account` distinguishes entries that share a service. |
 
-All seven are adapters in this build, behind the same block and the same `${vault.NAME.KEY}` references, so a file changes backends by changing `provider` (and the reference forms in `secrets`), never by changing the places that use the secret.
+| `plugin` | available | Whatever the helper `h1-vault-<plugin>` understands as its first argument; see "Vault plugins" below. |
+
+All eight are adapters in this build, behind the same block and the same `${vault.NAME.KEY}` references, so a file changes backends by changing `provider` (and the reference forms in `secrets`), never by changing the places that use the secret.
+
+## Vault plugins
+
+A new backend does not need a change to h1: `provider = "plugin"` runs an external helper.
+
+```yah check
+yah 1
+
+vault "av" {
+  provider = "plugin"
+  plugin   = "aliasvault"
+  account  = "me@example.test"
+  options  = { url = "http://localhost:8090" }
+  secrets  = { GH_TOKEN = "GitHub" }
+}
+```
+
+- **Contract.** h1 runs `h1-vault-<plugin> <ref> <key>` (no shell; `<ref>` is the `secrets` value, `<key>` the KEY). The value is the helper's stdout with trailing newlines trimmed. `account` arrives as `H1_VAULT_ACCOUNT`, each option as `H1_VAULT_OPT_<KEY>` (key upper-cased), and `H1_VAULT_PROTOCOL=1` marks the protocol version. Settings never ride on argv.
+- **Failures.** Same path as every external provider: a non-zero exit reports the helper's name and exit status only, never its stdout or stderr; a timeout (30 s), more than 1 MiB of output or non-UTF-8 output carries no helper text. Fetched values are cached for the run (a second `get` does not re-run the helper) and scrubbed from output; they never reach a manifest.
+- **Discovery.** By name, on PATH, lazily: h1 keeps no registry and scans nothing at startup, so a plugin costs nothing until a secret is fetched. `check`, `plan` and `vault list` never look for the helper and never run it; `vault status` reports a plugin ready iff `h1-vault-<plugin>` is found on PATH (the rule the CLI providers use), and runs it only with `--fetch`. `command = ["/abs/path/helper"]` pins a path instead.
+- **Passwords.** A helper that needs a master password must read it from the macOS keychain or from an environment variable named in `options`; it must not take it from the `.yah` file, argv, logs or manifests. h1 passes its own environment through to the helper.
+- **Check-time validation.** Any well-formed plugin name and option names load. For a plugin with a row in `vault::KNOWN_PLUGINS` (today `aliasvault`: option `url` required, `account` required) misspelled or missing options are reported at `check`. That table only validates; it is not consulted when fetching.
 
 ## Security model
 
@@ -616,7 +642,9 @@ With `FLEET_TOKEN=...` in `fleet.env` beside the `.yah` file, `h1 up` fetches it
 
 Example 1 with `provider = var.secrets` and a `variable "secrets"` defaulting to `"dotenv"` (the full form is in "Switching backends" above): locally the token comes from `fleet.env`; in CI, `--var secrets=env` reads the same name from the CI environment, where the CI system injects it. No other line changes.
 
-### 3. AliasVault (not an h1 backend)
+### 3. AliasVault (no helper ships yet)
+
+The `plugin` provider (see "Vault plugins") is the integration point for AliasVault: a helper `h1-vault-aliasvault` would have to log in over SRP and decrypt the vault client-side. No such helper is included in this build; until one exists the statements below hold.
 
 AliasVault cannot be read from h1. Its vault is end-to-end encrypted: no CLI or plain HTTP API returns a plaintext credential or creates an item, and the in-container `aliasvault` CLI is admin-only (`reset-admin-password`, `hash-password`). Decryption is client-side after unlock, so no `command` provider can fetch from it.
 
