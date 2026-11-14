@@ -46,6 +46,16 @@ The key is the proxy's own `api_key` from `proxy.toml`, not a Muse credential.
   turn (and any turn after a rewind or pi restart) sends the tool list, pi's
   system prompt (clipped) and the history, newest messages first when it must
   be cut. Parallel tool results share the request budget evenly.
+- **Attachments.** The proxy accepts text only (an image part gets a 400), so
+  pi's images (a pasted screenshot, an image a tool returned) are turned into
+  text before the request: a header with type and size, then what a describer
+  read from the image. The default describer is macOS on-device OCR (a small
+  Swift helper, compiled once into `~/.pi/agent/cache`), listing each text line
+  with its rough position. Set `PI_MUSE_PROXY_IMAGE_CMD` to a command run as
+  `<cmd> <image path>` to use any other describer (a vision model, say); its
+  stdout replaces the OCR text. Muse therefore sees text, not pixels: it can
+  discuss what the image says, not how it looks. Descriptions are cached by
+  content hash and clipped to 6000 characters.
 - **Latency.** Requests are non-streaming; expect roughly 6 to 20 seconds per
   turn, so tool loops are slow.
 - Each pi conversation creates a Muse side chat; use the proxy only for this.

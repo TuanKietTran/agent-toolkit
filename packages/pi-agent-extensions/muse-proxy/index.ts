@@ -31,6 +31,7 @@ import type {
 } from "@earendil-works/pi-ai";
 import * as piAi from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { inlineAttachments, warmUp } from "./attachments.ts";
 import { DEFAULT_BASE_URL, errorMessageFromBody, loadConfig } from "./config.ts";
 import { correctionMessage, parseRuns, type ToolDef } from "./protocol.ts";
 import { DEFAULT_LIMITS, SessionTracker, type MuseMessage } from "./session.ts";
@@ -181,8 +182,10 @@ function streamMuse(
         description: tool.description,
         parameters: tool.parameters,
       }));
+      // The proxy is text only: images become text surrogates before planning.
+      const museMessages = await inlineAttachments(context.messages as unknown as MuseMessage[]);
       const plan = tracker.plan(
-        context.messages as unknown as MuseMessage[],
+        museMessages,
         getSystemPrompt(context),
         process.cwd(),
         { ...DEFAULT_LIMITS, maxChars: config.maxChars, rotateTurns: config.rotateTurns },
@@ -223,7 +226,7 @@ function streamMuse(
         // Start a brand-new Muse chat carrying the recent context.
         tracker.reset(currentPlan.key);
         currentPlan = tracker.plan(
-          context.messages as unknown as MuseMessage[],
+          museMessages,
           getSystemPrompt(context),
           process.cwd(),
           { ...DEFAULT_LIMITS, maxChars: config.maxChars, rotateTurns: config.rotateTurns },
@@ -314,6 +317,7 @@ function streamMuse(
 }
 
 export default function (pi: ExtensionAPI) {
+  warmUp(); // build the OCR helper in the background so the first image is quick
   // Any shutdown (quit, /new, resume, fork, reload) ends the conversation these chats served.
   pi.on("session_shutdown", (event) => {
     compacting = undefined;
