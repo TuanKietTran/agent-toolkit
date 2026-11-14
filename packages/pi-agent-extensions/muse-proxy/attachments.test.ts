@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { imageSurrogate, inlineAttachments, MAX_DESCRIPTION_CHARS } from "./attachments.ts";
 
@@ -37,4 +40,23 @@ test("inlineAttachments replaces images, keeps text and message count, and cache
 test("a failing describer still yields a header-only surrogate", async () => {
   const out = await inlineAttachments([{ role: "user", content: [{ type: "image", data: "QUJD", mimeType: "image/jpeg" }] }], async () => { throw new Error("boom"); });
   assert.match((out[0].content as any[])[0].text, /no text could be extracted/);
+});
+
+test("an image file path in user text gets a surrogate; unknown paths and other roles are left alone", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "muse-test-"));
+  const file = join(dir, "pi-clipboard-1.png");
+  writeFileSync(file, Buffer.alloc(300, 7));
+  const describe = async () => "OCR TEXT";
+  const out = await inlineAttachments(
+    [
+      { role: "user", content: `${file} what is this? also /nope/missing.png` },
+      { role: "user", content: [{ type: "text", text: `see ${file}.` }] },
+      { role: "assistant", content: `I looked at ${file}` },
+    ],
+    describe,
+  );
+  assert.match(out[0].content as string, /what is this\? also \/nope\/missing\.png\n\n\[Attached image file .*pi-clipboard-1\.png: image\/png/);
+  assert.match(out[0].content as string, /OCR TEXT/);
+  assert.match((out[1].content as any[])[0].text, /OCR TEXT/);
+  assert.equal(out[2].content, `I looked at ${file}`);
 });

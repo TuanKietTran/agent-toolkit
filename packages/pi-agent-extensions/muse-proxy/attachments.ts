@@ -16,7 +16,7 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -38,9 +38,9 @@ export type Describer = (image: ImageInput) => Promise<string | undefined>;
 const EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/gif": "gif", "image/webp": "webp" };
 
 /** Pure: the text Muse sees in place of one image. */
-export function imageSurrogate(image: ImageInput, description: string | undefined): string {
+export function imageSurrogate(image: ImageInput, description: string | undefined, label = ""): string {
   const bytes = Math.floor((image.data.length * 3) / 4);
-  const header = `[Attached image: ${image.mimeType}, ${(bytes / 1024).toFixed(1)} KB. Muse cannot receive pixels through the proxy, so a text rendering follows.]`;
+  const header = `[Attached image${label}: ${image.mimeType}, ${(bytes / 1024).toFixed(1)} KB. Muse cannot receive pixels through the proxy, so a text rendering follows.]`;
   const body = description?.trim();
   if (!body) return `${header}\n(no text could be extracted from it)`;
   return `${header}\n${clip(body, MAX_DESCRIPTION_CHARS)}`;
@@ -91,13 +91,52 @@ export const defaultDescriber: Describer = (image) =>
 
 const cache = new Map<string, string>();
 
+const MIME: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp" };
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+/** Absolute paths to image files, as pi writes for a pasted clipboard image or an @-mention. */
+const IMAGE_PATH = /(?<![\w./-])(\/[^\s"'`<>|]+\.(?:png|jpe?g|gif|webp))(?![\w/-])/gi;
+
+async function surrogateFor(image: ImageInput, describe: Describer, label = ""): Promise<string> {
+  const key = createHash("sha1").update(label).update(image.data).digest("hex");
+  let surrogate = cache.get(key);
+  if (surrogate === undefined) {
+    surrogate = imageSurrogate(image, await describe(image).catch(() => undefined), label);
+    cache.set(key, surrogate);
+  }
+  return surrogate;
+}
+
+/** Text of a user message plus a surrogate for every image file it names that exists. */
+async function withFileSurrogates(text: string, describe: Describer): Promise<string> {
+  const extra: string[] = [];
+  for (const path of new Set([...text.matchAll(IMAGE_PATH)].map((m) => m[1]))) {
+    try {
+      if (statSync(path).size > MAX_FILE_BYTES) continue;
+      const mimeType = MIME[path.slice(path.lastIndexOf(".") + 1).toLowerCase()];
+      extra.push(await surrogateFor({ data: readFileSync(path).toString("base64"), mimeType }, describe, ` file ${path}`));
+    } catch { /* not a readable file: leave the text alone */ }
+  }
+  return extra.length ? `${text}\n\n${extra.join("\n\n")}` : text;
+}
+
 interface Block { type: string; text?: string; data?: string; mimeType?: string }
 interface Msg { role: string; content: string | Block[] }
 
 /** Replaces every image block in user and tool-result messages with its text surrogate. */
 export async function inlineAttachments<T extends Msg>(messages: T[], describe: Describer = defaultDescriber): Promise<T[]> {
   const out: T[] = [];
-  for (const message of messages) {
+  for (let message of messages) {
+    if (message.role === "user") {
+      if (typeof message.content === "string") {
+        const text = await withFileSurrogates(message.content, describe);
+        out.push(text === message.content ? message : { ...message, content: text });
+        continue;
+      }
+      const blocks = await Promise.all(
+        message.content.map(async (b) => (b.type === "text" && b.text ? { ...b, text: await withFileSurrogates(b.text, describe) } : b)),
+      );
+      message = { ...message, content: blocks };
+    }
     if (typeof message.content === "string" || !message.content.some((b) => b.type === "image")) {
       out.push(message);
       continue;
@@ -109,13 +148,7 @@ export async function inlineAttachments<T extends Msg>(messages: T[], describe: 
         continue;
       }
       const image = { data: block.data, mimeType: block.mimeType ?? "image/png" };
-      const key = createHash("sha1").update(image.data).digest("hex");
-      let surrogate = cache.get(key);
-      if (surrogate === undefined) {
-        surrogate = imageSurrogate(image, await describe(image).catch(() => undefined));
-        cache.set(key, surrogate);
-      }
-      blocks.push({ type: "text", text: surrogate });
+      blocks.push({ type: "text", text: await surrogateFor(image, describe) });
     }
     out.push({ ...message, content: blocks });
   }
