@@ -274,13 +274,14 @@ function streamMuse(
       }));
       const prose = calls.length > 0 ? parsed.text : text;
 
-      // Muse's reasoning before a tool request joins its streamed status as thinking.
-      if (calls.length > 0 && prose) onProgress(prose);
       if (thinkingIndex >= 0) {
         stream.push({ type: "thinking_end", contentIndex: thinkingIndex, content: thinkingText, partial: output });
       }
-      if (calls.length === 0) {
-        if (!prose) throw new Error("muse-proxy returned an empty reply (the request may have been superseded or cancelled)");
+      if (calls.length === 0 && !prose) {
+        throw new Error("muse-proxy returned an empty reply (the request may have been superseded or cancelled)");
+      }
+      // Muse's non-command text renders as a normal text block, before any tool calls.
+      if (prose) {
         const contentIndex = output.content.length;
         output.content.push({ type: "text", text: prose });
         stream.push({ type: "text_start", contentIndex, partial: output });
