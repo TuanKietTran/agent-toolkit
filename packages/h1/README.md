@@ -173,6 +173,28 @@ h1 open -n worker --detached --auto-rearm --brief /abs/brief.md --resume-log /ab
 
 If the host itself dies — a crash, a kill, a reboot — the registry record remains, and `h1 recover -n NAME` reopens the lab from it: the recorded command, working directory, size, title, role, parent and model, plus the stored brief, resume log, new-session command and ready pattern. `h1 recover --all` recovers every record whose host is gone. The record stores the **names** of the `--env` variables the lab was opened with, never their values: each value is taken from the current environment, and if a recorded name is not set there, recovery fails listing the missing names only. After reopening, recover runs the same re-arm as `renew` when a brief or resume log is stored, and prints `recovered NAME`. `h1 list` and the console hide a session whose host is gone but never delete its record (`h1 list --all` shows it); only `h1 stop` removes a record. Recover passes the recorded variable names with their current values to the reopened host as `--env NAME=value`, so those values are visible in that host's process arguments, exactly as with `h1 open --env`. A lab whose host still answers is refused and never touched. `h1 doctor` lists sessions that have a record but no host and says `h1 recover` would fix them.
 
+## Lifecycle: reap and guard
+
+Finished agents keep burning tokens when loops keep poking idle labs, and failed agents need a manual renew. `reap` covers the finished case and `guard` covers the failed case. Pass `--run ID` to scope either command to one run. Both accept `--dry-run` to report what they would do without doing it.
+
+A finished agent is one whose log shows DONE, LAB-DONE or 'queue 0 open', whose screen shows no open todo, and which has been idle for the TTL (default 10m). `reap` parks it: it stops the session and records it in the run manifest as finished. Anything that nudges idle labs skips finished ones.
+
+```sh
+$ h1 reap --run ID --ttl 10s
+$ h1 reap --run ID --dry-run
+```
+
+A failed agent is one whose screen contains 'Error:' with an API or proxy error, whose process exited while its host is still registered, whose host is gone but its registry record remains, or which has stalled longer than the configured limit with open todos. `guard` re-arms failed agents with `renew` or `recover`.
+
+```sh
+$ h1 guard --run ID --once
+$ h1 guard --run ID --interval 60s
+```
+
+`guard` is safe at fleet scale: at most 3 concurrent renews, 5s spacing with jitter between renews, a per-agent attempt cap with exponential backoff, and it never re-arms a finished agent.
+
+`guard` writes one line per action to `status/guard.log`. The smoke harness records its commands and outputs in `status/smoke.log`; it is `scripts/smoke-lifecycle.sh` in this package, takes an optional smoke-log path, and uses a short TTL, so the reap step does not wait 10 minutes.
+
 ## Platforms
 
 Linux, macOS and Windows (native, through ConPTY) are supported. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) builds and tests all three; see [`specs/006-cross-platform.md`](specs/006-cross-platform.md) for what has been verified on each.
