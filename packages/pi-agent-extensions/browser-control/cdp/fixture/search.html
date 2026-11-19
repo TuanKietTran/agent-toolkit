@@ -1,0 +1,27 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Acme Search</title>
+<nav aria-label="Main"><a href="/site.html">Home</a></nav>
+<main>
+<h1>Search</h1>
+<form id="search-form" role="search" action="/search.html" method="get">
+<label for="q">Search the catalog</label> <input id="q" name="q" type="search">
+<button id="go" type="submit">Search</button>
+</form>
+<section aria-label="Results"><h2 id="results-heading">Results</h2><ol id="results"></ol></section>
+</main>
+<script>
+const ITEMS = [
+  { id: 'a1', name: 'Anvil Classic', tags: 'anvil forge iron' },
+  { id: 'r7', name: 'Rocket Skates', tags: 'rocket skates speed' },
+  { id: 'r9', name: 'Rocket Sled', tags: 'rocket sled snow' },
+  { id: 'm2', name: 'Magnet Deluxe', tags: 'magnet iron' },
+];
+const q = new URLSearchParams(location.search).get('q');
+if (q != null) {
+  document.getElementById('q').value = q;
+  const found = ITEMS.filter((i) => (i.name + ' ' + i.tags).toLowerCase().includes(q.toLowerCase()));
+  document.getElementById('results-heading').textContent = found.length + ' results for "' + q + '"';
+  for (const i of found) { const li = document.createElement('li'); const a = document.createElement('a'); a.href = '/item.html?id=' + i.id; a.textContent = i.name; li.append(a); document.getElementById('results').append(li); }
+}
+</script>

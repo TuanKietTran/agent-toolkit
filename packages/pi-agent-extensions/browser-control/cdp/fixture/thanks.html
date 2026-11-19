@@ -1,0 +1,8 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Request received</title>
+<main><h1>Request received</h1><p id="echo"></p></main>
+<script>
+const p = new URLSearchParams(location.search);
+document.getElementById('echo').textContent = 'Name: ' + (p.get('fullname') || '') + ' | Email: ' + (p.get('mail') || '') + ' | Topic: ' + (p.get('topic') || '') + ' | Message: ' + (p.get('message') || '');
+</script>

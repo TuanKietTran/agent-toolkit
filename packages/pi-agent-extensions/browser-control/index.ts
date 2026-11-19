@@ -165,6 +165,8 @@ const WATCH_MAX_SETTLE_MS = 2_000;
 const WATCH_BLANK_GRACE_MS = 4_000;
 const WATCH_MODEL = process.env.PI_MAC_BROWSER_WATCH_MODEL?.trim() || "openai-codex/gpt-5.6-luna";
 const WATCH_ASSESS_TIMEOUT_MS = 20_000;
+const VERIFY_LUMINANCE_DELTA = 12;
+const VERIFY_MIN_CELLS = 2;
 
 type Point = { x: number; y: number };
 type Rect = { x: number; y: number; width: number; height: number };
@@ -456,6 +458,7 @@ export default function browserControl(pi: ExtensionAPI) {
   pi.registerTool({
     name: TOOL_WATCH,
     label: "Watch Mac Browser",
+    executionMode: "sequential",
     description: WATCH_DESCRIPTION,
     promptSnippet: "Watch browser changes during actions; changed frames steer the agent with an image",
     promptGuidelines: WATCH_GUIDELINES,
@@ -498,6 +501,8 @@ export default function browserControl(pi: ExtensionAPI) {
   pi.registerTool({
     name: TOOL_OBSERVE,
     label: OBSERVE_LABEL,
+    // Native input and capture of one window must never interleave; pi also stops a sequential batch on abort.
+    executionMode: "sequential",
     description: OBSERVE_DESCRIPTION,
     promptSnippet: OBSERVE_SNIPPET,
     promptGuidelines: OBSERVE_GUIDELINES,
@@ -532,6 +537,7 @@ export default function browserControl(pi: ExtensionAPI) {
           await runNative(["annotate", raw, annotated, encodedTrail, `${frame.x}`, `${frame.y}`, `${frame.width}`, `${frame.height}`, `${next.width}`, `${next.height}`], signal);
           const image = await readFile(annotated);
           view = next;
+          onUpdate?.({ content: [{ type: BLOCK_TEXT, text: `captured ${next.width}x${next.height} window ${status.browserWindowId}` }], details: { runtimeEvent: { kind: "computer.observation", title: status.browserWindowTitle, evidence: `window screenshot ${next.width}x${next.height}px of ${BROWSER_APP} (focus unchanged)` } } });
           const pointer = trail.at(-1);
           updateStatus(ctx, pointer);
           const text = [
@@ -563,6 +569,7 @@ export default function browserControl(pi: ExtensionAPI) {
   pi.registerTool({
     name: TOOL_ACT,
     label: ACT_LABEL,
+    executionMode: "sequential",
     description: ACT_DESCRIPTION,
     promptSnippet: ACT_SNIPPET,
     promptGuidelines: ACT_GUIDELINES,
@@ -581,9 +588,19 @@ export default function browserControl(pi: ExtensionAPI) {
       interval_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 1_000, description: DESC_INTERVAL })),
       wait_ms: Type.Optional(Type.Integer({ minimum: 0, maximum: 60_000, description: DESC_WAIT })),
     }),
-    async execute(_id, params, signal, _onUpdate, ctx) {
+    async execute(_id, params, signal, onUpdate, ctx) {
       return serial(async () => {
         throwIfAborted(signal);
+        const target = params.x !== undefined && params.y !== undefined ? `${Math.round(params.x)},${Math.round(params.y)}` : params.key ?? (params.text !== undefined ? `${params.text.length} chars` : undefined);
+        const report = (status: "started" | "completed" | "failed", detail?: string) => onUpdate?.({ content: [{ type: BLOCK_TEXT, text: `${params.action} ${status}${target ? ` ${target}` : ""}` }], details: { runtimeEvent: { kind: "computer.action", action: params.action, status, ...(target ? { target } : {}), ...(detail ? { detail } : {}) } } });
+        report("started");
+        try {
+          return await actOnce();
+        } catch (error) {
+          report("failed", errorMessage(error));
+          throw error;
+        }
+        async function actOnce() {
         const duration = params.duration_ms ?? MOVE_DURATION;
         let summary = `Completed ${params.action}`;
         let status = await nativeStatus(signal);
@@ -605,6 +622,10 @@ export default function browserControl(pi: ExtensionAPI) {
           return runNative([...args, "--pid", `${pid}`], signal, timeout);
         };
         const current = sendsInput ? actionView(status) : view;
+        // Observe -> act -> verify: a posted event is not proof of an effect (Chromium can ignore
+        // synthetic input), so the window is fingerprinted before and after every input action.
+        const verifyWindow = sendsInput && params.action !== ACTION_MOVE ? current?.windowId : undefined;
+        const beforeFrame = verifyWindow !== undefined ? await watchFrame(verifyWindow, signal ?? new AbortController().signal).catch(() => undefined) : undefined;
         try {
           switch (params.action) {
           case ACTION_MOVE: {
@@ -683,13 +704,27 @@ export default function browserControl(pi: ExtensionAPI) {
         } finally {
           // No focus or foreground state exists to restore: background PID delivery is mandatory.
         }
+        let verification: { verified: boolean; evidence: string } | undefined;
+        if (beforeFrame && verifyWindow !== undefined) {
+          const afterFrame = await watchFrame(verifyWindow, signal ?? new AbortController().signal).catch((error) => error as Error);
+          if (afterFrame instanceof Error) verification = { verified: false, evidence: `could not re-capture the window: ${errorMessage(afterFrame)}` };
+          else {
+            const cells = changedCells(beforeFrame.fingerprint, afterFrame.fingerprint);
+            const titleChanged = beforeFrame.title !== afterFrame.title;
+            verification = cells >= VERIFY_MIN_CELLS || titleChanged
+              ? { verified: true, evidence: `window changed: ${cells} of ${afterFrame.fingerprint.length} cells${titleChanged ? `, title ${JSON.stringify(beforeFrame.title)} -> ${JSON.stringify(afterFrame.title)}` : ""}` }
+              : { verified: false, evidence: `no visible change in the browser window within ${ACTION_DELAY}ms; the target may have ignored the input (background input is not delivered to every Chromium build) - observe before assuming success, or use focus_click` };
+          }
+          onUpdate?.({ content: [{ type: BLOCK_TEXT, text: (verification.verified ? "verified: " : "NOT verified: ") + verification.evidence }], details: { runtimeEvent: { kind: "computer.observation", title: afterFrame instanceof Error ? undefined : afterFrame.title, verified: verification.verified, evidence: verification.evidence } } });
+        }
         status = await nativeStatus(signal);
         // Never read the user's physical cursor into automation state.
         const pointer = trail.at(-1);
         updateStatus(ctx, pointer);
         const reported = current ?? viewFor(status.targetDisplay);
         const text = [
-          summary,
+          verification && !verification.verified ? `${summary} (NOT verified)` : summary,
+          ...(verification ? [`verified=${verification.verified}`, `evidence=${verification.evidence}`] : []),
           `input_mode=${params.action === ACTION_FOCUS_CLICK ? "foreground_hid" : sendsInput ? "background_pid" : "none"}`,
           `virtual_cursor=${pointer ? describeCursor(reported, pointer) : "unset"}`,
           `physical_cursor_ignored=${params.action === ACTION_FOCUS_CLICK ? "false" : "true"}`,
@@ -697,10 +732,12 @@ export default function browserControl(pi: ExtensionAPI) {
           `browser_activation_possible=${params.action === ACTION_FOCUS_CLICK ? "true" : "false"}`,
           `trail_points=${trail.length}`,
         ].join(NEWLINE);
+        report("completed", `input_mode=${params.action === ACTION_FOCUS_CLICK ? "foreground_hid" : sendsInput ? "background_pid" : "none"}`);
         return {
-          content: [{ type: BLOCK_TEXT, text }],
-          details: { trail: [...trail], view, status, action: params.action },
+          content: [{ type: BLOCK_TEXT as typeof BLOCK_TEXT, text }],
+          details: { trail: [...trail], view, status, action: params.action, ...(verification ? { verification } : {}) },
         };
+        }
       });
     },
   });
@@ -708,6 +745,7 @@ export default function browserControl(pi: ExtensionAPI) {
   pi.registerTool({
     name: TOOL_SURFACE,
     label: SURFACE_LABEL,
+    executionMode: "sequential",
     description: SURFACE_DESCRIPTION,
     promptSnippet: SURFACE_SNIPPET,
     parameters: Type.Object({
@@ -729,6 +767,7 @@ export default function browserControl(pi: ExtensionAPI) {
   pi.registerTool({
     name: TOOL_TABS,
     label: TABS_LABEL,
+    executionMode: "sequential",
     description: tabsDescription(BROWSER_APP),
     promptSnippet: TABS_SNIPPET,
     parameters: Type.Object({
@@ -811,6 +850,14 @@ function looksBlank(fingerprint: Buffer): boolean {
 
 function significantFrameChange(previous: Pick<WatchFrame, "fingerprint" | "title">, current: Pick<WatchFrame, "fingerprint" | "title">): boolean {
   return previous.title !== current.title || significantChange(previous.fingerprint, current.fingerprint);
+}
+
+/** Fingerprint cells whose luminance moved enough to be a real change rather than JPEG noise. */
+function changedCells(previous: Buffer, current: Buffer): number {
+  if (previous.length !== current.length) return current.length;
+  let changed = 0;
+  for (let index = 0; index < current.length; index++) if (Math.abs(previous[index] - current[index]) >= VERIFY_LUMINANCE_DELTA) changed++;
+  return changed;
 }
 
 function significantChange(previous: Buffer, current: Buffer): boolean {

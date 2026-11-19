@@ -1,9 +1,8 @@
-// CDP browser-control extension entry (the tools layer). Default export per cdp/contract.ts.
+// CDP browser-control extension entry. Default export per cdp/contract.ts.
 // The controller is created lazily on first use: no browser connection at load time.
-// the controller's controller.ts currently exports ControllerImpl; createController is also
-// accepted so either shape works after the branches merge.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { Controller } from "./contract.ts";
+import { PI_EVENT } from "../../core/events.ts";
+import { TOOL_NAMES, type Controller } from "./contract.ts";
 import { registerCdpTools, resolveAgent } from "./tools.ts";
 
 const NOTE_INFO = "info";
@@ -17,16 +16,22 @@ export default function browserControlCdp(pi: ExtensionAPI, deps?: { controller?
   async function getController(): Promise<Controller> {
     if (controller) return controller;
     creating ??= (async () => {
-      const mod = (await import("./controller.ts")) as { createController?: () => Controller; ControllerImpl?: new () => Controller };
-      const created = typeof mod.createController === "function" ? mod.createController() : mod.ControllerImpl ? new mod.ControllerImpl() : undefined;
-      if (!created) throw new Error("cdp/controller.ts exports neither createController nor ControllerImpl");
-      controller = created;
-      return created;
+      const { createController } = await import("./controller.ts");
+      controller = createController();
+      return controller;
     })();
     return creating;
   }
 
   registerCdpTools(pi, getController, deps?.agent);
+
+  // Results are returned, never thrown, so pi would record a failed call as a success. Flag it, so the
+  // model's tool result, pi's own UI and the runtime stream all agree that the call failed.
+  pi.on(PI_EVENT.TOOL_RESULT, async (event) => {
+    if (!(TOOL_NAMES as readonly string[]).includes(event.toolName)) return undefined;
+    const details = (event as { details?: unknown }).details as { ok?: boolean } | undefined;
+    return details?.ok === false && !event.isError ? { isError: true } : undefined;
+  });
 
   pi.registerCommand("bc", {
     description: "CDP browser control: status | launch | assign <tabId> [agent] | resume",
@@ -70,7 +75,7 @@ export default function browserControlCdp(pi: ExtensionAPI, deps?: { controller?
     },
   });
 
-  pi.on("session_shutdown", async () => {
+  pi.on(PI_EVENT.SESSION_SHUTDOWN, async () => {
     await controller?.close().catch(() => undefined);
   });
 }

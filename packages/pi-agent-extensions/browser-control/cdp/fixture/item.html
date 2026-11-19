@@ -1,0 +1,19 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Item</title>
+<nav aria-label="Main"><a href="/catalog.html">Back to catalog</a></nav>
+<main><h1 id="name">Unknown item</h1><dl id="facts"></dl></main>
+<script>
+const ITEMS = {
+  a1: { name: 'Anvil Classic', price: '$120.00', sku: 'ANV-001', weight: '45 kg', stock: '3 in stock' },
+  r7: { name: 'Rocket Skates', price: '$349.99', sku: 'RKT-SK7', weight: '6.2 kg', stock: '12 in stock' },
+  r9: { name: 'Rocket Sled', price: '$899.00', sku: 'RKT-SL9', weight: '38 kg', stock: 'Out of stock' },
+  m2: { name: 'Magnet Deluxe', price: '$19.95', sku: 'MAG-002', weight: '0.4 kg', stock: '140 in stock' },
+};
+const item = ITEMS[new URLSearchParams(location.search).get('id')];
+if (item) {
+  document.title = item.name + ' - Acme';
+  document.getElementById('name').textContent = item.name;
+  for (const [k, v] of Object.entries(item)) { if (k === 'name') continue; const dt = document.createElement('dt'); dt.textContent = k; const dd = document.createElement('dd'); dd.textContent = v; document.getElementById('facts').append(dt, dd); }
+}
+</script>

@@ -1,0 +1,23 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Acme Live Status</title>
+<nav aria-label="Main"><a href="/site.html">Home</a></nav>
+<main>
+<h1>Live status</h1>
+<p><button id="refresh" type="button">Refresh status</button> <button id="toggle" type="button" aria-pressed="false">Show details</button> <button id="noop" type="button">Do nothing</button></p>
+<div id="status" role="status" aria-live="polite">Status not loaded</div>
+<div id="details" hidden><p>Region: eu-west · Build 4.2.1</p></div>
+</main>
+<script>
+let n = 0;
+document.getElementById('refresh').addEventListener('click', () => {
+  const s = document.getElementById('status');
+  s.textContent = 'Loading…';
+  n += 1;
+  setTimeout(() => { s.textContent = 'All systems operational (check #' + n + ', 3 services healthy)'; }, 1200);
+});
+document.getElementById('toggle').addEventListener('click', (e) => {
+  const d = document.getElementById('details'); d.hidden = !d.hidden;
+  e.target.setAttribute('aria-pressed', String(!d.hidden)); e.target.textContent = d.hidden ? 'Show details' : 'Hide details';
+});
+</script>

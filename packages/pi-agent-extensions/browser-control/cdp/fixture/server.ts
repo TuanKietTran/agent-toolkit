@@ -9,6 +9,9 @@ export async function startFixtureServer(): Promise<FixtureServer> {
   const server = createServer(async (req, res) => {
     try {
       const u = new URL(req.url || '/', 'http://127.0.0.1');
+      // ?delay=<ms> holds the response, so tests can observe navigation that has not committed yet.
+      const delay = Math.min(10000, Math.max(0, Number(u.searchParams.get('delay') ?? 0) || 0));
+      if (delay) await new Promise((r) => setTimeout(r, delay));
       const name = u.pathname === '/' ? 'page.html' : decodeURIComponent(u.pathname.slice(1));
       const path = normalize(join(DIR, name));
       if (!path.startsWith(DIR) || !TYPES[extname(path)]) throw new Error('not found');

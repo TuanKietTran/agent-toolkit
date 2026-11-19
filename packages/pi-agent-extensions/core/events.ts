@@ -10,11 +10,14 @@ export const PI_EVENT = {
 	SESSION_BEFORE_COMPACT: "session_before_compact",
 	// Agent
 	BEFORE_AGENT_START: "before_agent_start",
+	CONTEXT: "context",
 	AGENT_START: "agent_start",
+	AGENT_END: "agent_end",
 	AGENT_BEFORE_SETTLE: "agent_before_settle",
 	AGENT_SETTLED: "agent_settled",
 	// Turn and message
 	TURN_END: "turn_end",
+	MESSAGE_START: "message_start",
 	MESSAGE_UPDATE: "message_update",
 	MESSAGE_END: "message_end",
 	MODEL_SELECT: "model_select",
@@ -24,5 +27,6 @@ export const PI_EVENT = {
 	TOOL_CALL: "tool_call",
 	TOOL_RESULT: "tool_result",
 	TOOL_EXECUTION_START: "tool_execution_start",
+	TOOL_EXECUTION_UPDATE: "tool_execution_update",
 	TOOL_EXECUTION_END: "tool_execution_end",
 } as const;
