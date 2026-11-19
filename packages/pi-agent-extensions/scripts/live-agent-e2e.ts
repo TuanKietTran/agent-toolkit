@@ -43,6 +43,7 @@ const scenarios = (origin: string): Scenario[] => [
   { id: "2", prompt: `Go to ${origin}/search.html, find the search field, search for "rocket", and open the first result. Tell me which item page you opened.`, check: (s) => /item\.html\?id=r7$/.test(s.url) },
   { id: "3", prompt: `Open ${origin}/contact.html and complete the form: full name "Ada Lovelace", email "ada@example.com", topic Billing, message "Invoice question". Then submit it - I confirm the submission. Tell me what the confirmation page says.`, check: (s) => /Name: Ada Lovelace \| Email: ada@example\.com \| Topic: billing \| Message: Invoice question/.test(s.page) },
   { id: "4", prompt: `Open ${origin}/dynamic.html, press the "Refresh status" button, wait for the status to finish loading, and report the exact status text.`, check: (s) => /All systems operational \(check #1, 3 services healthy\)/.test(s.finalText) },
+  { id: "10", prompt: `In the shop at ${origin}/shop.html, add the Rocket Skates to the cart. Confirm what the cart shows.`, check: (s) => /Cart: 1 item \(Rocket Skates\)/.test(s.page) && /rocket skates/i.test(s.finalText) },
   { id: "9", prompt: `Visit the catalog at ${origin}/catalog.html, find the Rocket Sled, open its detail page, and give me its price, SKU and stock status as a JSON object.`, check: (s) => s.finalText.includes("899.00") && s.finalText.includes("RKT-SL9") && /out of stock/i.test(s.finalText) },
 ];
 

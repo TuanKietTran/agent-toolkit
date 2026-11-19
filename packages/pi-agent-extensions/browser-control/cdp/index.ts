@@ -1,7 +1,8 @@
 // CDP browser-control extension entry. Default export per cdp/contract.ts.
 // The controller is created lazily on first use: no browser connection at load time.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { Controller } from "./contract.ts";
+import { PI_EVENT } from "../../core/events.ts";
+import { TOOL_NAMES, type Controller } from "./contract.ts";
 import { registerCdpTools, resolveAgent } from "./tools.ts";
 
 const NOTE_INFO = "info";
@@ -23,6 +24,14 @@ export default function browserControlCdp(pi: ExtensionAPI, deps?: { controller?
   }
 
   registerCdpTools(pi, getController, deps?.agent);
+
+  // Results are returned, never thrown, so pi would record a failed call as a success. Flag it, so the
+  // model's tool result, pi's own UI and the runtime stream all agree that the call failed.
+  pi.on(PI_EVENT.TOOL_RESULT, async (event) => {
+    if (!(TOOL_NAMES as readonly string[]).includes(event.toolName)) return undefined;
+    const details = (event as { details?: unknown }).details as { ok?: boolean } | undefined;
+    return details?.ok === false && !event.isError ? { isError: true } : undefined;
+  });
 
   pi.registerCommand("bc", {
     description: "CDP browser control: status | launch | assign <tabId> [agent] | resume",
@@ -66,7 +75,7 @@ export default function browserControlCdp(pi: ExtensionAPI, deps?: { controller?
     },
   });
 
-  pi.on("session_shutdown", async () => {
+  pi.on(PI_EVENT.SESSION_SHUTDOWN, async () => {
     await controller?.close().catch(() => undefined);
   });
 }

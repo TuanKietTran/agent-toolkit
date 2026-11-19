@@ -9,12 +9,12 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createController } from '../controller.ts';
 import type { Controller } from '../contract.ts';
-import { resolveBravePath } from '../launch.ts';
+import { resolveTestBrowser } from './browser-harness.ts';
 import { FAST_PACING, REF_PATTERN } from '../contract.ts';
 import { startFixtureServer, type FixtureServer } from '../fixture/server.ts';
 
 const AGENT = 'qa-e2e';
-const bravePath = resolveBravePath();
+const bravePath = resolveTestBrowser();
 const hasBrave = !!bravePath && existsSync(bravePath);
 
 let fixture: FixtureServer | undefined;
@@ -96,7 +96,7 @@ async function ensureTab(): Promise<string> {
   return tab;
 }
 function e2e(name: string, fn: (t: any) => Promise<void>) {
-  test(name, { skip: hasBrave ? false : 'Brave not installed (resolveBravePath found nothing)' }, async (t) => {
+  test(name, { skip: hasBrave ? false : 'no Chromium-family browser found' }, async (t) => {
     if (!hasBrave || !ctl) return;
     await fn(t);
   });

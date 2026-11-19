@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { EventLog, isToolRuntimeEvent, parseResumePoint, sanitizeContent, sseFrame } from "../events.ts";
+import { EventLog, NOT_EXECUTED_TEXT, closeOrphanToolCalls, isToolRuntimeEvent, parseResumePoint, sanitizeContent, sseFrame } from "../events.ts";
 import { ExecutionStateMachine, InvalidTransitionError, MetricsRecorder, PauseGate, canTransition } from "../lifecycle.ts";
 import { createRuntime } from "../runtime.ts";
 
@@ -225,4 +225,36 @@ test("runtime: a model error ends the execution as failed", async () => {
   await emit("agent_settled");
   const failed = rt.log.all().find((e) => e.type === "agent.failed") as any;
   assert.equal(failed.error, "HTTP 500 upstream");
+});
+
+test("orphan tool calls get an explicit not-executed error result placed after the existing results", () => {
+  const messages: any[] = [
+    { role: "user", content: "go" },
+    { role: "assistant", content: [{ type: "toolCall", id: "a", name: "wait_for" }, { type: "toolCall", id: "b", name: "click" }] },
+    { role: "toolResult", toolCallId: "a", content: [{ type: "text", text: "aborted" }], isError: true },
+    { role: "user", content: "next" },
+  ];
+  const out = closeOrphanToolCalls(messages)!;
+  assert.deepEqual(out.map((m: any) => m.role + ":" + (m.toolCallId ?? "")), ["user:", "assistant:", "toolResult:a", "toolResult:b", "user:"]);
+  assert.equal(out[3].isError, true);
+  assert.equal(out[3].content[0].text, NOT_EXECUTED_TEXT);
+  assert.equal(closeOrphanToolCalls(out), undefined, "nothing to change once every call has a result");
+});
+
+test("runtime: calls requested but never started end as tool.skipped", async () => {
+  const rt = createRuntime();
+  const { pi, emit } = fakePi();
+  rt.attach(pi);
+  await emit("session_start", { reason: "startup" });
+  await emit("agent_start");
+  await emit("message_update", { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "a", name: "wait_for", arguments: {} } } });
+  await emit("message_update", { assistantMessageEvent: { type: "toolcall_end", toolCall: { id: "b", name: "click", arguments: {} } } });
+  await emit("tool_execution_start", { toolCallId: "a", toolName: "wait_for", args: {} });
+  rt.cancel();
+  await emit("tool_execution_end", { toolCallId: "a", toolName: "wait_for", isError: true, result: { content: [{ type: "text", text: "aborted" }] } });
+  await emit("agent_end", { messages: [{ role: "assistant", stopReason: "toolUse" }] });
+  await emit("agent_settled");
+  const skipped = rt.log.all().filter((e) => e.type === "tool.skipped") as any[];
+  assert.deepEqual(skipped.map((e) => e.toolCallId), ["b"]);
+  assert.equal(rt.status().recent[0].outcome, "cancelled");
 });

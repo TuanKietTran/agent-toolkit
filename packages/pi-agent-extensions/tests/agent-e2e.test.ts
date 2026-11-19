@@ -375,3 +375,140 @@ e2e("6d web UI: the built-in remote page renders live tool activity, verificatio
     await h.controller.call("ui-viewer", "tab_close", { tab: uiTab } as never);
   } finally { await h.dispose(); }
 });
+
+// ---------------------------------------------------------------------------------------------
+// Lifecycle consistency: the model loop, the tool loop and the stream must describe the same run.
+// For every tool call the test compares four views: the SSE stream (what a UI shows), pi's session
+// tool-result message, the exact context the model received on its next request, and the browser.
+// The model here is a policy that decides each step ONLY from the tool results it actually received,
+// so a result that never reached the model would derail the run.
+// ---------------------------------------------------------------------------------------------
+
+type LlmMsg = { role: string; content?: any; toolCallId?: string; isError?: boolean; toolName?: string };
+const textOfContent = (content: unknown): string => Array.isArray(content) ? content.filter((c: any) => c?.type === "text").map((c: any) => c.text).join("\n") : String(content ?? "");
+function orphanToolCalls(messages: LlmMsg[]): string[] {
+  const results = new Set(messages.filter((m) => m.role === "toolResult").map((m) => m.toolCallId));
+  return messages.filter((m) => m.role === "assistant").flatMap((m) => (Array.isArray(m.content) ? m.content : []).filter((c: any) => c.type === "toolCall").map((c: any) => c.id)).filter((id: string) => !results.has(id));
+}
+
+e2e("L lifecycle consistency + adaptation: stream, session and model context agree on every tool call while the agent adapts to a changing page", async () => {
+  const contexts: LlmMsg[][] = [];
+  let oldRef = "";
+  let phase = "start";
+  const policy = (ctx: { messages: readonly unknown[] }) => {
+    const messages = structuredClone(ctx.messages) as LlmMsg[];
+    contexts.push(messages);
+    const last = [...messages].reverse().find((m) => m.role === "toolResult");
+    const lastText = textOfContent(last?.content);
+    switch (phase) {
+      case "start": phase = "opened"; return msg([call("tab_open", { url: fx.origin + "/shop.html" })]);
+      case "opened": tab = tabFrom(lastText); phase = "first-snapshot"; return msg([call("snapshot", { tab })]);
+      case "first-snapshot": oldRef = refIn(lastText, "Add Rocket Skates to cart"); phase = "first-add"; return msg([call("click", { tab, ref: oldRef })]);
+      case "first-add":
+        // Adapt: the click did not add to the cart; the page showed a consent banner instead.
+        assert.ok(!last?.isError && /We use cookies/.test(lastText), "the model received the banner evidence: " + lastText);
+        phase = "banner-snapshot"; return msg([call("snapshot", { tab })]);
+      case "banner-snapshot": phase = "accept"; return msg([call("click", { tab, ref: refIn(lastText, "Accept cookies") })]);
+      case "accept": phase = "retry-old"; return msg([call("click", { tab, ref: oldRef })]); // naive retry with the old ref
+      case "retry-old":
+        // Adapt: the list was re-rendered; the old reference is reported stale and as an error.
+        assert.equal(last?.isError, true, "the model received the stale ref as an error");
+        assert.match(lastText, /no longer on the page/);
+        phase = "resnapshot"; return msg([call("snapshot", { tab })]);
+      case "resnapshot": phase = "add"; return msg([call("click", { tab, ref: refIn(lastText, "Add Rocket Skates to cart") })]);
+      case "add":
+        assert.match(lastText, /Cart: 1 item \(Rocket Skates\)/);
+        phase = "noop"; return msg([call("scroll", { tab, direction: "up", amount: 100 })]); // already at the top: NOT verified
+      case "noop":
+        assert.match(lastText, /unchanged/);
+        phase = "done"; return msg(text("Added Rocket Skates. The cart shows 1 item (Rocket Skates)."));
+      default: throw new Error("unexpected extra model call in phase " + phase);
+    }
+  };
+  const h = await startHarness({ browserPort: br.port, responses: Array.from({ length: 12 }, () => policy) });
+  try {
+    remote = await startRemote(h.session);
+    const es = openEvents(remote);
+    await new Promise((r) => setTimeout(r, 100));
+    const { executionId } = await run(h, "Add the Rocket Skates to the cart in the local shop.");
+    await es.waitFor((e) => e.type === "agent.completed" && e.executionId === executionId);
+    es.close();
+    assert.equal(phase, "done");
+    const stream = es.received.map((r) => r.event).filter((e) => e.executionId === executionId);
+    const session = (h.session.messages as LlmMsg[]).filter((m) => m.role === "toolResult");
+    const requested = stream.filter((e) => e.type === "tool.requested") as any[];
+    assert.equal(requested.length, 9);
+    assert.equal(session.length, requested.length, "every requested call has exactly one result in the session");
+    for (const req of requested) {
+      const id = req.toolCallId;
+      const mine = stream.filter((e) => (e as any).toolCallId === id);
+      const kinds = mine.map((e) => e.type).filter((t) => t.startsWith("tool."));
+      const terminal = kinds.filter((t) => t === "tool.completed" || t === "tool.failed");
+      assert.equal(terminal.length, 1, `${req.toolName} ${id}: exactly one terminal event (${kinds.join(",")})`);
+      assert.ok(kinds.indexOf("tool.requested") < kinds.indexOf("tool.started") && kinds.indexOf("tool.started") < kinds.indexOf(terminal[0]), `${id} ordered: ${kinds.join(",")}`);
+      const result = session.find((m) => m.toolCallId === id)!;
+      assert.ok(result, `${id} has a session result`);
+      // The stream's verdict equals the flag the model sees.
+      assert.equal(terminal[0] === "tool.failed", result.isError === true, `${req.toolName}: stream ${terminal[0]} vs isError ${result.isError}`);
+      const end = mine.find((e) => e.type === terminal[0]) as any;
+      const resultText = textOfContent(result.content);
+      const shown = terminal[0] === "tool.failed" ? end.error : end.summary ?? "";
+      assert.ok(resultText.startsWith(shown), `${req.toolName}: the stream shows what the model got`);
+      const details = (h.session.messages as any[]).find((m) => m.role === "toolResult" && m.toolCallId === id).details;
+      if (details?.verification) assert.equal(end.verified, details.verification.verified, `${req.toolName}: verified flag`);
+      // The model actually received this exact result in its next request.
+      const seenIn = contexts.find((c) => c.some((m) => m.role === "toolResult" && m.toolCallId === id));
+      assert.ok(seenIn, `${req.toolName} ${id} result reached the model`);
+      const seen = seenIn.find((m) => m.role === "toolResult" && m.toolCallId === id)!;
+      assert.equal(textOfContent(seen.content), resultText, `${req.toolName}: model context text equals the session result`);
+      assert.equal(!!seen.isError, !!result.isError, `${req.toolName}: model context error flag`);
+    }
+    for (const c of contexts) assert.deepEqual(orphanToolCalls(c), [], "no tool call without a result in any model request");
+    const outcomes = requested.map((r) => { const t = stream.find((e) => (e.type === "tool.completed" || e.type === "tool.failed") && (e as any).toolCallId === r.toolCallId) as any; return r.toolName + (t.type === "tool.failed" ? "!" : t.verified === false ? "?" : ""); });
+    // ! = failed (the model saw an error), ? = completed but NOT verified.
+    assert.deepEqual(outcomes, ["tab_open", "snapshot", "click", "snapshot", "click", "click!", "snapshot", "click", "scroll?"]);
+    // And the browser agrees with what the model concluded.
+    const page: any = await h.controller.call("harness", "snapshot", { tab } as never);
+    assert.match(page.text, /Cart: 1 item \(Rocket Skates\)/);
+    assert.equal(stream.at(-1)!.type, "agent.completed");
+  } finally { await h.dispose(); }
+});
+
+e2e("L2 cancel mid-batch leaves no tool call without a result, so the next instruction can continue the session", async () => {
+  const contexts: LlmMsg[][] = [];
+  let pingRef = "";
+  const record = (ctx: { messages: readonly unknown[] }) => { contexts.push(structuredClone(ctx.messages) as LlmMsg[]); };
+  const h = await startHarness({ browserPort: br.port, responses: [
+    (ctx: Ctx) => { record(ctx); return openTab("/page.html"); },
+    (ctx: Ctx) => { record(ctx); return snapshotAfterOpen(ctx); },
+    (ctx: Ctx) => { record(ctx); pingRef = refIn(snap(ctx), "Ping"); return msg([call("wait_for", { tab, text: "never appears", timeout_ms: 20000 }), call("click", { tab, ref: pingRef })]); },
+    (ctx: Ctx) => { record(ctx); return msg(text("Continuing after the cancel.")); },
+  ] });
+  try {
+    remote = await startRemote(h.session);
+    const es = openEvents(remote);
+    await new Promise((r) => setTimeout(r, 100));
+    const first = run(h, "Wait, then click Ping.");
+    await es.waitFor((e) => e.type === "tool.started" && (e as any).toolName === "wait_for");
+    await new Promise((r) => setTimeout(r, 200));
+    await remote.post("/api/cancel");
+    await first;
+    await es.waitFor((e) => e.type === "agent.cancelled");
+    es.close();
+    await run(h, "Never mind the click. Just confirm you are still working.");
+    const afterCancel = contexts.at(-1)!;
+    const orphans = orphanToolCalls(afterCancel);
+    assert.deepEqual(orphans, [], "the model's next request has a result for every earlier tool call");
+    // The never-started click is explicit in both views: an error result for the model, tool.skipped on the stream.
+    const clickCall = afterCancel.flatMap((m) => m.role === "assistant" && Array.isArray(m.content) ? m.content : []).find((c: any) => c.type === "toolCall" && c.name === "click") as any;
+    const clickResult = afterCancel.find((m) => m.role === "toolResult" && m.toolCallId === clickCall.id)!;
+    assert.equal(clickResult.isError, true);
+    assert.match(textOfContent(clickResult.content), /Not executed.*NOT performed/);
+    const skipped = es.received.map((r) => r.event).find((e) => e.type === "tool.skipped") as any;
+    assert.equal(skipped?.toolCallId, clickCall.id);
+    assert.match(skipped.reason, /cancelled/);
+    assert.match(finalText(h), /Continuing/);
+    const page: any = await h.controller.call("harness", "snapshot", { tab } as never);
+    assert.ok(page.text.includes('"idle"'), "the cancelled click never ran");
+  } finally { await h.dispose(); }
+});

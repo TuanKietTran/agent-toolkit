@@ -30,6 +30,8 @@ export type AgentEventBody =
   | { type: "tool.progress"; toolCallId: string; toolName: string; message?: string; progress?: number }
   | { type: "tool.completed"; toolCallId: string; toolName: string; durationMs: number; summary?: string; verified?: boolean }
   | { type: "tool.failed"; toolCallId: string; toolName: string; durationMs: number; error: string }
+  /** Requested by the model but never started (the run was cancelled or ended first); the action was not performed. */
+  | { type: "tool.skipped"; toolCallId: string; toolName: string; reason: string }
   // Computer-use stream (reported by browser/computer tools through tool updates)
   | { type: "computer.action"; toolCallId: string; action: string; status: ComputerActionStatus; target?: string; detail?: string }
   | { type: "computer.observation"; toolCallId: string; url?: string; title?: string; navigated?: boolean; verified?: boolean; evidence?: string }
@@ -138,6 +140,35 @@ export function parseResumePoint(value: string | null | undefined, logId: string
 /** One SSE frame. `id:` lets EventSource clients resume with Last-Event-ID. */
 export function sseFrame(event: AgentEvent): string {
   return `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+/** Text the model receives for a tool call that never started. */
+export const NOT_EXECUTED_TEXT = "Not executed: this tool call was never started because the run was interrupted before it. Its action was NOT performed.";
+
+type ToolCallBlock = { type: string; id?: string; name?: string };
+type ContextMessage = { role?: string; content?: unknown; toolCallId?: string };
+
+/**
+ * Inserts an explicit error result for every tool call that has no result (a batch cut short by a
+ * cancel). Without it the model either sees nothing (custom providers) or a generic "No result provided"
+ * that does not say whether the action happened. Returns undefined when nothing needs changing.
+ */
+export function closeOrphanToolCalls<T extends ContextMessage>(messages: T[]): T[] | undefined {
+  const answered = new Set(messages.filter((m) => m.role === "toolResult").map((m) => m.toolCallId));
+  const out: T[] = [];
+  let changed = false;
+  for (let i = 0; i < messages.length; i++) {
+    out.push(messages[i]);
+    const m = messages[i];
+    if (m.role !== "assistant" || !Array.isArray(m.content)) continue;
+    const orphans = (m.content as ToolCallBlock[]).filter((c) => c?.type === "toolCall" && c.id && !answered.has(c.id));
+    if (!orphans.length) continue;
+    // Keep existing results for this message first, then the synthetic ones, before the next turn.
+    while (i + 1 < messages.length && messages[i + 1].role === "toolResult") out.push(messages[++i]);
+    for (const c of orphans) out.push({ role: "toolResult", toolCallId: c.id, toolName: c.name, content: [{ type: "text", text: NOT_EXECUTED_TEXT }], isError: true, timestamp: Date.now() } as unknown as T);
+    changed = true;
+  }
+  return changed ? out : undefined;
 }
 
 /** Replaces inline base64 image data with a small placeholder so state snapshots stay bounded. */

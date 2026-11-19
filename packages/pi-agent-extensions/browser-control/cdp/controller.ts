@@ -153,7 +153,14 @@ export class ControllerImpl implements Controller {
   private async snapshotText(tab: string): Promise<string> { const r = await this.send(tab, "Accessibility.getFullAXTree", {}); const t = (await this.targets()).find((x) => x.targetId === tab); return buildSnapshot((r.nodes ?? []) as AxNodeLike[], t?.url ?? "", t?.title ?? "", this.store(tab)).text; }
   private async axBackends(tab: string): Promise<Set<number>> { const r = await this.send(tab, "Accessibility.getFullAXTree", {}); return new Set(((r.nodes ?? []) as AxNodeLike[]).map((n) => n.backendDOMNodeId).filter((x): x is number => x != null)); }
   private resolveRef(tab: string, ref: string): RefEntry | ErrorResult { if (!REF_PATTERN.test(ref)) return err("invalid_param", "bad ref: " + ref); const s = this.stores.get(tab); if (!s || !s.issued(ref)) return err("no_such_ref", "ref " + ref + " was never issued for this tab"); const e = s.resolve(ref); if (!e) return err("no_such_ref", "ref " + ref + " was never issued for this tab"); return e; }
-  private async liveEntry(tab: string, ref: string): Promise<RefEntry | ErrorResult> { const e = this.resolveRef(tab, ref); if ("code" in e) return e; try { await this.send(tab, "DOM.describeNode", { backendNodeId: e.backendNodeId }); } catch { return err("stale_ref", "ref " + ref + " is gone; take a new snapshot"); } return e; }
+  private async liveEntry(tab: string, ref: string): Promise<RefEntry | ErrorResult> {
+    const e = this.resolveRef(tab, ref); if ("code" in e) return e;
+    const stale = err("stale_ref", "ref " + ref + " (" + (e.role || "element") + (e.name ? " " + quote(e.name, 60) : "") + ") is no longer on the page; the page changed - take a new snapshot");
+    try { await this.send(tab, "DOM.describeNode", { backendNodeId: e.backendNodeId }); } catch { return stale; }
+    // A node removed by a re-render can still be described while it is referenced; acting on it would silently miss.
+    if (await this.callOn(tab, e, "function(){ return this.isConnected; }").catch(() => false) !== true) return stale;
+    return e;
+  }
 
   private async callOn(tab: string, e: RefEntry, fn: string, args: unknown[] = []): Promise<any> {
     const rn = await this.send(tab, "DOM.resolveNode", { backendNodeId: e.backendNodeId });

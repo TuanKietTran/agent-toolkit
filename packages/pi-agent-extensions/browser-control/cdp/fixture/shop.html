@@ -1,0 +1,51 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Acme Shop</title>
+<style>#consent{border:2px solid #333;padding:12px;margin:12px 0;background:#ffd}</style>
+<main>
+<h1>Shop</h1>
+<p id="cart" role="status" aria-live="polite">Cart: 0 items</p>
+<div id="slot"></div>
+<ul id="items"></ul>
+</main>
+<script>
+// The page changes under the agent: the first add attempt shows a consent banner instead of adding,
+// and accepting it re-renders the list in a different order, so earlier element references go stale.
+const ITEMS = [['a1', 'Anvil Classic'], ['r7', 'Rocket Skates'], ['m2', 'Magnet Deluxe']];
+let consented = false;
+const cart = [];
+function render(order) {
+  const ul = document.getElementById('items');
+  ul.replaceChildren();
+  for (const [id, name] of order) {
+    const li = document.createElement('li');
+    li.append(name + ' ');
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = 'Add ' + name + ' to cart';
+    b.addEventListener('click', () => add(name));
+    li.append(b);
+    ul.append(li);
+  }
+}
+function add(name) {
+  if (!consented) { showConsent(); return; }
+  cart.push(name);
+  document.getElementById('cart').textContent = 'Cart: ' + cart.length + ' item' + (cart.length === 1 ? '' : 's') + ' (' + cart.join(', ') + ')';
+}
+function showConsent() {
+  if (document.getElementById('consent')) return;
+  const d = document.createElement('div');
+  d.id = 'consent';
+  d.setAttribute('role', 'dialog');
+  d.setAttribute('aria-label', 'Cookie consent');
+  d.innerHTML = '<p>We use cookies to keep your cart. Accept to continue shopping.</p>';
+  const ok = document.createElement('button');
+  ok.type = 'button';
+  ok.textContent = 'Accept cookies';
+  ok.addEventListener('click', () => { consented = true; d.remove(); render([...ITEMS].reverse()); });
+  d.append(ok);
+  document.getElementById('slot').append(d);
+}
+render(ITEMS);
+</script>

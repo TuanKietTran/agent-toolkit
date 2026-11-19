@@ -4,7 +4,7 @@
 import { createWriteStream, type WriteStream } from "node:fs";
 import { randomBytes } from "node:crypto";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { EventLog, isToolRuntimeEvent, textOf, type AgentEvent, type AgentEventBody, type ExecutionState } from "./events.ts";
+import { EventLog, closeOrphanToolCalls, isToolRuntimeEvent, textOf, type AgentEvent, type AgentEventBody, type ExecutionState } from "./events.ts";
 import { ExecutionStateMachine, MetricsRecorder, PauseGate, type ExecutionMetrics } from "./lifecycle.ts";
 import { PI_EVENT } from "../core/events.ts";
 
@@ -24,6 +24,8 @@ interface Execution {
   machine: ExecutionStateMachine;
   metrics: MetricsRecorder;
   tools: Map<string, ActiveTool>;
+  /** Requested in the model stream but not started yet. */
+  requested: Map<string, string>;
   pauseRequested: boolean;
   cancelRequested: boolean;
   holding: number;
@@ -103,6 +105,7 @@ export class AgentRuntime {
       machine: new ExecutionStateMachine(),
       metrics: new MetricsRecorder(""),
       tools: new Map(),
+      requested: new Map(),
       pauseRequested: false,
       cancelRequested: false,
       holding: 0,
@@ -178,7 +181,10 @@ export class AgentRuntime {
       const u = event.assistantMessageEvent;
       if (u.type === "text_delta") { this.execution?.metrics.firstToken(); this.emit({ type: "message.delta", content: u.delta }); }
       else if (u.type === "thinking_start") this.emit({ type: "activity.updated", activity: "thinking" });
-      else if (u.type === "toolcall_end") this.emit({ type: "tool.requested", toolCallId: u.toolCall.id, toolName: u.toolCall.name, args: redact(u.toolCall.arguments) });
+      else if (u.type === "toolcall_end") {
+        this.execution?.requested.set(u.toolCall.id, u.toolCall.name);
+        this.emit({ type: "tool.requested", toolCallId: u.toolCall.id, toolName: u.toolCall.name, args: redact(u.toolCall.arguments) });
+      }
     });
 
     pi.on(PI_EVENT.MESSAGE_END, async (event) => {
@@ -190,6 +196,7 @@ export class AgentRuntime {
 
     pi.on(PI_EVENT.TOOL_EXECUTION_START, async (event) => {
       const ex = this.execution;
+      ex?.requested.delete(event.toolCallId);
       if (ex) { ex.tools.set(event.toolCallId, { toolCallId: event.toolCallId, toolName: event.toolName, startedAt: Date.now(), args: event.args }); ex.metrics.toolStarted(event.toolName, event.args); }
       this.emit({ type: "tool.started", toolCallId: event.toolCallId, toolName: event.toolName, args: redact(event.args) });
       if (ex && !ex.holding && ex.machine.state !== "paused") this.setState("waiting_for_tool");
@@ -233,6 +240,12 @@ export class AgentRuntime {
       }
     });
 
+    // The model must learn that calls cut off by a cancel were not performed (see closeOrphanToolCalls).
+    pi.on(PI_EVENT.CONTEXT, async (event) => {
+      const messages = closeOrphanToolCalls(event.messages as never[]);
+      return messages ? { messages } : undefined;
+    });
+
     // Pause point 1: before any tool executes. pi awaits this hook, so holding here holds the tool.
     pi.on(PI_EVENT.TOOL_CALL, async (event, ctx) => {
       const outcome = await this.hold(ctx, "tool_call", event.toolCallId, event.toolName);
@@ -252,7 +265,11 @@ export class AgentRuntime {
       const last = [...event.messages].reverse().find((m) => (m as { role?: string }).role === "assistant") as { stopReason?: string; errorMessage?: string; content?: unknown } | undefined;
       // An abort that lands during tool execution leaves the last assistant message at stopReason "toolUse":
       // the cancel request and the run's abort signal are the authoritative evidence.
-      if (ex.cancelRequested || last?.stopReason === "aborted" || ctx.signal?.aborted) ex.outcome = { kind: "cancelled" };
+      const cancelled = ex.cancelRequested || last?.stopReason === "aborted" || !!ctx.signal?.aborted;
+      // Calls the model asked for that never started: say so, so no UI shows them as pending or done.
+      for (const [toolCallId, toolName] of ex.requested) this.emit({ type: "tool.skipped", toolCallId, toolName, reason: cancelled ? "the run was cancelled before this call started" : "the run ended before this call started" });
+      ex.requested.clear();
+      if (cancelled) ex.outcome = { kind: "cancelled" };
       else if (last?.stopReason === "error") ex.outcome = { kind: "failed", error: last.errorMessage ?? "model error" };
       else ex.outcome = { kind: "completed", summary: textOf(last?.content, 500) || undefined };
     });
