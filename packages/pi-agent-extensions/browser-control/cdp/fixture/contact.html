@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Acme Contact</title>
+<nav aria-label="Main"><a href="/site.html">Home</a></nav>
+<main>
+<h1>Contact form</h1>
+<form id="contact" action="/thanks.html" method="get">
+<p><label for="fullname">Full name</label> <input id="fullname" name="fullname" type="text" value="placeholder text"></p>
+<p><label for="mail">Email address</label> <input id="mail" name="mail" type="email"></p>
+<p><label for="topic">Topic</label> <select id="topic" name="topic"><option value="general">General question</option><option value="billing">Billing</option><option value="support">Technical support</option></select></p>
+<p><label for="message">Message</label> <textarea id="message" name="message" rows="3"></textarea></p>
+<p><button id="send-form" type="submit">Submit request</button></p>
+</form>
+</main>

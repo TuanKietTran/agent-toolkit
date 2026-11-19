@@ -106,3 +106,32 @@ test('tools: click/type schemas name tab and ref', () => {
     assert.ok(schema.includes('ref'), `${name} schema mentions ref`);
   }
 });
+
+test('tools: every browser tool is sequential so one message never runs two browser calls at once', () => {
+  const { tools } = setup(() => ok());
+  for (const name of TOOL_NAMES) assert.equal(tools.get(name).executionMode, 'sequential', name);
+});
+
+test('tools: the abort signal reaches the controller and progress is forwarded as runtime events', async () => {
+  const seen: any[] = [];
+  const tools = new Map<string, any>();
+  const controller: any = {
+    ownership: undefined, async connect() { return { ok: true, browser: 'fake' }; }, async close() {}, halted() { return undefined; }, resume() {},
+    async call(_a: string, _t: string, _p: any, opts: any) { seen.push(opts.signal); opts.onProgress({ kind: 'computer.action', action: 'click', status: 'started', target: 'e1' }); return { ok: true, text: 'clicked' }; },
+  };
+  browserControlCdp({ registerTool: (t: any) => tools.set(t.name, t), registerCommand() {}, on() {} } as any, { controller });
+  const ac = new AbortController();
+  const updates: any[] = [];
+  await tools.get('click').execute('id', { tab: 't', ref: 'e1' }, ac.signal, (u: any) => updates.push(u), {});
+  assert.equal(seen[0], ac.signal);
+  assert.deepEqual(updates[0].details.runtimeEvent, { kind: 'computer.action', action: 'click', status: 'started', target: 'e1' });
+  assert.match(updates[0].content[0].text, /click started e1/);
+});
+
+test('tools: screenshot details keep only image metadata (the base64 data lives once, in content)', async () => {
+  const data = Buffer.from('png-bytes-png-bytes').toString('base64');
+  const { run } = setup(() => ({ ok: true, text: 'screenshot', image: { mimeType: 'image/png', data } }));
+  const r = await run('screenshot', { tab: 'tab-1' });
+  assert.ok(!JSON.stringify(r.details).includes(data));
+  assert.equal(r.details.image.mimeType, 'image/png');
+});

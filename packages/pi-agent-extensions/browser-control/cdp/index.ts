@@ -1,7 +1,5 @@
-// CDP browser-control extension entry (the tools layer). Default export per cdp/contract.ts.
+// CDP browser-control extension entry. Default export per cdp/contract.ts.
 // The controller is created lazily on first use: no browser connection at load time.
-// the controller's controller.ts currently exports ControllerImpl; createController is also
-// accepted so either shape works after the branches merge.
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Controller } from "./contract.ts";
 import { registerCdpTools, resolveAgent } from "./tools.ts";
@@ -17,11 +15,9 @@ export default function browserControlCdp(pi: ExtensionAPI, deps?: { controller?
   async function getController(): Promise<Controller> {
     if (controller) return controller;
     creating ??= (async () => {
-      const mod = (await import("./controller.ts")) as { createController?: () => Controller; ControllerImpl?: new () => Controller };
-      const created = typeof mod.createController === "function" ? mod.createController() : mod.ControllerImpl ? new mod.ControllerImpl() : undefined;
-      if (!created) throw new Error("cdp/controller.ts exports neither createController nor ControllerImpl");
-      controller = created;
-      return created;
+      const { createController } = await import("./controller.ts");
+      controller = createController();
+      return controller;
     })();
     return creating;
   }

@@ -1,12 +1,12 @@
 // Shared contract of the CDP browser-control extension. Types and constants only.
-// the controller implements the controller side, the tools layer the pi tools, the test suite the tests.
-// All three code against this file; do not change it without telling the manager.
+// The controller (controller.ts and its helpers), the pi tools layer (index.ts, tools.ts) and the
+// tests all code against this file.
 
 // ---- Layout (all under packages/pi-agent-extensions/browser-control/cdp/) ----
-// the controller:   client.ts (CDP over WebSocket), controller.ts, ownership.ts, detector.ts,
-//           guard.ts, pacing.ts, snapshot.ts, launch.ts
-// the tools layer: index.ts (default export), tools.ts, README.md, package.json "pi.extensions" entry
-// the test suite:    fixture/ (page.html + server.ts), tests/*.test.ts, package.json "test" script entry
+// controller: client.ts (CDP over WebSocket), controller.ts, ownership.ts, detector.ts,
+//             guard.ts, pacing.ts, snapshot.ts, launch.ts
+// tools:      index.ts (default export), tools.ts, README.md, package.json "pi.extensions" entry
+// tests:      fixture/ (pages + server.ts), tests/*.test.ts, package.json "test" script entry
 
 export const TOOL_NAMES = [
   "tabs_list", "tab_open", "tab_close", "navigate", "snapshot", "click",
@@ -20,12 +20,13 @@ export const OBSERVATION_TOOLS: readonly ToolName[] = ["tabs_list", "tab_close",
 // ---- Parameters (every tool except tabs_list/tab_open names its tab by CDP targetId string) ----
 export interface ToolParams {
   tabs_list: Record<string, never>;
-  tab_open: { url?: string };                                  // default about:blank
+  tab_open: { url?: string };                                  // default about:blank; waits for the page to load
   tab_close: { tab: string };
-  navigate: { tab: string; url: string };                      // http(s) and about:blank only
+  navigate: { tab: string; url: string };                      // http(s) and about:blank only; waits for load
   snapshot: { tab: string };
   click: { tab: string; ref: string; user_confirmed?: boolean };
-  type: { tab: string; ref: string; text: string; user_confirmed?: boolean }; // refuses password fields
+  /** Replaces the field's content unless `append` is true. Refuses password fields. */
+  type: { tab: string; ref: string; text: string; append?: boolean; user_confirmed?: boolean };
   press: { tab: string; key: string; user_confirmed?: boolean };              // "Enter","Tab","Escape","ArrowDown","a",...
   select: { tab: string; ref: string; value: string };         // option value or visible label
   scroll: { tab: string; direction: "up" | "down" | "left" | "right"; amount?: number; ref?: string }; // px, default 600
@@ -38,7 +39,7 @@ export interface ToolParams {
 export type StopReason = "captcha" | "bot_check" | "login_wall" | "rate_limit" | "unusual_traffic";
 
 export type ErrorCode =
-  | "not_connected"      // no Brave on the debugging port
+  | "not_connected"      // no browser on the debugging port
   | "not_owned"          // tab exists but the calling agent does not own it
   | "no_such_tab"
   | "no_such_ref"        // ref never issued for this tab
@@ -46,17 +47,36 @@ export type ErrorCode =
   | "invalid_param"
   | "confirm_required"   // submit-type action without user_confirmed
   | "password_field"     // type() into a password input is always refused
+  | "navigation_failed"  // the browser could not load the URL (DNS, refused, TLS, aborted, ...)
+  | "dialog_open"        // a JavaScript alert/confirm/prompt blocks the page; press Enter (accept) or Escape (dismiss)
+  | "aborted"            // the caller's AbortSignal fired; the action was not performed (or was interrupted)
   | "timeout"
   | "cdp_error";
 
+/**
+ * Evidence about what an action actually changed, observed after it ran.
+ * `verified` is true only when the expected effect was observed (field holds the typed text, the page
+ * navigated or changed, the scroll position moved, ...). It is never inferred from "no exception".
+ */
+export interface Verification {
+  verified: boolean;
+  evidence: string;
+  url?: string;
+  title?: string;
+  navigated?: boolean;
+  httpStatus?: number;
+}
+
 export interface OkResult {
   ok: true;
-  /** Text for the model. snapshot: the tree; others: one-line outcome. */
+  /** Text for the model. snapshot: the tree; others: one-line outcome plus evidence. */
   text: string;
   /** screenshot only. base64 PNG. */
   image?: { mimeType: "image/png"; data: string };
   /** Small structured extras, e.g. { tab, url, title }. */
   data?: Record<string, unknown>;
+  /** Present on every state-changing action. */
+  verification?: Verification;
 }
 
 export interface StopResult {
@@ -78,6 +98,18 @@ export interface ErrorResult {
 
 export type ActionResult = OkResult | StopResult | ErrorResult;
 
+/** Live progress emitted while a call runs. Mirrors runtime/events.ts ToolRuntimeEvent structurally. */
+export type ControllerProgress =
+  | { kind: "computer.action"; action: string; status: "started" | "completed" | "failed"; target?: string; detail?: string }
+  | { kind: "computer.observation"; url?: string; title?: string; navigated?: boolean; verified?: boolean; evidence?: string }
+  | { kind: "progress"; message: string; progress?: number };
+
+export interface CallOptions {
+  /** Aborting stops waits and prevents a queued action from being dispatched. */
+  signal?: AbortSignal;
+  onProgress?: (event: ControllerProgress) => void;
+}
+
 /** snapshot text format, one node per line, 2-space indent per depth:
  *    [e12] button "Save"
  *    [e13] textbox "Email" value="a@b.c"
@@ -95,10 +127,12 @@ export interface Detection { blocked: boolean; reason?: StopReason; evidence?: s
 //   (password input + login wording, or url /login|signin|accounts) / 429 or "too many requests"
 //   (rate_limit) / "unusual traffic" ("unusual_traffic").
 
-export interface ClickTargetFacts { role: string; name: string; inputType?: string; inForm?: boolean }
+export interface ClickTargetFacts { role: string; name: string; inputType?: string; inForm?: boolean; inSearchForm?: boolean }
 // guard.ts:  export function isSubmitLike(t: ClickTargetFacts): boolean
 //   true for type=submit, and buttons/links named submit, pay, buy, purchase, place order, confirm,
 //   send, post, publish, delete, checkout, subscribe, sign up, register, apply (case-insensitive).
+//   A plain search form (role=search or containing a search input) is not submit-like unless the
+//   control is named for a payment, purchase, deletion or subscription.
 
 // ---- Ownership (ownership.ts) ----
 export interface Ownership {
@@ -130,13 +164,15 @@ export interface ControllerOptions {
   port?: number;               // default env PI_BC_PORT or 9222
   pacing?: Partial<PacingOptions>;
   ownership?: Ownership;
+  /** Upper bound for waiting on a page load after navigate/tab_open/click-navigation. Default 15000. */
+  loadTimeoutMs?: number;
 }
 
 export interface BlockState { tab: string; url: string; reason: StopReason }
 
 export interface Controller {
   readonly ownership: Ownership;
-  /** Attach to Brave on host:port. Idempotent. Returns not_connected error text instead of throwing. */
+  /** Attach to the browser on host:port. Idempotent. Returns not_connected error text instead of throwing. */
   connect(): Promise<{ ok: true; browser: string } | ErrorResult>;
   /** Detach websockets. Never closes the user's browser and never closes tabs. */
   close(): Promise<void>;
@@ -145,7 +181,7 @@ export interface Controller {
   /** User action (slash command): clear the halt. */
   resume(): void;
   /** Every method: first arg is the agent id, ownership is enforced before anything else. */
-  call<T extends ToolName>(agent: string, tool: T, params: ToolParams[T]): Promise<ActionResult>;
+  call<T extends ToolName>(agent: string, tool: T, params: ToolParams[T], opts?: CallOptions): Promise<ActionResult>;
 }
 // export function createController(opts?: ControllerOptions): Controller
 //
@@ -159,8 +195,10 @@ export interface Controller {
 //  5. click/press submit guard (isSubmitLike): without user_confirmed return confirm_required.
 //  6. pacing: serialize + random delay, then act. Input only through CDP Input.dispatchMouseEvent /
 //     dispatchKeyEvent / insertText (no Page.bringToFront, no Target.activateTarget, no OS input).
-//  7. After the action, re-run detectBlock; if the new page is blocked set the halt and return
-//     StopResult (so the agent learns at once).
+//     An aborted signal is checked again right before dispatch: a queued action never runs after abort.
+//  7. After the action: wait for any navigation it started to load, observe url/title/page text and
+//     the target element, and attach a Verification. Then re-run detectBlock; if the new page is
+//     blocked set the halt and return StopResult (so the agent learns at once).
 
 // ---- Launch (launch.ts) ----
 export interface LaunchOptions { port?: number; profileDir?: string; bravePath?: string }
@@ -172,9 +210,12 @@ export interface LaunchOptions { port?: number; profileDir?: string; bravePath?:
 
 // ---- Tools layer (index.ts / tools.ts) ----
 // export default function browserControlCdp(pi: ExtensionAPI, deps?: { controller?: Controller; agent?: () => string }): void
-// registers the 13 tools named in TOOL_NAMES (exact names), each calling controller.call(agent, name, params).
+// registers the 13 tools named in TOOL_NAMES (exact names), each calling controller.call(agent, name, params,
+// { signal, onProgress }). Every tool is registered with executionMode "sequential" so pi never runs two
+// browser calls of one assistant message concurrently.
 // Agent id: deps.agent?.() ?? process.env.H1_SELF ?? "pi".
-// Result mapping: OkResult -> content text (+ image block for screenshot); StopResult/ErrorResult ->
-// content text = message, details = the result object (do not throw), so the agent reads the STOP.
+// Result mapping: OkResult -> content text (+ image block for screenshot), details = the result;
+// StopResult/ErrorResult -> content text = message, details = the result object (do not throw), so the
+// agent reads the STOP. Progress -> onUpdate({ content, details: { runtimeEvent } }).
 // Slash command /bc: status | launch | assign <tabId> [agent] | resume.
 // The controller is created lazily on first use (no browser connection at load time).

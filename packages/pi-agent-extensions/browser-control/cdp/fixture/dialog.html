@@ -1,0 +1,13 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Acme Drafts</title>
+<main>
+<h1>Drafts</h1>
+<p><button id="remove" type="button">Remove draft</button> <label><input id="notify" type="checkbox"> Notify me</label></p>
+<p id="result">Draft kept</p>
+</main>
+<script>
+document.getElementById('remove').addEventListener('click', () => {
+  document.getElementById('result').textContent = confirm('Remove the draft?') ? 'Draft removed' : 'Draft kept (cancelled)';
+});
+</script>

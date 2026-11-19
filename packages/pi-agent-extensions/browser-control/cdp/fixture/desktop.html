@@ -1,0 +1,14 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Desktop Target</title>
+<style>
+body{margin:0;background:#ffffff;font:20px system-ui,sans-serif}
+#go{position:absolute;left:60px;top:60px;width:320px;height:130px;border:0;background:#ff00aa;color:#fff;font-size:28px}
+#go.done{background:#00cc44}
+#field{position:absolute;left:60px;top:260px;width:420px;height:64px;border:0;background:#ffee00;font-size:28px;padding:0 12px}
+</style>
+<button id="go" type="button">Mark done</button>
+<input id="field" type="text" aria-label="Note">
+<script>
+document.getElementById('go').addEventListener('click', (e) => { e.target.classList.add('done'); e.target.textContent = 'Done'; });
+</script>
