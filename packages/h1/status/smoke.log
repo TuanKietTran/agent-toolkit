@@ -1,3 +1,3 @@
-smoke-lifecycle: log follows in /Users/handlerone/Downloads/agent-toolkit/wt/hl-smoke/packages/h1/status/smoke.log
+smoke-lifecycle: log follows in packages/h1/status/smoke.log
     Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.65s
 smoke-lifecycle: BLOCKED waiting for A/B, missing commands: reap guard

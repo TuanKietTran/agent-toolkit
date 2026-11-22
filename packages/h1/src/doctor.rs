@@ -1,26 +1,27 @@
 //! `h1 doctor`: rename/migration diagnostics. Prints names and paths only, never values
 //! from any registry file. Semantics: attention (exit 1) = an old registry (the temp-dir
 //! one the pre-rename tool actually used, or the home-dir one) still holds sessions, the
-//! old binary is still on PATH, `h1` is missing from PATH, a skill link is broken, an
-//! old-binary process is still running, or a lab-gui server runs from outside this
-//! repo. Informational only (never attention): the current registry dir not being
-//! created yet, an old registry existing with no sessions, the `labctl` compat shim
-//! (it execs `h1` by design), absent skill links, lab-gui not currently reachable
+//! old binary is still on PATH, `h1` is missing from PATH, a skill link is broken, a
+//! link left by the retired lab-commander skill is still installed, an old-binary
+//! process is still running, or a lab-gui server runs from outside this repo.
+//! Informational only (never attention): the current registry dir not being
+//! created yet, an old registry existing with no sessions, a `labctl` on PATH
+//! (it only execs `h1`), absent skill links, lab-gui not currently reachable
 //! (it is started on demand), and a lab-gui server running from this repo.
 //! With `--fix-hints` it also prints, after the findings, the exact shell command
-//! for each fixable finding (kill a stale process, re-link a broken lab-commander
-//! skill link, remove the stale binary); hints are printed only, never executed,
+//! for each fixable finding (kill a stale process, re-link a broken h1-orchestrator
+//! skill link, remove a retired link or the stale binary); hints are printed only, never executed,
 //! and findings with no safe one-line fix (either old registry) get no hint.
 //! It also prints the two system-one lines from `yah::pick::doctor_report`
 //! (where system-one was found, or that it was not found, plus a sample pick);
 //! those lines are informational only, never attention. With
 //! `--set-system-one <dir>` it first validates and stores that system-one
 //! package directory via `yah::pick::store_system_one_dir`, then diagnoses.
-//! The re-link source is copied verbatim from a lab-commander skill link that
+//! The re-link source is copied verbatim from an h1-orchestrator skill link that
 //! already resolves (never derived from the cwd, the executable, or a checkout);
 //! when no such link resolves, a fallback line replaces the re-link hint. The
-//! stale-binary `rm` hint is preceded by a warning line, because the installed
-//! labctl/lab-* scripts still call the old binary until their checkout is updated.
+//! stale-binary `rm` hint is preceded by a warning line, because scripts that call
+//! the old binary stop working until their checkout is updated.
 
 use std::{
     env, fs,
@@ -41,11 +42,16 @@ const OLD_BINARY_NAME: &str = "agent-cli-lab";
 /// `<temp dir>/agent-cli-lab`, not the home-dir location (functional literal).
 const OLD_TEMP_REGISTRY_DIR_NAME: &str = "agent-cli-lab";
 /// Warning printed as a hint immediately above the stale-binary `rm` hint (verbatim).
-const RM_OLD_BINARY_WARNING: &str = "only after your lab-commander checkout contains the h1 rename (git pull); the installed labctl and lab-* scripts call the old binary until then";
-/// Printed as a hint instead of any `ln -sfn` line when no lab-commander skill
+const RM_OLD_BINARY_WARNING: &str = "only after your agent-toolkit checkout contains the h1 rename (git pull); scripts that still call the old binary stop working until then";
+/// The orchestration skill whose links doctor checks.
+const SKILL_NAME: &str = "h1-orchestrator";
+/// Printed as a hint instead of any `ln -sfn` line when no h1-orchestrator skill
 /// link resolves to copy the target from (verbatim).
 const NO_WORKING_SKILL_LINK_HINT: &str =
-    "no working skill link to copy: run skills/lab-commander/install.sh from your checkout";
+    "no working skill link to copy: run skills/h1-orchestrator/install.sh from your checkout";
+/// The skill that h1-orchestrator replaced, and the tools it linked into ~/.local/bin.
+const RETIRED_SKILL_NAME: &str = "lab-commander";
+const RETIRED_TOOLS: [&str; 5] = ["labctl", "lab-gui", "lab-clean", "lab-team", "lab-watch"];
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum LinkState {
@@ -65,6 +71,7 @@ struct Inputs {
     old_binary_on_path: Option<PathBuf>,
     labctl_on_path: Option<PathBuf>,
     skill_links: Vec<(PathBuf, LinkState)>,
+    retired_links: Vec<PathBuf>,
     gui_ports: Vec<(u16, bool)>,
     old_temp_registry_dir: PathBuf,
     old_temp_registry_exists: bool,
@@ -159,7 +166,7 @@ fn assess(inputs: &Inputs) -> Report {
     }
     match &inputs.labctl_on_path {
         Some(path) => lines.push(format!(
-            "labctl shim on PATH: {} (compatibility shim, execs h1)",
+            "labctl shim on PATH: {} (retired, execs h1: call h1 directly)",
             path.display()
         )),
         None => lines.push("labctl shim on PATH: not found".to_string()),
@@ -170,7 +177,7 @@ fn assess(inputs: &Inputs) -> Report {
             LinkState::Broken => {
                 attention = true;
                 lines.push(format!("skill link {}: broken", link.display()));
-                if link.file_name().is_some_and(|name| name == "lab-commander") {
+                if link.file_name().is_some_and(|name| name == SKILL_NAME) {
                     if let Some(source) = &inputs.skill_source {
                         hints.push(format!("ln -sfn {} {}", source.display(), link.display()));
                     } else if !hints.iter().any(|hint| hint == NO_WORKING_SKILL_LINK_HINT) {
@@ -182,6 +189,14 @@ fn assess(inputs: &Inputs) -> Report {
                 lines.push(format!("skill link {}: not installed", link.display()))
             }
         }
+    }
+    for link in &inputs.retired_links {
+        attention = true;
+        lines.push(format!(
+            "retired link {}: still installed (lab-commander was replaced by h1-orchestrator)",
+            link.display()
+        ));
+        hints.push(format!("rm {}", link.display()));
     }
     for (port, reachable) in &inputs.gui_ports {
         lines.push(format!(
@@ -521,25 +536,34 @@ fn diagnose_inner(
 ) -> Report {
     let old_registry_dir = home.join(OLD_REGISTRY_DIR_NAME);
     let old_temp_registry_dir = temp_dir.join(OLD_TEMP_REGISTRY_DIR_NAME);
-    let skill_link_candidates = [
-        home.join(".claude").join("skills").join("lab-commander"),
-        home.join(".codex").join("skills").join("lab-commander"),
-        home.join(".local").join("bin").join("labctl"),
-        home.join(".local").join("bin").join("lab-gui"),
-        home.join(".local").join("bin").join("lab-clean"),
-        home.join(".local").join("bin").join("lab-team"),
-        home.join(".local").join("bin").join("lab-watch"),
+    let skill_dirs = [
+        home.join(".claude").join("skills"),
+        home.join(".codex").join("skills"),
+        home.join(".pi").join("agent").join("skills"),
     ];
+    let skill_link_candidates: Vec<PathBuf> =
+        skill_dirs.iter().map(|dir| dir.join(SKILL_NAME)).collect();
+    // Anything still at a path the retired skill used to occupy, link or not.
+    let retired_links: Vec<PathBuf> = skill_dirs
+        .iter()
+        .map(|dir| dir.join(RETIRED_SKILL_NAME))
+        .chain(
+            RETIRED_TOOLS
+                .iter()
+                .map(|tool| home.join(".local").join("bin").join(tool)),
+        )
+        .filter(|path| fs::symlink_metadata(path).is_ok())
+        .collect();
     let skill_links: Vec<(PathBuf, LinkState)> = skill_link_candidates
         .iter()
         .map(|link| (link.clone(), link_state(link)))
         .collect();
-    // The ONLY re-link source: the verbatim target of a lab-commander skill
+    // The ONLY re-link source: the verbatim target of an h1-orchestrator skill
     // link that already resolves. Never derived from cwd/current_exe/roots.
     let skill_source = skill_links
         .iter()
         .filter(|(link, state)| {
-            *state == LinkState::Ok && link.file_name().is_some_and(|name| name == "lab-commander")
+            *state == LinkState::Ok && link.file_name().is_some_and(|name| name == SKILL_NAME)
         })
         .find_map(|(link, _)| resolved_link_target(link));
     let inputs = Inputs {
@@ -561,6 +585,7 @@ fn diagnose_inner(
         old_binary_on_path: find_on_path(path_dirs, OLD_BINARY_NAME),
         labctl_on_path: find_on_path(path_dirs, "labctl"),
         skill_links,
+        retired_links,
         gui_ports: gui_ports.iter().map(|port| (*port, probe(*port))).collect(),
         leaked_line: leaked_line(registry_dir),
     };
@@ -834,11 +859,12 @@ mod tests {
             "h1 on PATH: not found",
             "old binary agent-cli-lab on PATH: /Users/x/.local/bin/agent-cli-lab (stale, pre-rename)",
             "old binary agent-cli-lab on PATH: not found",
-            "labctl shim on PATH: /Users/x/.local/bin/labctl (compatibility shim, execs h1)",
+            "labctl shim on PATH: /Users/x/.local/bin/labctl (retired, execs h1: call h1 directly)",
             "labctl shim on PATH: not found",
-            "skill link /Users/x/.codex/skills/lab-commander: ok",
-            "skill link /Users/x/.codex/skills/lab-commander: broken",
-            "skill link /Users/x/.codex/skills/lab-commander: not installed",
+            "skill link /Users/x/.codex/skills/h1-orchestrator: ok",
+            "skill link /Users/x/.codex/skills/h1-orchestrator: broken",
+            "skill link /Users/x/.codex/skills/h1-orchestrator: not installed",
+            "retired link /Users/x/.claude/skills/lab-commander: still installed (lab-commander was replaced by h1-orchestrator)",
             "lab-gui port 4317: reachable",
             "lab-gui port 4317: not reachable",
             "system-one: found at /Users/x/system-one",
@@ -854,9 +880,10 @@ mod tests {
             "doctor: attention needed",
             "fix hints (print only, not executed):",
             "  kill 1234",
-            "  ln -sfn /Users/x/checkout/skills/lab-commander /Users/x/.codex/skills/lab-commander",
-            "  no working skill link to copy: run skills/lab-commander/install.sh from your checkout",
-            "  only after your lab-commander checkout contains the h1 rename (git pull); the installed labctl and lab-* scripts call the old binary until then",
+            "  ln -sfn /Users/x/checkout/skills/h1-orchestrator /Users/x/.codex/skills/h1-orchestrator",
+            "  no working skill link to copy: run skills/h1-orchestrator/install.sh from your checkout",
+            "  only after your agent-toolkit checkout contains the h1 rename (git pull); scripts that still call the old binary stop working until then",
+            "  rm /Users/x/.claude/skills/lab-commander",
             "  rm /Users/x/.local/bin/agent-cli-lab",
         ];
         for sample in samples {
@@ -873,7 +900,7 @@ mod tests {
         let root = temp_root("linksrc");
         let target = root.join("skill-target");
         fs::create_dir_all(&target).expect("target dir");
-        let link = root.join("lab-commander");
+        let link = root.join("h1-orchestrator");
         std::os::unix::fs::symlink(&target, &link).expect("plant resolving link");
         assert_eq!(resolved_link_target(&link), Some(target));
         assert_eq!(resolved_link_target(&root.join("missing")), None);
@@ -891,13 +918,13 @@ mod tests {
         fs::create_dir_all(&skill_source).expect("skill target");
         let claude_dir = home.join(".claude").join("skills");
         fs::create_dir_all(&claude_dir).expect("claude link dir");
-        std::os::unix::fs::symlink(&skill_source, claude_dir.join("lab-commander"))
+        std::os::unix::fs::symlink(&skill_source, claude_dir.join("h1-orchestrator"))
             .expect("plant resolving link");
-        let decoy = root.join("repo").join("skills").join("lab-commander");
+        let decoy = root.join("repo").join("skills").join("h1-orchestrator");
         fs::create_dir_all(&decoy).expect("decoy checkout skill dir");
         let link_dir = home.join(".codex").join("skills");
         fs::create_dir_all(&link_dir).expect("link dir");
-        let link = link_dir.join("lab-commander");
+        let link = link_dir.join("h1-orchestrator");
         std::os::unix::fs::symlink(root.join("dead-target"), &link).expect("plant broken link");
         let tmp = root.join("tmp");
         let old_temp = tmp.join(OLD_TEMP_REGISTRY_DIR_NAME);
@@ -1001,7 +1028,7 @@ mod tests {
         for host in [".claude", ".codex"] {
             let dir = home.join(host).join("skills");
             fs::create_dir_all(&dir).expect("link dir");
-            std::os::unix::fs::symlink(root.join("dead-target"), dir.join("lab-commander"))
+            std::os::unix::fs::symlink(root.join("dead-target"), dir.join("h1-orchestrator"))
                 .expect("plant broken link");
         }
         let bin = root.join("bin");
@@ -1199,4 +1226,72 @@ mod tests {
         );
         let _ = fs::remove_dir_all(&root);
     }
+}
+
+#[test]
+fn retired_lab_commander_links_need_attention_and_get_rm_hints() {
+    let base = std::env::temp_dir().join(format!("h1-doctor-retired-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    let registry = base.join("registry");
+    let home = base.join("home");
+    let temp = base.join("temp");
+    for dir in [&registry, &temp] {
+        fs::create_dir_all(dir).unwrap();
+    }
+    let skill = home
+        .join(".pi")
+        .join("agent")
+        .join("skills")
+        .join("lab-commander");
+    let tool = home.join(".local").join("bin").join("lab-watch");
+    for path in [&skill, &tool] {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "old").unwrap();
+    }
+    let quiet = diagnose(&registry, &home, &temp, &[], &[], &|_| false, &[], &[]);
+    assert!(quiet.attention, "lines: {:?}", quiet.lines);
+    for path in [&skill, &tool] {
+        let line = format!(
+            "retired link {}: still installed (lab-commander was replaced by h1-orchestrator)",
+            path.display()
+        );
+        assert!(
+            quiet.lines.contains(&line),
+            "missing {line:?} in {:?}",
+            quiet.lines
+        );
+    }
+    let report = diagnose_inner(
+        &registry,
+        &home,
+        &temp,
+        &[],
+        &[],
+        &|_| false,
+        &[],
+        &[],
+        true,
+        &[],
+    );
+    for path in [&skill, &tool] {
+        let hint = format!("  rm {}", path.display());
+        assert!(
+            report.lines.contains(&hint),
+            "missing {hint:?} in {:?}",
+            report.lines
+        );
+    }
+    // The new skill's links are checked in every agent's skill dir, Pi's included.
+    let pi_link = home
+        .join(".pi")
+        .join("agent")
+        .join("skills")
+        .join("h1-orchestrator");
+    let line = format!("skill link {}: not installed", pi_link.display());
+    assert!(
+        quiet.lines.contains(&line),
+        "missing {line:?} in {:?}",
+        quiet.lines
+    );
+    let _ = fs::remove_dir_all(&base);
 }

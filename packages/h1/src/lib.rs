@@ -103,7 +103,7 @@ enum Commands {
     Agents(agents::AgentsArgs),
     /// k9s-style console of every lab: table, lab graph, live screens. Opens a new terminal window unless run in one.
     Console(console::ConsoleArgs),
-    /// Diagnose rename/migration problems: print the registry dir in use, whether the pre-rename registries (home dir and temp dir) still hold sessions, which h1 and old-named binaries and the labctl shim are on PATH, whether the lab-commander skill links resolve, whether the lab-gui port is reachable, and whether old-named or outside-repo lab-gui processes are still running. Exit 1 if anything needs attention.
+    /// Diagnose rename/migration problems: print the registry dir in use, whether the pre-rename registries (home dir and temp dir) still hold sessions, which h1 and old-named binaries and a retired labctl are on PATH, whether the h1-orchestrator skill links resolve, whether retired lab-commander links remain, whether the lab-gui port is reachable, and whether old-named or outside-repo lab-gui processes are still running. Exit 1 if anything needs attention.
     Doctor(DoctorArgs),
     /// End a session: stop its program and its host.
     Stop(StopArgs),
@@ -767,7 +767,8 @@ fn alloc_resource(args: AllocArgs) -> Result<i32> {
             return Ok(2);
         }
     };
-    let record = resources::alloc(&session::session_dir(), kind, &args.value, &args.run)?;
+    let value = resources::absolute_value(kind, &args.value, &env::current_dir()?);
+    let record = resources::alloc(&session::session_dir(), kind, &value, &args.run)?;
     println!(
         "alloc {} {} run={}",
         record.kind.as_str(),
@@ -778,18 +779,25 @@ fn alloc_resource(args: AllocArgs) -> Result<i32> {
 }
 
 fn release_resources(args: RunFilterArgs) -> Result<i32> {
-    let freed = resources::release(&session::session_dir(), args.run.as_deref());
-    if freed.is_empty() {
+    let released = resources::release(&session::session_dir(), args.run.as_deref());
+    if released.freed.is_empty() && released.kept.is_empty() {
         println!("no resources released");
-    } else {
-        for record in &freed {
-            println!(
-                "released {} {} run={}",
-                record.kind.as_str(),
-                record.value,
-                record.run
-            );
-        }
+    }
+    for record in &released.freed {
+        println!(
+            "released {} {} run={}",
+            record.kind.as_str(),
+            record.value,
+            record.run
+        );
+    }
+    for (record, reason) in &released.kept {
+        println!(
+            "kept {} {} run={} ({reason})",
+            record.kind.as_str(),
+            record.value,
+            record.run
+        );
     }
     Ok(0)
 }

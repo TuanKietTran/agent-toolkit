@@ -1,5 +1,5 @@
 ---
-name: lab-commander
+name: sample-skill
 description: Fixture for installer tests.
 ---
 

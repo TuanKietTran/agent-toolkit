@@ -4,7 +4,7 @@ A local web GUI for [`h1`](../h1): the lab graph, live state, a peek at each lab
 
 ```sh
 node packages/lab-gui/server.mjs --open      # or: npm start --prefix packages/lab-gui
-lab-gui --port 4400                          # after skills/lab-commander/install.sh (links bin/lab-gui)
+lab-gui --port 4400                          # after `npm link` in this package (bin: lab-gui)
 ```
 
 The server prints a link such as `http://127.0.0.1:4317/?key=…` (default port; `--port 0` picks a free one) and `--open` opens it. The key in the link is the launch key: the page swaps it for a cookie and nothing is served without it, so open the printed link rather than the bare address. Needs Node 20 or newer and `h1` on `PATH` (override with `H1_BIN`). `H1_DIR` selects which labs it sees, exactly as for the CLI. There are no dependencies to install.
@@ -13,7 +13,7 @@ Desktop apps for macOS and Windows that wrap this server live in [`../lab-gui-de
 
 ## What it shows
 
-- **Graph**: lead to helpers, drawn left to right. Each role has its own shape and colour plus a letter badge, so it still reads without colour: builder (rounded rectangle, B), explorer (pill, E), advisor (cut-corner octagon, A), commander (hexagon), manager (square corners), worker (dashed). The three-role team from `lab-team` is Sonnet builds, Haiku explores, Opus reviews.
+- **Graph**: lead to helpers, drawn left to right. Each role has its own shape and colour plus a letter badge, so it still reads without colour: builder (rounded rectangle, B), explorer (pill, E), advisor (cut-corner octagon, A), commander (hexagon), manager (square corners), worker (dashed).
 - **Live state** per lab: working, asking, stalled, gone (a lab that vanished stays on the board for a minute), with a pulse on working labs and flowing edges to working children.
 - **Activity sparkline** per lab, from the growth of the lab's output.
 - **Model** per lab and **tokens / cost** where the lab prints them: Pi's footer (`↑in ↓out R… W… $cost ctx%`) is read from the screen. Labs that show no such footer say "not reported".

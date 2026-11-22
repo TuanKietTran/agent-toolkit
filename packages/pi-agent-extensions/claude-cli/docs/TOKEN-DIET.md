@@ -90,7 +90,7 @@ Early stop is the largest single saving (it removes two thirds of the requests a
 
 - `claude --help` lists `--agents <json>`, `--forward-subagent-text` and `claude agents` (background sessions). It does **not** list `--advisor` or `--subagents`. `--subagents haiku` is rejected (`unknown option '--subagents'`).
 - `--advisor <model>` is accepted although hidden from the help (the binary contains an "advisor tool"). It works with a subscription login: `claude -p --model claude-sonnet-5-5 --advisor opus` runs and the request grows from about 2.7k to 4.3k input tokens on a one-word prompt, so the advisor tool definition costs roughly 1.6k tokens on every request. That is more than a third of the 4-tool "after" request, so it is **off by default**; `PI_CLAUDE_CLI_ADVISOR=opus` passes it through for people who want the second opinion more than the saving. It is a quality feature, not a token saving, and no scenario here exercised an actual consult.
-- Subagents do not apply inside this provider. Pi owns tool execution and Claude's native tools (including the agent/task tool) are disabled, so there is nothing for a Haiku subagent to explore with, and a subagent definition would only add tokens. The split is useful one level up, as separate labs: see `lab-team` in `skills/lab-commander`.
+- Subagents do not apply inside this provider. Pi owns tool execution and Claude's native tools (including the agent/task tool) are disabled, so there is nothing for a Haiku subagent to explore with, and a subagent definition would only add tokens. The split is useful one level up, as separate labs: see the topology guidance in `skills/h1-orchestrator`.
 
 ## What did not help, or was not done
 

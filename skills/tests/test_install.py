@@ -14,11 +14,11 @@ class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.home = Path(self.temp.name) / "home"
-        self.fixture = FILE.parent / "tests/fixtures/lab-commander"
+        self.fixture = FILE.parent / "tests/fixtures/sample-skill"
         self.original_root = installer.ROOT
         installer.ROOT = FILE.parent
-        # Inject fixture as the lab-commander source without touching the repository tree.
-        self.mapping = {"lab-commander": self.fixture}
+        # Inject fixture as the sample-skill source without touching the repository tree.
+        self.mapping = {"sample-skill": self.fixture}
 
     def tearDown(self):
         installer.ROOT = self.original_root
@@ -29,14 +29,14 @@ class InstallerTests(unittest.TestCase):
         original_root = installer.ROOT
         try:
             installer.ROOT = self.fixture.parent
-            installer.discover = lambda: ["lab-commander"]
+            installer.discover = lambda: ["sample-skill"]
             original_link = installer.link
             def mapped_link(source, destination):
-                if source == installer.ROOT / "lab-commander":
+                if source == installer.ROOT / "sample-skill":
                     source = self.fixture
                 original_link(source, destination)
             installer.link = mapped_link
-            installer.install(["lab-commander"], "all", self.home)
+            installer.install(["sample-skill"], "all", self.home)
         finally:
             installer.ROOT = original_root
             installer.discover = original_discover
@@ -51,26 +51,26 @@ class InstallerTests(unittest.TestCase):
         finally:
             os.chdir(cwd)
         for parent in (".claude/skills", ".codex/skills", ".pi/agent/skills"):
-            self.assertEqual((self.home / parent / "lab-commander").resolve(), self.fixture)
-        for tool in ("labctl", "lab-watch"):
+            self.assertEqual((self.home / parent / "sample-skill").resolve(), self.fixture)
+        for tool in ("tool-a", "tool-b"):
             self.assertEqual((self.home / ".local/bin" / tool).resolve(), self.fixture / "bin" / tool)
 
     def test_conflict_refused(self):
-        dest = self.home / ".claude/skills/lab-commander"
+        dest = self.home / ".claude/skills/sample-skill"
         dest.parent.mkdir(parents=True)
         dest.write_text("keep")
         original_discover = installer.discover
-        installer.discover = lambda: ["lab-commander"]
+        installer.discover = lambda: ["sample-skill"]
         try:
             with self.assertRaises(RuntimeError):
-                installer.install(["lab-commander"], "claude", self.home)
+                installer.install(["sample-skill"], "claude", self.home)
         finally:
             installer.discover = original_discover
         self.assertEqual(dest.read_text(), "keep")
 
     def test_discovery_and_missing_skill(self):
         names = installer.discover()
-        self.assertEqual(names, ["lab-commander", "orchestrator-options"])
+        self.assertEqual(names, ["h1-orchestrator", "orchestrator-options"])
         with self.assertRaises(ValueError):
             installer.install(["not-a-skill"], "all", self.home)
 

@@ -153,3 +153,82 @@ fn release_only_frees_named_run() {
     assert!(ok, "gc --run run2 failed: {out}");
     assert!(!dir2.exists(), "run2 dir still exists after gc");
 }
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+        .args(args)
+        .status()
+        .expect("run git");
+    assert!(status.success(), "git {args:?} failed");
+}
+
+fn h1_in(cwd: &Path, dir: &Path, args: &[&str]) -> (String, bool) {
+    let output = Command::new(env!("CARGO_BIN_EXE_h1"))
+        .args(args)
+        .current_dir(cwd)
+        .env("H1_DIR", dir)
+        .env_remove("H1_SOCKET")
+        .env_remove("H1_NAME")
+        .output()
+        .expect("run h1");
+    (
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        output.status.success(),
+    )
+}
+
+/// A relative worktree path is recorded absolute, and gc run from another directory keeps a
+/// worktree that holds uncommitted work instead of deleting it.
+#[test]
+fn gc_keeps_a_dirty_worktree_allocated_by_relative_path() {
+    let h1_dir = tempfile::tempdir().expect("h1 dir");
+    let base = tempfile::tempdir().expect("base dir");
+    let elsewhere = tempfile::tempdir().expect("other cwd");
+    let repo = base.path().join("repo");
+    fs::create_dir(&repo).expect("create repo");
+    git(&repo, &["init", "-q"]);
+    git(&repo, &["commit", "-q", "--allow-empty", "-m", "base"]);
+    git(&repo, &["worktree", "add", "-q", "-b", "lane", "../wt"]);
+    let wt = base.path().join("wt");
+    fs::write(wt.join("uncommitted.txt"), "keep me").expect("write work");
+
+    let (out, ok) = h1_in(
+        base.path(),
+        h1_dir.path(),
+        &["alloc", "worktree", "wt", "--run", "r1"],
+    );
+    assert!(ok, "alloc failed: {out}");
+    let (out, ok) = h1_in(
+        elsewhere.path(),
+        h1_dir.path(),
+        &["resources", "--run", "r1"],
+    );
+    assert!(
+        ok && out.contains(&wt.display().to_string()),
+        "not recorded absolute: {out}"
+    );
+
+    let (out, ok) = h1_in(elsewhere.path(), h1_dir.path(), &["gc", "--run", "r1"]);
+    assert!(ok, "gc failed: {out}");
+    assert!(
+        out.contains("kept worktree"),
+        "gc did not report keeping it: {out}"
+    );
+    assert!(
+        wt.join("uncommitted.txt").exists(),
+        "uncommitted work was deleted"
+    );
+
+    let (out, _) = h1_in(
+        elsewhere.path(),
+        h1_dir.path(),
+        &["resources", "--run", "r1"],
+    );
+    assert!(
+        out.contains("run=r1"),
+        "kept worktree lost its record: {out}"
+    );
+}

@@ -71,7 +71,7 @@ h1 console --here          # this terminal
 h1 console --snapshot --view graph --width 130 --height 30   # one text frame
 ```
 
-`labs` (table with role, parent, state, model, activity sparkline), `graph` (commander -> managers -> workers drawn as nodes and edges, plus an output-activity sparkline) and `models`. Keys: `:labs` `:graph` `:models`, `/` filter, `enter` peek, `d` describe, `a` attach in a new window, `m` message, `ctrl-d` stop, `o` sort, `?` help. It is a TUI rather than a GUI on purpose: labs are PTYs that already live in terminal windows, it works over SSH and needs no extra runtime. For a browser view of the same graph (role shapes, activity, token/cost counters, peek/message/stop), see [`packages/lab-gui`](../lab-gui). Roles `builder`, `explorer` and `advisor` (opened together by `lab-team`, see the lab-commander skill) have their own colours in the console.
+`labs` (table with role, parent, state, model, activity sparkline), `graph` (commander -> managers -> workers drawn as nodes and edges, plus an output-activity sparkline) and `models`. Keys: `:labs` `:graph` `:models`, `/` filter, `enter` peek, `d` describe, `a` attach in a new window, `m` message, `ctrl-d` stop, `o` sort, `?` help. It is a TUI rather than a GUI on purpose: labs are PTYs that already live in terminal windows, it works over SSH and needs no extra runtime. For a browser view of the same graph (role shapes, activity, token/cost counters, peek/message/stop), see [`packages/lab-gui`](../lab-gui). Roles `builder`, `explorer` and `advisor` have their own colours in the console.
 
 The graph comes from `open --role ROLE --parent NAME [--model PROVIDER/ID]`. A session opened from inside another one is attached to it automatically (the hosted program gets `H1_SELF`). `open --brief FILE [--resume-log FILE] [--new-cmd TEXT] [--ready-regex RE]` also stores those renew settings in the registry — paths and settings only, never file contents or secret values — so the session can later be renewed with its context.
 
@@ -175,6 +175,8 @@ If the host itself dies — a crash, a kill, a reboot — the registry record re
 
 ## Lifecycle: reap and guard
 
+> **Status: planned, not implemented.** `reap` and `guard` are not in this build (`h1 reap --help` fails). This section is the design they are being built to. Until they land, use `h1 watch`/`h1 event subscribe` to see finished or failed sessions, `h1 stop` to park a finished one, and `h1 renew`/`h1 recover` to re-arm a failed one.
+
 Finished agents keep burning tokens when loops keep poking idle labs, and failed agents need a manual renew. `reap` covers the finished case and `guard` covers the failed case. Pass `--run ID` to scope either command to one run. Both accept `--dry-run` to report what they would do without doing it.
 
 A finished agent is one whose log shows DONE, LAB-DONE or 'queue 0 open', whose screen shows no open todo, and which has been idle for the TTL (default 10m). `reap` parks it: it stops the session and records it in the run manifest as finished. Anything that nudges idle labs skips finished ones.
@@ -214,7 +216,7 @@ On Windows, `run` ends a piped stdin with Ctrl-Z and Enter, because a console ig
 h1 doctor   # diagnose rename/migration problems; exit 1 if anything needs attention
 ```
 
-`h1 doctor` prints names and paths only, never registry values: the registry dir in use (`$H1_DIR` if set, else the resolved temp default) and whether it exists, whether the pre-rename registries still hold sessions — the one under the home dir and the one under the temp dir that the pre-rename tool actually used (a single warning line each if so, because those labs will not show in the TUI/GUI), which `h1` and old-named binaries and the `labctl` compatibility shim are on `PATH`, whether the lab-commander skill links resolve, whether the lab-gui port (`$LAB_GUI_PORT`, default 4317) is reachable, and whether any running process is an old-named binary or a lab-gui server started from outside this repo (one warning line per such process, naming its pid and, for lab-gui, its port). The lab-gui port check is informational only (it is started on demand), as are a not-yet-created registry dir, an empty pre-rename registry, and a lab-gui server running from this repo. Exit is 1 when a pre-rename registry still holds sessions, an old-named binary is still on `PATH`, `h1` is missing from `PATH`, a skill link is broken, an old-named process is still running, or a lab-gui server runs from outside this repo; otherwise 0. With `--fix-hints`, after the findings doctor prints a fix-hints section with the exact shell command for each fixable finding (`kill <pid>` for a stale old process, `ln -sfn <this repo>/skills/lab-commander <link path>` for a broken lab-commander skill link, `rm` for the stale old-named binary on `PATH`); those commands are printed only, never executed, and findings with no safe one-line fix (such as an old registry still holding sessions) get no hint. Doctor also prints two system-one lines (where the system-one package was found, or that it was not found and where it looked, plus a sample pick against a small catalog, falling back to `claude-sonnet-5-5` when system-one is unavailable or chooses an unknown model); those lines are informational only and never affect the exit code. With `--set-system-one <dir>`, doctor first validates `<dir>` as a system-one package directory (it must contain `src/system_one`) and stores it in the h1 config directory for later picks, printing `system-one: stored <dir>`, then runs the normal diagnosis; an invalid directory is an error and nothing is stored.
+`h1 doctor` prints names and paths only, never registry values: the registry dir in use (`$H1_DIR` if set, else the resolved temp default) and whether it exists, whether the pre-rename registries still hold sessions — the one under the home dir and the one under the temp dir that the pre-rename tool actually used (a single warning line each if so, because those labs will not show in the TUI/GUI), which `h1` and old-named binaries and a retired `labctl` are on `PATH`, whether the h1-orchestrator skill links resolve (Claude Code, Codex and Pi skill dirs), whether links left by the retired lab-commander skill are still installed, whether the lab-gui port (`$LAB_GUI_PORT`, default 4317) is reachable, and whether any running process is an old-named binary or a lab-gui server started from outside this repo (one warning line per such process, naming its pid and, for lab-gui, its port). The lab-gui port check is informational only (it is started on demand), as are a not-yet-created registry dir, an empty pre-rename registry, and a lab-gui server running from this repo. Exit is 1 when a pre-rename registry still holds sessions, an old-named binary is still on `PATH`, `h1` is missing from `PATH`, a skill link is broken, a retired lab-commander link is still installed, an old-named process is still running, or a lab-gui server runs from outside this repo; otherwise 0. With `--fix-hints`, after the findings doctor prints a fix-hints section with the exact shell command for each fixable finding (`kill <pid>` for a stale old process, `ln -sfn <this repo>/skills/h1-orchestrator <link path>` for a broken h1-orchestrator skill link, `rm` for a retired lab-commander link and for the stale old-named binary on `PATH`); those commands are printed only, never executed, and findings with no safe one-line fix (such as an old registry still holding sessions) get no hint. Doctor also prints two system-one lines (where the system-one package was found, or that it was not found and where it looked, plus a sample pick against a small catalog, falling back to `claude-sonnet-5-5` when system-one is unavailable or chooses an unknown model); those lines are informational only and never affect the exit code. With `--set-system-one <dir>`, doctor first validates `<dir>` as a system-one package directory (it must contain `src/system_one`) and stores it in the h1 config directory for later picks, printing `system-one: stored <dir>`, then runs the normal diagnosis; an invalid directory is an error and nothing is stored.
 
 Doctor output is stable: the status lines below always appear in this order, followed by any process findings (one per matching process, in process-list order), then the fix-hints section (only with `--fix-hints` and only when at least one hint exists), then the verdict line. Paths, counts, pids, subcommand names and ports vary; the wording does not. One verbatim sample per line kind and variant:
 
@@ -230,11 +232,12 @@ Doctor output is stable: the status lines below always appear in this order, fol
 - `h1` missing from `PATH` (attention): `h1 on PATH: not found`
 - Old binary still on `PATH` (attention): `old binary agent-cli-lab on PATH: /Users/x/.local/bin/agent-cli-lab (stale, pre-rename)`
 - Old binary not on `PATH`: `old binary agent-cli-lab on PATH: not found`
-- `labctl` shim on `PATH`: `labctl shim on PATH: /Users/x/.local/bin/labctl (compatibility shim, execs h1)`
+- `labctl` shim on `PATH`: `labctl shim on PATH: /Users/x/.local/bin/labctl (retired, execs h1: call h1 directly)`
 - `labctl` shim not on `PATH`: `labctl shim on PATH: not found`
-- Skill link resolves: `skill link /Users/x/.codex/skills/lab-commander: ok`
-- Skill link broken (attention): `skill link /Users/x/.codex/skills/lab-commander: broken`
-- Skill link absent: `skill link /Users/x/.codex/skills/lab-commander: not installed`
+- Skill link resolves: `skill link /Users/x/.codex/skills/h1-orchestrator: ok`
+- Skill link broken (attention): `skill link /Users/x/.codex/skills/h1-orchestrator: broken`
+- Skill link absent: `skill link /Users/x/.codex/skills/h1-orchestrator: not installed`
+- Retired lab-commander link still installed (attention): `retired link /Users/x/.claude/skills/lab-commander: still installed (lab-commander was replaced by h1-orchestrator)`
 - Lab-gui port reachable: `lab-gui port 4317: reachable`
 - Lab-gui port not reachable: `lab-gui port 4317: not reachable`
 - System-one found: `system-one: found at /Users/x/system-one`
@@ -249,20 +252,21 @@ Doctor output is stable: the status lines below always appear in this order, fol
 - Verdict, nothing needs attention: `doctor: ok`
 - Verdict, something needs attention (exit 1): `doctor: attention needed`
 
-With `--fix-hints`, each hint is printed on its own line, indented by two spaces, under a header line. The `kill` hint is emitted for an old-binary process and for a lab-gui process started from outside this repo; the `ln -sfn` hint only for a broken lab-commander skill link, with its source copied from a skill link that already resolves; when no skill link resolves, the fallback line replaces the `ln -sfn` hint (at most once); and the warning line is always printed immediately above the `rm` hint for the stale old binary:
+With `--fix-hints`, each hint is printed on its own line, indented by two spaces, under a header line. The `kill` hint is emitted for an old-binary process and for a lab-gui process started from outside this repo; the `ln -sfn` hint only for a broken h1-orchestrator skill link, with its source copied from a skill link that already resolves; when no skill link resolves, the fallback line replaces the `ln -sfn` hint (at most once); an `rm` hint for each retired lab-commander link; and the warning line is always printed immediately above the `rm` hint for the stale old binary:
 
 ```
 fix hints (print only, not executed):
   kill 1234
-  ln -sfn /Users/x/checkout/skills/lab-commander /Users/x/.codex/skills/lab-commander
-  no working skill link to copy: run skills/lab-commander/install.sh from your checkout
-  only after your lab-commander checkout contains the h1 rename (git pull); the installed labctl and lab-* scripts call the old binary until then
+  ln -sfn /Users/x/checkout/skills/h1-orchestrator /Users/x/.codex/skills/h1-orchestrator
+  no working skill link to copy: run skills/h1-orchestrator/install.sh from your checkout
+  rm /Users/x/.claude/skills/lab-commander
+  only after your agent-toolkit checkout contains the h1 rename (git pull); scripts that still call the old binary stop working until then
   rm /Users/x/.local/bin/agent-cli-lab
 ```
 
 ## Migration
 
-The binary was renamed from `agent-cli-lab` to `h1`; `labctl` remains as a compatibility shim that execs `h1`. Every environment variable was renamed with it:
+The binary was renamed from `agent-cli-lab` to `h1`. The `labctl` compatibility shim was retired with the lab-commander skill; call `h1` directly. Every environment variable was renamed with it:
 
 | Before | After |
 |---|---|
@@ -291,9 +295,9 @@ Needs Rust 1.85 or newer. On Windows, either the MSVC or the GNU toolchain works
 
 See [`specs/`](specs/) for prioritized problems and acceptance criteria.
 
-## Commander skill
+## Orchestration skill
 
-[`../../skills/lab-commander`](../../skills/lab-commander) documents the `h1` CLI. `labctl` is a compatibility shim that execs `h1`. Run `skills/lab-commander/install.sh` to install the Rust binary and link the skill plus `labctl`, `lab-watch`, and `lab-clean`; the common `skills/install.py` installer handles skill and executable links, not Rust binary installation. The shell installer invokes the binary installation step before delegating to the common installer.
+h1 is the orchestration runtime: everything above works without any skill. The optional [`h1-orchestrator`](../../skills/h1-orchestrator) skill teaches an agent the judgment around it (when to delegate, which team, how to brief, supervise, verify and clean up) and ships no scripts. Run `skills/h1-orchestrator/install.sh` to install the binary with `cargo install` and link the skill for Claude Code, Codex and Pi; `skills/install.py` alone only links. It replaces the `lab-commander` skill and its `labctl`, `lab-team`, `lab-watch`, `lab-clean` and `lab-gui` helpers; see [`docs/architecture/h1-skill-migration.md`](../../docs/architecture/h1-skill-migration.md).
 
 ## Resources
 
@@ -306,4 +310,4 @@ $ h1 resources --run run1
 $ h1 gc --run run1
 ```
 
-`alloc` records a `worktree|clone|tmp|port|proc` value against `--run` in `$H1_DIR/resources.json`. `h1 resources` lists the live ones with their owner run and age, and `h1 release|gc [--run R]` frees them: directory paths are removed, a proc pid is killed, and a port is record-only. Stopping a session releases its run automatically, and `h1 doctor` flags resources leaked from dead runs.
+`alloc` records a `worktree|clone|tmp|port|proc` value against `--run` in `$H1_DIR/resources.json`; a relative path is recorded as an absolute one. `h1 resources` lists the live ones with their owner run and age, and `h1 release|gc [--run R]` frees them: a tmp path is removed; a git worktree is removed with `git worktree remove` (never `--force`, so its branch and commits survive) and a worktree or clone with uncommitted changes is kept, reported as `kept ... (reason)` and left on record; a proc pid is killed (on Linux and macOS only); a port is record-only. Without `--run` they act on every run's resources. Stopping a session releases its run automatically, and `h1 doctor` flags resources leaked from dead runs.

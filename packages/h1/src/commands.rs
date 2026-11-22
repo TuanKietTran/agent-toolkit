@@ -925,7 +925,16 @@ pub(crate) fn stop(args: StopArgs) -> Result<i32> {
             .map_or_else(|| socket.display().to_string(), str::to_owned)
     );
     if let Some(name) = &args.connection.name {
-        crate::resources::release(&crate::session::session_dir(), Some(name.as_str()));
+        let released =
+            crate::resources::release(&crate::session::session_dir(), Some(name.as_str()));
+        for (record, reason) in &released.kept {
+            eprintln!(
+                "kept {} {} run={} ({reason})",
+                record.kind.as_str(),
+                record.value,
+                record.run
+            );
+        }
     }
     Ok(0)
 }

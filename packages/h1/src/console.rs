@@ -2274,7 +2274,7 @@ fn draw_models(frame: &mut Frame, area: Rect, app: &mut App) {
 }
 
 /// Colour of a role in the console. `builder`, `explorer` and `advisor` are the three-role team
-/// (`lab-team`): the builder leads, the explorer reads, the advisor reviews.
+/// the builder leads, the explorer reads, the advisor reviews.
 fn role_color(role: &str) -> Color {
     match role {
         "manager" => PINK,

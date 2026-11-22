@@ -1,3 +1,0 @@
-#!/bin/sh
-# Backward-compatible name for the h1 binary.
-exec h1 "$@"

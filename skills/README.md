@@ -1,6 +1,6 @@
 # Agent skills
 
-This directory contains the `orchestrator-options` and `lab-commander` skill bundles. Install all discovered immediate child skills, or selected names, with:
+This directory contains the `orchestrator-options` and `h1-orchestrator` skill bundles. Install all discovered immediate child skills, or selected names, with:
 
 ```sh
 python3 skills/install.py [skill ...] [--agent claude|codex|pi|all] [--home PATH]

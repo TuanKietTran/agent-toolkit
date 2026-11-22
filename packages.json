@@ -38,7 +38,7 @@
     "skills": {
       "dir": "skills",
       "toolchain": "python",
-      "test": "python3 -m unittest discover -s tests -p 'test_*.py' && python3 -m unittest discover -s orchestrator-options/client -p 'test_*.py' && python3 -m unittest discover -s lab-commander/tests -p 'test_*.py'"
+      "test": "python3 -m unittest discover -s tests -p 'test_*.py' && python3 -m unittest discover -s orchestrator-options/client -p 'test_*.py' && python3 -m unittest discover -s h1-orchestrator/tests -p 'test_*.py'"
     },
     "system-one": {
       "toolchain": "python",
