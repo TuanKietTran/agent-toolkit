@@ -13,5 +13,6 @@ testpaths = ["tests"]
 
 [dependency-groups]
 dev = [
+    "pytest>=9.2.0",
     "pyyaml>=6.0.3",
 ]
