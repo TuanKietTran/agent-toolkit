@@ -631,9 +631,11 @@ fn renew_silent_agent(dir: &Path) -> Vec<String> {
 #[cfg(windows)]
 fn renew_silent_agent(dir: &Path) -> Vec<String> {
     let script = dir.join("silent-agent.ps1");
+    // ReadKey($true) reads without echo, like `stty -echo` in the Unix agent: a console's
+    // ReadLine echoes what is typed, so the screen would change and rearm would confirm.
     fs::write(
         &script,
-        "[Console]::Write('ready'); while (($l = [Console]::ReadLine()) -ne $null) { if ($l -eq '/new') { [Console]::WriteLine(''); [Console]::WriteLine('got:/new') } }",
+        "[Console]::Write('ready'); $l = ''; while ($true) { $k = [Console]::ReadKey($true); if ($k.Key -eq 'Enter') { if ($l -eq '/new') { [Console]::WriteLine(''); [Console]::WriteLine('got:/new') }; $l = '' } else { $l += $k.KeyChar } }",
     )
     .unwrap();
     vec![

@@ -20,6 +20,8 @@
 //! Gated like `preview_cli_matches_goldens_when_available`: if this
 //! binary has no `preview` subcommand, the test prints
 //! `PREVIEW_SKIPPED` and passes.
+// The fakes are `sh` scripts made executable with Unix permissions.
+#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -62,7 +64,6 @@ fn make_fake(dir: &Path, name: &str, log: &Path) {
     std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
-#[cfg(unix)]
 #[test]
 fn preview_spawns_nothing_writes_nothing_and_fetches_nothing() {
     let dir = tempfile::tempdir().unwrap();

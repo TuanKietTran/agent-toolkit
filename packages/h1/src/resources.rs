@@ -188,9 +188,14 @@ pub fn free_one(r: &Resource) -> Result<(), String> {
         }
         Kind::Port => Ok(()),
         Kind::Proc => {
-            #[cfg(unix)]
-            if r.value.parse::<i64>().is_ok() {
+            if r.value.parse::<u32>().is_ok() {
+                #[cfg(unix)]
                 let _ = Command::new("kill").arg(&r.value).output();
+                // The process and the children it started, like `kill` on a Unix job.
+                #[cfg(windows)]
+                let _ = Command::new("taskkill")
+                    .args(["/PID", &r.value, "/T", "/F"])
+                    .output();
             }
             Ok(())
         }

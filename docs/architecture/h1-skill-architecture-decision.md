@@ -78,13 +78,12 @@ what made removing `lab-clean` safe.
 
 1. Deprecate the ledger commander (`spawn`, `checkpoint`, `decide`, `ledger`, `close`,
    `resume` and the `--lab`/positional forms): a second registry that duplicates
-   `open`/`stop`/`renew`/`recover`, and `spawn` fails on Windows. Smallest step: mark them
+   `open`/`stop`/`renew`/`recover` (it now works on Windows too). Smallest step: mark them
    deprecated in `--help`, then remove after one release.
 2. Implement or drop `reap`/`guard`; the README now marks them as planned.
-3. Kill `proc` resources on Windows in `gc`; today they are only killed on Unix.
-4. Guard `tests/preview_side_effects.rs` with `#[cfg(unix)]` so `cargo test` builds on Windows.
-5. Fix `renew`/`recover` on Windows: a live `h1 recover` hangs, and three `tests/session.rs`
-   tests fail or hang there.
+
+Done since: `proc` resources are killed on Windows, the whole h1 and yah test suites build and
+pass on Windows, and `recover` no longer hangs there (see the audit's platform evidence).
 
 ## Consequences
 

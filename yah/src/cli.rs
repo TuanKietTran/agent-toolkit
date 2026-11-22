@@ -729,13 +729,30 @@ fn dotenv_path(vault: &Vault, base_dir: &Path, env: &dyn Fn(&str) -> Option<Stri
 }
 
 fn program_found(program: &str, env: &dyn Fn(&str) -> Option<String>) -> bool {
-    if program.contains('/') {
-        return Path::new(program).is_file();
+    let candidates = program_candidates(program, env);
+    if program.contains('/') || (cfg!(windows) && program.contains('\\')) {
+        return candidates.iter().any(|name| Path::new(name).is_file());
     }
     let Some(path) = env("PATH") else {
         return false;
     };
-    std::env::split_paths(&path).any(|dir| dir.join(program).is_file())
+    std::env::split_paths(&path).any(|dir| candidates.iter().any(|name| dir.join(name).is_file()))
+}
+
+/// The file names `program` may have on disk. On Windows a bare name also matches with
+/// each `PATHEXT` extension (`printf` is `printf.exe`), as process creation resolves it.
+fn program_candidates(program: &str, env: &dyn Fn(&str) -> Option<String>) -> Vec<String> {
+    let mut names = vec![program.to_string()];
+    if cfg!(windows) && Path::new(program).extension().is_none() {
+        let pathext = env("PATHEXT").unwrap_or_else(|| ".COM;.EXE;.BAT;.CMD".to_string());
+        names.extend(
+            pathext
+                .split(';')
+                .filter(|ext| !ext.is_empty())
+                .map(|ext| format!("{program}{}", ext.to_ascii_lowercase())),
+        );
+    }
+    names
 }
 
 /// One `(ready, reason)` presence verdict for a vault: nothing is fetched.
@@ -1141,7 +1158,7 @@ fn build_picker(spec: &Spec, yah_file: &Path) -> Box<dyn Picker> {
             python: std::env::var("H1_PYTHON")
                 .ok()
                 .filter(|v| !v.is_empty())
-                .unwrap_or_else(|| "python3".to_string()),
+                .unwrap_or_else(|| crate::pick::default_python(&dir)),
             system_one_dir: dir,
             student: spec
                 .system_one

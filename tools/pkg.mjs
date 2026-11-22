@@ -54,7 +54,9 @@ if (verb === "list") { for (const n of names) console.log(n); process.exit(0); }
 if (verb === "changed") { for (const n of changedPackages(rest[0])) console.log(n); process.exit(0); }
 if (verb === "matrix") {
   const include = changedPackages(rest[0]).filter((n) => VERBS.some((v) => packages[n][v]))
-    .map((n) => ({ package: n, os: packages[n].os ?? "ubuntu-latest", toolchain: packages[n].toolchain ?? "none" }));
+    // `os` is one runner or a list of runners; each runner gets its own job.
+    .flatMap((n) => [].concat(packages[n].os ?? "ubuntu-latest")
+      .map((os) => ({ package: n, os, toolchain: packages[n].toolchain ?? "none" })));
   console.log(JSON.stringify({ include })); process.exit(0);
 }
 

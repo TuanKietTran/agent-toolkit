@@ -39,7 +39,9 @@ mod os {
         "-Command",
         "if (-not [Console]::IsInputRedirected -and -not [Console]::IsOutputRedirected) { [Console]::Write('pty-ok') }",
     ];
-    pub const UNTIL_END_OF_INPUT: &[&str] = &["sort"];
+    // The Windows sort, which ends at Ctrl-Z. A bare `sort` follows the caller's PATH (the
+    // hosted program gets it unchanged), and in Git Bash that is GNU sort, which ignores Ctrl-Z.
+    pub const UNTIL_END_OF_INPUT: &[&str] = &["C:\\Windows\\System32\\sort.exe"];
     pub const TWO_LINES: &[&str] = &[
         "powershell",
         "-NoProfile",

@@ -100,12 +100,42 @@ pub struct SystemOnePicker {
     pub timeout_ms: u64,
 }
 
+/// The interpreter that runs system-one when `H1_PYTHON` does not name one: the package's own
+/// virtualenv (`uv sync` creates it, with system-one's dependencies), else the first of `python3`
+/// and `python` that runs. On Windows `python3` is often only the Microsoft Store stub, which
+/// exists but fails, so a candidate counts only when `--version` succeeds.
+pub fn default_python(system_one_dir: &Path) -> String {
+    let venv = if cfg!(windows) {
+        system_one_dir
+            .join(".venv")
+            .join("Scripts")
+            .join("python.exe")
+    } else {
+        system_one_dir.join(".venv").join("bin").join("python")
+    };
+    if venv.is_file() {
+        return venv.display().to_string();
+    }
+    ["python3", "python"]
+        .into_iter()
+        .find(|candidate| {
+            Command::new(candidate)
+                .arg("--version")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .is_ok_and(|status| status.success())
+        })
+        .unwrap_or("python3")
+        .to_string()
+}
+
 impl Picker for SystemOnePicker {
     fn pick(&self, request: &PickRequest) -> anyhow::Result<PickDecision> {
         let python = match std::env::var("H1_PYTHON") {
             Ok(p) if !p.trim().is_empty() => p,
             _ if !self.python.trim().is_empty() => self.python.clone(),
-            _ => "python3".to_string(),
+            _ => default_python(&self.system_one_dir),
         };
         let scenario = serde_json::json!({
             "kind": "model_pick",
@@ -562,7 +592,7 @@ pub fn doctor_report(yah_file: Option<&Path>) -> Vec<String> {
                 python: std::env::var("H1_PYTHON")
                     .ok()
                     .filter(|v| !v.is_empty())
-                    .unwrap_or_else(|| "python3".to_string()),
+                    .unwrap_or_else(|| default_python(dir)),
                 system_one_dir: dir.clone(),
                 student: None,
                 timeout_ms: 10_000,
@@ -1435,16 +1465,17 @@ mod tests {
             eprintln!("skip e2e: system-one directory not found");
             return;
         };
-        if std::process::Command::new("python3")
+        let python = default_python(&dir);
+        if !Command::new(&python)
             .arg("--version")
             .output()
-            .is_err()
+            .is_ok_and(|out| out.status.success())
         {
-            eprintln!("skip e2e: python3 unavailable");
+            eprintln!("skip e2e: no working python");
             return;
         }
         let picker = SystemOnePicker {
-            python: "python3".to_string(),
+            python,
             system_one_dir: dir,
             student: None,
             timeout_ms: 30_000,

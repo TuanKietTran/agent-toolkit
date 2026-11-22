@@ -694,6 +694,15 @@ struct AgentStartArgs {
     args: Vec<OsString>,
 }
 
+/// Process start-up that must happen before any child is spawned. On Windows it stops this
+/// process's standard handles from being inherited: otherwise every command that starts another
+/// h1 (`recover`, `up`, `adopt`, the agent start commands) hands the caller's output pipe down to
+/// the long-lived host, and whoever reads that output waits until the host ends. Children that
+/// should share stdio still get it, because `Stdio::inherit` passes explicit duplicates.
+pub fn prepare_process() {
+    conpty::stop_inheriting_std_handles();
+}
+
 pub fn execute(cli: Cli) -> Result<i32> {
     match cli.command {
         Commands::Run(args) => run(args),
@@ -948,6 +957,16 @@ fn open_pty(args: &TerminalArgs, child_command: &[OsString]) -> Result<(Pty, Sha
         })
         .context("failed to open pseudo-terminal")?;
     let mut command = CommandBuilder::new(&child_command[0]);
+    // On Windows portable-pty rebuilds the environment from the registry, so the hosted program
+    // would lose this process's PATH and every other variable set in the calling shell (a venv,
+    // Git Bash's tools, an agent's own PATH). Pass the environment through as on Unix.
+    #[cfg(windows)]
+    {
+        command.env_clear();
+        for (name, value) in std::env::vars_os() {
+            command.env(name, value);
+        }
+    }
     command.cwd(match &args.cwd {
         Some(directory) => directory.clone(),
         None => std::env::current_dir().context("failed to resolve current directory")?,

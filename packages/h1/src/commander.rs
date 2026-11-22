@@ -112,7 +112,7 @@ pub(crate) fn spawn(a: SpawnArgs) -> Result<i32> {
         .context("cwd does not exist or is not a directory")?;
     fs::create_dir_all(labs())?;
     let path = record_path(&a.name);
-    if path.exists() && load(&a.name).is_ok_and(|r| is_alive(r.pid)) {
+    if path.exists() && load(&a.name).is_ok_and(|r| host_answers(&r.socket)) {
         return Err(anyhow!("{} already running", a.name));
     }
     let mut cmd = match a.agent.as_str() {
@@ -145,9 +145,18 @@ pub(crate) fn spawn(a: SpawnArgs) -> Result<i32> {
         .stderr(Stdio::from(stderr))
         .spawn()
         .context("failed to start host")?;
-    thread::sleep(Duration::from_secs(a.boot));
-    if !socket.exists() {
-        return Err(anyhow!("host failed to create socket {}", socket.display()));
+    // Wait for the host to answer on its socket. On Windows the socket is a named pipe, so
+    // there is no file to look for; asking the host works on every platform.
+    let boot = a.boot.max(1);
+    let deadline = std::time::Instant::now() + Duration::from_secs(boot);
+    while !host_answers(&socket.display().to_string()) {
+        if std::time::Instant::now() >= deadline {
+            return Err(anyhow!(
+                "host did not answer on {} within {boot}s",
+                socket.display()
+            ));
+        }
+        thread::sleep(Duration::from_millis(100));
     }
     let lab = Lab {
         name: a.name.clone(),
@@ -172,7 +181,7 @@ pub(crate) fn spawn(a: SpawnArgs) -> Result<i32> {
 
 pub(crate) fn status(name: &str) -> Result<i32> {
     let lab = load(name)?;
-    if !is_alive(lab.pid) {
+    if !host_answers(&lab.socket) {
         println!("{name:16} {:7} dead", lab.agent);
         return Ok(0);
     }
@@ -213,27 +222,22 @@ fn after_last_prompt(screen: &str, prompt: Option<&str>) -> String {
         None => String::new(),
     }
 }
-fn is_alive(pid: u32) -> bool {
-    #[cfg(unix)]
-    {
-        PathBuf::from(format!("/proc/{pid}")).exists()
-            || Command::new("kill")
-                .args(["-0", &pid.to_string()])
-                .status()
-                .is_ok_and(|s| s.success())
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        true
-    }
+/// Whether the lab's host answers on its control socket: the same check on every platform
+/// (a pid can be reused, and on Windows there is no `kill -0`).
+fn host_answers(socket: &str) -> bool {
+    crate::commands::request_with_timeout(
+        std::path::Path::new(socket),
+        serde_json::json!({ "op": "screen" }),
+        Duration::from_millis(1500),
+    )
+    .is_ok()
 }
 
 pub(crate) fn wait(name: &str, timeout: u64, poll_ms: u64) -> Result<i32> {
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout);
     loop {
         let lab = load(name)?;
-        if !is_alive(lab.pid) {
+        if !host_answers(&lab.socket) {
             println!("{name}: dead");
             return Ok(2);
         }
@@ -381,12 +385,21 @@ pub(crate) fn close(a: CloseArgs) -> Result<i32> {
     names.sort();
     for name in names {
         let lab = load(&name)?;
+        // Ask the host to stop its program (the host ends with it); on Unix fall back to a signal.
+        let stopped = crate::commands::request_with_timeout(
+            std::path::Path::new(&lab.socket),
+            serde_json::json!({ "op": "stop" }),
+            Duration::from_secs(5),
+        )
+        .is_ok();
         #[cfg(unix)]
-        {
+        if !stopped {
             let _ = Command::new("kill")
                 .args(["-TERM", &lab.pid.to_string()])
                 .status();
         }
+        #[cfg(not(unix))]
+        let _ = stopped;
         let _ = fs::remove_file(&lab.socket);
         fs::remove_file(record_path(&name))?;
         append_ledger(serde_json::json!({"event":"close","lab":name}))?;

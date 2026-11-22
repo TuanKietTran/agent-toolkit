@@ -232,3 +232,28 @@ fn gc_keeps_a_dirty_worktree_allocated_by_relative_path() {
         "kept worktree lost its record: {out}"
     );
 }
+
+/// `gc` ends a recorded process on Windows too (`taskkill`), as `kill` does on Unix.
+#[cfg(windows)]
+#[test]
+fn gc_kills_a_recorded_process_on_windows() {
+    let h1_dir = tempfile::tempdir().expect("h1 dir");
+    let mut child = Command::new("ping")
+        .args(["-n", "60", "127.0.0.1"])
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn ping");
+    let pid = child.id().to_string();
+    let (out, ok) = h1(h1_dir.path(), &["alloc", "proc", &pid, "--run", "w1"]);
+    assert!(ok, "alloc failed: {out}");
+    let (out, ok) = h1(h1_dir.path(), &["gc", "--run", "w1"]);
+    assert!(ok && out.contains("released proc"), "gc failed: {out}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while child.try_wait().expect("poll child").is_none() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("process {pid} still alive after gc");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}

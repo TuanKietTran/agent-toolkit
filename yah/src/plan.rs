@@ -841,7 +841,8 @@ mod tests {
         let plan = build(&s, "default", &r, &o).unwrap();
         let d = displays(&plan.steps[1]);
         let at = d.iter().position(|a| a == "--record").unwrap();
-        assert_eq!(d[at + 1], "/tmp/trace/builder.jsonl");
+        let expected = PathBuf::from("/tmp/trace").join("builder.jsonl");
+        assert_eq!(d[at + 1], expected.display().to_string());
     }
 
     #[test]

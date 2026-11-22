@@ -801,7 +801,9 @@ mod tests {
             .get("v", "K")
             .unwrap_err();
         assert!(
-            err.contains("exited") && err.contains("exit status: 3"),
+            // Rust prints "exit status: 3" on Unix and "exit code: 3" on Windows.
+            err.contains("exited")
+                && (err.contains("exit status: 3") || err.contains("exit code: 3")),
             "{err}"
         );
         assert!(
@@ -848,7 +850,11 @@ mod tests {
         v.command = vec![
             "sh".into(),
             "-c".into(),
-            format!("echo run >> {}; echo value", counter.display()),
+            // Forward slashes and quotes: sh reads a Windows backslash path as escapes.
+            format!(
+                "echo run >> '{}'; echo value",
+                counter.display().to_string().replace('\\', "/")
+            ),
         ];
         let vs = [v];
         let env = |_: &str| None;
