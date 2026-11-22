@@ -175,6 +175,7 @@ class LlamaSwapTextTests(unittest.TestCase):
         for marker in ('"system-one":', "cmd: >", "proxy: http://127.0.0.1:${PORT}", '"system-one-group":', "swap: false", "persistent: true"):
             self.assertIn(marker, text)
 
+    @skipUnless(os.name == "nt", "Windows paths render with backslashes only on Windows")
     def test_windows_backslashes_use_single_quoted_env_scalars(self):
         project = Path("C:/Program Files/O'Brien/system-one")
         python = project / ".venv" / "Scripts" / "python.exe"
