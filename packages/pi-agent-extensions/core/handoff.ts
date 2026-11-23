@@ -26,8 +26,6 @@ type Handoff = { goal?: string; constraints: string[]; decisions: string[]; done
 
 
 const empty = (): Handoff => ({ constraints: [], decisions: [], done: [], in_progress: [], files: [], verification: [], errors: [], next: [], rollback: [], updated_at: Date.now() });
-let latestState = empty();
-let latestTurns = 0;
 const clean = (value: unknown): string => String(value ?? "").trim().slice(0, MAX_TEXT);
 const list = (value: unknown): string[] => Array.isArray(value) ? value.map(clean).filter(Boolean).slice(0, MAX_ITEMS) : [];
 function valid(value: unknown): value is Handoff {
@@ -63,31 +61,43 @@ function readDurable(ctx: ExtensionContext): Handoff | undefined {
 	} catch { return undefined; }
 }
 
-export default function handoff(pi: ExtensionAPI): void {
+/** Per-session handle returned to core: the job-event nudge must read this session's state only. */
+export interface HandoffHandle {
+	nudge(): string | undefined;
+}
+
+const hasFacts = (state: Handoff): boolean => Boolean(state.goal) || fields.slice(1).some((field) => (state[field] as string[]).length > 0);
+
+export default function handoff(pi: ExtensionAPI): HandoffHandle {
+	// All state is owned by this registration and rebuilt from the session on every
+	// session_start / session_tree, so nothing from a previous session survives a switch.
 	let state = empty();
 	let context: ExtensionContext | undefined;
 	let turnsSinceUpdate = 0;
-	const persist = () => { state.updated_at = Date.now(); turnsSinceUpdate = 0; latestState = state; latestTurns = 0; pi.appendEntry(ENTRY_TYPE, state); if (context) writeDurable(context, state); };
+	// The changing summary goes in as a hidden message, only when the model has not seen this text
+	// (first run, after a restart or compaction, or after it changed); the system prompt stays byte-stable.
+	let seenSummary: string | undefined;
+	const reset = () => {
+		state = empty();
+		context = undefined;
+		turnsSinceUpdate = 0;
+		seenSummary = undefined;
+	};
+	const persist = () => { state.updated_at = Date.now(); turnsSinceUpdate = 0; pi.appendEntry(ENTRY_TYPE, state); if (context) writeDurable(context, state); };
 	const restore = (ctx: ExtensionContext) => {
+		reset();
 		context = ctx;
 		const saved = readDurable(ctx);
 		for (const entry of ctx.sessionManager.getBranch() as any[]) if (entry.type === "custom" && entry.customType === ENTRY_TYPE && valid(entry.data)) state = normalize(entry.data);
 		if (saved && saved.updated_at > state.updated_at) state = saved;
-		turnsSinceUpdate = 0;
-		latestState = state;
-		latestTurns = 0;
-		seenSummary = undefined;
 	};
 	pi.on(PI_EVENT.SESSION_START, async (_event, ctx) => restore(ctx));
 	pi.on(PI_EVENT.SESSION_TREE, async (_event, ctx) => restore(ctx));
-	pi.on(PI_EVENT.AGENT_START, async () => { turnsSinceUpdate++; latestTurns = turnsSinceUpdate; });
-	// The changing summary goes in as a hidden message, only when the model has not seen this text
-	// (first run, after a restart or compaction, or after it changed); the system prompt stays byte-stable.
-	let seenSummary: string | undefined;
+	pi.on(PI_EVENT.SESSION_SHUTDOWN, async () => reset());
+	pi.on(PI_EVENT.AGENT_START, async () => { turnsSinceUpdate++; });
 	pi.on(PI_EVENT.SESSION_COMPACT, async () => { seenSummary = undefined; });
 	pi.on(PI_EVENT.BEFORE_AGENT_START, async () => {
-		const hasFacts = Boolean(state.goal) || fields.slice(1).some((field) => (state[field] as string[]).length > 0);
-		const text = hasFacts ? summary(state) : undefined;
+		const text = hasFacts(state) ? summary(state) : undefined;
 		if (text === seenSummary) return;
 		seenSummary = text;
 		if (!text) return;
@@ -108,11 +118,11 @@ export default function handoff(pi: ExtensionAPI): void {
 		},
 	});
 	pi.registerCommand("handoff", { description: "Show durable continuation state; \"clear\" resets it", handler: async (args, ctx) => { if (args?.trim() === "clear") { state = empty(); persist(); } ctx.ui.notify(summary(state), NOTE_INFO); } });
-}
-
-export function handoffNudge(): string | undefined {
-	const hasFacts = Boolean(latestState.goal) || fields.slice(1).some((field) => (latestState[field] as string[]).length > 0);
-	if (!hasFacts) return "Handoff is empty; record the current goal, decisions, files, and next step with the handoff tool.";
-	if (latestTurns >= 5) return `Handoff is ${latestTurns} turns old; refresh it with verified progress before continuing.`;
-	return undefined;
+	return {
+		nudge() {
+			if (!hasFacts(state)) return "Handoff is empty; record the current goal, decisions, files, and next step with the handoff tool.";
+			if (turnsSinceUpdate >= 5) return `Handoff is ${turnsSinceUpdate} turns old; refresh it with verified progress before continuing.`;
+			return undefined;
+		},
+	};
 }

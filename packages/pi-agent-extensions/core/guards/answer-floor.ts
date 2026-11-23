@@ -78,8 +78,6 @@ const MAX_AUTO_CONTINUES = cfg.max_auto_continues;
 
 const CONTINUE_PROMPT = prompt(RULES_FILE, CONTINUE_HEADING);
 
-let consecutiveContinues = 0;
-
 interface ModelShape {
 	contextWindow?: number;
 	maxTokens?: number;
@@ -94,6 +92,13 @@ function budgetAhead(ctx: ExtensionContext): { available: number; wanted: number
 }
 
 export default function (pi: ExtensionAPI) {
+	// Per registration and per session: a length-stop streak in one session must not
+	// eat into the auto-continue budget of the next.
+	let consecutiveContinues = 0;
+	pi.on(PI_EVENT.SESSION_START, () => {
+		consecutiveContinues = 0;
+	});
+
 	pi.on(PI_EVENT.BEFORE_PROVIDER_REQUEST, (event, ctx) => {
 		const payload = event.payload as Record<string, unknown> | undefined;
 		if (!payload) return;

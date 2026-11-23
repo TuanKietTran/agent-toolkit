@@ -48,7 +48,7 @@ function host(branch = []) {
   h.order = () => h.lastState().todos.map((t) => t.id);
   h.lastState = () => h.branch.filter((e) => e.customType === "todo-panel-state").at(-1).data;
   todoPanel(api);
-  handoffModule.default(api);
+  h.handoff = handoffModule.default(api);
   return h;
 }
 
@@ -171,9 +171,37 @@ await test("handoff resumes into the next prompt and nudges when stale", async (
   await h.emit("session_compact");
   assert.match((await h.emit("before_agent_start", { systemPrompt: "base" })).message.content, /ship the fix/, "sent again after compaction");
   for (let i = 0; i < 5; i++) await h.emit("agent_start");
-  assert.match(handoffModule.handoffNudge(), /turns old/);
+  assert.match(h.handoff.nudge(), /turns old/);
   await h.tools.handoff.execute("call", { field: "verification", items: ["test passed"] }, undefined, undefined, h.ctx);
-  assert.equal(handoffModule.handoffNudge(), undefined);
+  assert.equal(h.handoff.nudge(), undefined);
+});
+
+await test("handoff state never leaks into the next session", async () => {
+  const h = host();
+  await h.emit("session_start");
+  await h.tools.handoff.execute("call", { field: "goal", items: ["session one secret"] }, undefined, undefined, h.ctx);
+  for (let i = 0; i < 3; i++) await h.emit("agent_start");
+  await h.emit("session_shutdown");
+  h.branch = [];
+  await h.emit("session_start");
+  const next = await h.emit("before_agent_start", { systemPrompt: "base" });
+  assert.equal(next, undefined, "a fresh session gets no summary from the previous one");
+  assert.match(h.handoff.nudge(), /Handoff is empty/);
+  await h.commands.handoff.handler("", h.ctx);
+  assert.doesNotMatch(h.notes.at(-1).msg, /session one secret/);
+
+  // Switching sessions without a shutdown (session_start on a new branch) must also reset.
+  await h.tools.handoff.execute("call", { field: "goal", items: ["session two"] }, undefined, undefined, h.ctx);
+  h.branch = [];
+  await h.emit("session_start");
+  assert.match(h.handoff.nudge(), /Handoff is empty/);
+
+  // Two registrations in one process (two sessions) keep separate state.
+  const other = host();
+  await other.emit("session_start");
+  await h.tools.handoff.execute("call", { field: "goal", items: ["only in h"] }, undefined, undefined, h.ctx);
+  assert.match(other.handoff.nudge(), /Handoff is empty/);
+  assert.equal(h.handoff.nudge(), undefined);
 });
 
 await test("auto-continues with next unfinished todo and stops without progress", async () => {

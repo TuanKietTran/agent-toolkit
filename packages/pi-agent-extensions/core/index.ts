@@ -12,7 +12,7 @@ import { registerReplay } from "./dev/replay.ts";
 import { JOB_EVENT_MESSAGE, registerJobEventRenderer } from "./job-event-ui.ts";
 import { prompt } from "./md.ts";
 import todo, { TOOL_NAME as TODO_TOOL } from "./todo.ts";
-import handoff, { HANDOFF_RULES, HANDOFF_TOOL, handoffNudge } from "./handoff.ts";
+import handoff, { HANDOFF_RULES, HANDOFF_TOOL } from "./handoff.ts";
 import rightPanel from "./right-panel.ts";
 import { SHELL, Supervisor, type JobEvent, type JobRecord, type KindConfig } from "./supervisor.ts";
 
@@ -142,7 +142,7 @@ export default function core(pi: ExtensionAPI) {
 	answerFloor(pi);
 	contextOptimize(pi);
 	fileToolDiscipline(pi);
-	handoff(pi);
+	const handoffState = handoff(pi);
 	rightPanel(pi);
 	todo(pi);
 	registerReplay(pi);
@@ -169,7 +169,7 @@ export default function core(pi: ExtensionAPI) {
 				onEvent: (ev: JobEvent) => {
 					if (generation !== sessionGeneration || sup !== sessionSup) return;
 					if (!STEER_STATES.has(ev.state)) return;
-					const nudge = handoffNudge();
+					const nudge = handoffState.nudge();
 					if (nudge) Object.assign(ev, { handoff_nudge: nudge });
 					pi.sendMessage(
 						{ customType: JOB_EVENT_MESSAGE, content: JSON.stringify(ev), display: true, details: ev },
