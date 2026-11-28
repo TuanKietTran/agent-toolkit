@@ -1,14 +1,11 @@
 // handoff — durable, compact continuation state shared by compaction and restarts.
 
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { PI_EVENT } from "./events.ts";
 import { prompt } from "./md.ts";
 
 const ENTRY_TYPE = "core-handoff";
-const FILE_NAME = "handoff.json";
 const TOOL_NAME = "handoff";
 const MAX_ITEMS = 12;
 const MAX_TEXT = 800;
@@ -44,22 +41,6 @@ function summary(state: Handoff): string {
 	})].filter(Boolean);
 	return lines.join("\n").slice(0, MAX_SUMMARY);
 }
-function writeDurable(ctx: ExtensionContext, state: Handoff): void {
-	try {
-		const dir = ctx.sessionManager.getSessionDir();
-		mkdirSync(dir, { recursive: true });
-		const target = join(dir, FILE_NAME);
-		const temp = `${target}.tmp`;
-		writeFileSync(temp, JSON.stringify(state), "utf8");
-		renameSync(temp, target);
-	} catch { /* session entries remain the fallback */ }
-}
-function readDurable(ctx: ExtensionContext): Handoff | undefined {
-	try {
-		const value = JSON.parse(readFileSync(join(ctx.sessionManager.getSessionDir(), FILE_NAME), "utf8"));
-		return valid(value) ? normalize(value) : undefined;
-	} catch { return undefined; }
-}
 
 /** Per-session handle returned to core: the job-event nudge must read this session's state only. */
 export interface HandoffHandle {
@@ -72,24 +53,19 @@ export default function handoff(pi: ExtensionAPI): HandoffHandle {
 	// All state is owned by this registration and rebuilt from the session on every
 	// session_start / session_tree, so nothing from a previous session survives a switch.
 	let state = empty();
-	let context: ExtensionContext | undefined;
 	let turnsSinceUpdate = 0;
 	// The changing summary goes in as a hidden message, only when the model has not seen this text
 	// (first run, after a restart or compaction, or after it changed); the system prompt stays byte-stable.
 	let seenSummary: string | undefined;
 	const reset = () => {
 		state = empty();
-		context = undefined;
 		turnsSinceUpdate = 0;
 		seenSummary = undefined;
 	};
-	const persist = () => { state.updated_at = Date.now(); turnsSinceUpdate = 0; pi.appendEntry(ENTRY_TYPE, state); if (context) writeDurable(context, state); };
+	const persist = () => { state.updated_at = Date.now(); turnsSinceUpdate = 0; pi.appendEntry(ENTRY_TYPE, state); };
 	const restore = (ctx: ExtensionContext) => {
 		reset();
-		context = ctx;
-		const saved = readDurable(ctx);
 		for (const entry of ctx.sessionManager.getBranch() as any[]) if (entry.type === "custom" && entry.customType === ENTRY_TYPE && valid(entry.data)) state = normalize(entry.data);
-		if (saved && saved.updated_at > state.updated_at) state = saved;
 	};
 	pi.on(PI_EVENT.SESSION_START, async (_event, ctx) => restore(ctx));
 	pi.on(PI_EVENT.SESSION_TREE, async (_event, ctx) => restore(ctx));

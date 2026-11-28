@@ -2,6 +2,8 @@
 // End-to-end harness: loads core/todo.ts through Pi's own jiti + aliases and
 // drives it with a fake ExtensionAPI that mirrors the host contracts it uses.
 import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLoader } from "./pi-root.mjs";
@@ -178,8 +180,14 @@ await test("handoff resumes into the next prompt and nudges when stale", async (
 
 await test("handoff state never leaks into the next session", async () => {
   const h = host();
+  const dir = mkdtempSync(join(tmpdir(), "pi-handoff-"));
+  const legacy = join(dir, "handoff.json");
+  writeFileSync(legacy, JSON.stringify({ goal: "legacy secret", updated_at: Date.now() + 100000, constraints: [], decisions: [], done: [], in_progress: [], files: [], verification: [], errors: [], next: [], rollback: [] }));
+  h.ctx.sessionManager.getSessionDir = () => dir;
   await h.emit("session_start");
+  assert.match(h.handoff.nudge(), /Handoff is empty/, "legacy shared files cannot seed a session");
   await h.tools.handoff.execute("call", { field: "goal", items: ["session one secret"] }, undefined, undefined, h.ctx);
+  assert.match(readFileSync(legacy, "utf8"), /legacy secret/, "session updates do not overwrite shared files");
   for (let i = 0; i < 3; i++) await h.emit("agent_start");
   await h.emit("session_shutdown");
   h.branch = [];
@@ -202,6 +210,7 @@ await test("handoff state never leaks into the next session", async () => {
   await h.tools.handoff.execute("call", { field: "goal", items: ["only in h"] }, undefined, undefined, h.ctx);
   assert.match(other.handoff.nudge(), /Handoff is empty/);
   assert.equal(h.handoff.nudge(), undefined);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 await test("auto-continues with next unfinished todo and stops without progress", async () => {
