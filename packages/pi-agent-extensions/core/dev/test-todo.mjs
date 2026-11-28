@@ -2,8 +2,6 @@
 // End-to-end harness: loads core/todo.ts through Pi's own jiti + aliases and
 // drives it with a fake ExtensionAPI that mirrors the host contracts it uses.
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createLoader } from "./pi-root.mjs";
@@ -11,7 +9,6 @@ import { createLoader } from "./pi-root.mjs";
 const here = dirname(fileURLToPath(import.meta.url));
 const jiti = await createLoader(import.meta.url);
 const todoPanel = await jiti.import(join(here, "..", "todo.ts"), { default: true });
-const handoffModule = await jiti.import(join(here, "..", "handoff.ts"));
 
 const theme = { fg: (_c, t) => t, bold: (t) => t, strikethrough: (t) => `~${t}~` };
 
@@ -50,7 +47,6 @@ function host(branch = []) {
   h.order = () => h.lastState().todos.map((t) => t.id);
   h.lastState = () => h.branch.filter((e) => e.customType === "todo-panel-state").at(-1).data;
   todoPanel(api);
-  h.handoff = handoffModule.default(api);
   return h;
 }
 
@@ -160,57 +156,6 @@ await test("tool results are compact; list returns the whole queue; snapshot is 
   const lines = (await prompt(big)).message.content.split("\n");
   assert.equal(lines.filter((l) => l.startsWith("#")).length, 40);
   assert.ok(lines.includes("… 6 more open"));
-});
-
-await test("handoff resumes into the next prompt and nudges when stale", async () => {
-  const h = host();
-  await h.emit("session_start");
-  await h.tools.handoff.execute("call", { field: "goal", items: ["ship the fix"] }, undefined, undefined, h.ctx);
-  const resumed = await h.emit("before_agent_start", { systemPrompt: "base" });
-  assert.match(resumed.message.content, /ship the fix/);
-  assert.equal(resumed.systemPrompt, undefined, "the summary never touches the cached system prompt");
-  assert.equal(await h.emit("before_agent_start", { systemPrompt: "base" }), undefined, "an unchanged summary is not sent twice");
-  await h.emit("session_compact");
-  assert.match((await h.emit("before_agent_start", { systemPrompt: "base" })).message.content, /ship the fix/, "sent again after compaction");
-  for (let i = 0; i < 5; i++) await h.emit("agent_start");
-  assert.match(h.handoff.nudge(), /turns old/);
-  await h.tools.handoff.execute("call", { field: "verification", items: ["test passed"] }, undefined, undefined, h.ctx);
-  assert.equal(h.handoff.nudge(), undefined);
-});
-
-await test("handoff state never leaks into the next session", async () => {
-  const h = host();
-  const dir = mkdtempSync(join(tmpdir(), "pi-handoff-"));
-  const legacy = join(dir, "handoff.json");
-  writeFileSync(legacy, JSON.stringify({ goal: "legacy secret", updated_at: Date.now() + 100000, constraints: [], decisions: [], done: [], in_progress: [], files: [], verification: [], errors: [], next: [], rollback: [] }));
-  h.ctx.sessionManager.getSessionDir = () => dir;
-  await h.emit("session_start");
-  assert.match(h.handoff.nudge(), /Handoff is empty/, "legacy shared files cannot seed a session");
-  await h.tools.handoff.execute("call", { field: "goal", items: ["session one secret"] }, undefined, undefined, h.ctx);
-  assert.match(readFileSync(legacy, "utf8"), /legacy secret/, "session updates do not overwrite shared files");
-  for (let i = 0; i < 3; i++) await h.emit("agent_start");
-  await h.emit("session_shutdown");
-  h.branch = [];
-  await h.emit("session_start");
-  const next = await h.emit("before_agent_start", { systemPrompt: "base" });
-  assert.equal(next, undefined, "a fresh session gets no summary from the previous one");
-  assert.match(h.handoff.nudge(), /Handoff is empty/);
-  await h.commands.handoff.handler("", h.ctx);
-  assert.doesNotMatch(h.notes.at(-1).msg, /session one secret/);
-
-  // Switching sessions without a shutdown (session_start on a new branch) must also reset.
-  await h.tools.handoff.execute("call", { field: "goal", items: ["session two"] }, undefined, undefined, h.ctx);
-  h.branch = [];
-  await h.emit("session_start");
-  assert.match(h.handoff.nudge(), /Handoff is empty/);
-
-  // Two registrations in one process (two sessions) keep separate state.
-  const other = host();
-  await other.emit("session_start");
-  await h.tools.handoff.execute("call", { field: "goal", items: ["only in h"] }, undefined, undefined, h.ctx);
-  assert.match(other.handoff.nudge(), /Handoff is empty/);
-  assert.equal(h.handoff.nudge(), undefined);
-  rmSync(dir, { recursive: true, force: true });
 });
 
 await test("auto-continues with next unfinished todo and stops without progress", async () => {

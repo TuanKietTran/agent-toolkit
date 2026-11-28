@@ -74,15 +74,7 @@ Your reply was cut off by the output limit. Continue exactly where it stopped: n
 Instructions for every compaction (context-optimize).
 
 ```text
-Compact to minimum continuation state: goal, constraints, decisions, done/in-progress work, exact paths, verification, errors, next steps, and rollback/user-data facts. Prefer the durable handoff facts when present. Drop repetition, superseded choices, raw output, and chat filler.
-```
-
-## handoff-guidance
-
-Added to the system prompt while the handoff tool is active; the changing summary itself is sent as a message.
-
-```text
-Multi-step work: keep the handoff tool current (goal, decisions, files, verification, next).
+Compact to minimum continuation state: goal, constraints, decisions, done/in-progress work, exact paths, verification, errors, next steps, and rollback/user-data facts. Drop repetition, superseded choices, raw output, and chat filler.
 ```
 
 ## summary-system-prompt

@@ -96,10 +96,6 @@ backstop for when that rule drifts — a new model, a hand-edited setting.
 
 ## Token and cache discipline (core)
 
-Handoff state is stored in the active Pi session's entries and restored from its
-current branch. The core extension does not read or write the old shared
-`handoff.json` sidecar, which could expose one session's state to another.
-
 Everything `core/` puts in front of the model is resent with every request, so it is kept small and kept
 append-only:
 

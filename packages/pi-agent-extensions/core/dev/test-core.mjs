@@ -25,7 +25,7 @@ const test = async (name, fn) => {
 await test("system prompt gets the job and todo rules, once, after the base prompt", async () => {
   setShell(true);
   const h = await makeHost(core);
-  assert.deepEqual(Object.keys(h.tools).sort(), ["cancel_job", "handoff", "job_logs", "job_status", "start_job", "todo"]);
+  assert.deepEqual(Object.keys(h.tools).sort(), ["cancel_job", "job_logs", "job_status", "start_job", "todo"]);
   const { systemPrompt } = await run(h);
   assert.ok(systemPrompt.startsWith(`${BASE}\n\nJobs: `));
   assert.equal(systemPrompt.match(/Jobs: /g).length, 1);
@@ -63,7 +63,7 @@ await test("a block is only sent while its tool is active", async () => {
 await test("without a POSIX shell the job tools and job rules are left out", async () => {
   setShell(false);
   const h = await makeHost(core);
-  assert.deepEqual(Object.keys(h.tools).sort(), ["handoff", "todo"]);
+  assert.deepEqual(Object.keys(h.tools).sort(), ["todo"]);
   assert.ok(h.commands.jobs, "/jobs stays available");
   const { systemPrompt } = await run(h);
   assert.match(systemPrompt, /Todos: /);
@@ -77,7 +77,7 @@ await test("the per-request cost of core stays bounded", async () => {
   const schemas = Object.values(h.tools).map((t) => JSON.stringify({ name: t.name, description: t.description, parameters: t.parameters }).length);
   // Both are resent with every request; a regression here is paid for on every turn of every session.
   assert.ok(added / 4 < 320, `system additions are ~${Math.round(added / 4)} tokens`);
-  assert.ok(schemas.reduce((a, b) => a + b, 0) / 4 < 420, "tool schemas are under ~420 tokens") // 400 plus the handoff tool (~65 tokens);
+  assert.ok(schemas.reduce((a, b) => a + b, 0) / 4 < 420, "tool schemas are under ~420 tokens");
 });
 
 console.log(`\n${passed} passed`);
